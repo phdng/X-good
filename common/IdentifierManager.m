@@ -345,7 +345,7 @@
         self.error = [[IDFAManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:idfa forType:@"IDFA"];    
+    [self setValueForType:idfa forType:@"IDFA"];    
     return idfa;
 }
 
@@ -356,7 +356,7 @@
         return nil;
     }
     
-    [self saveCustomValue:idfv forType:@"IDFV"];    
+    [self setValueForType:idfv forType:@"IDFV"];    
 
     return idfv;
 }
@@ -368,7 +368,7 @@
         return nil;
     }
     
-    [self saveCustomValue:deviceName forType:@"DeviceName"];    
+    [self setValueForType:deviceName forType:@"DeviceName"];    
     return deviceName;
 }
 
@@ -380,7 +380,7 @@
         self.error = [[SerialNumberManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:serialNumber forType:@"SerialNumber"];    
+    [self setValueForType:serialNumber forType:@"SerialNumber"];    
     
     return serialNumber;
 }
@@ -393,8 +393,8 @@
         self.error = [[IOSVersionInfo sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:[NSString stringWithFormat:@"%@ (%@)", versionInfo[@"version"], versionInfo[@"build"]] forType:@"IOSVersion"];    
-    [self saveCustomValue:versionInfo[@"build"] forType:@"IOSBuild"];    
+    [self setValueForType:[NSString stringWithFormat:@"%@ (%@)", versionInfo[@"version"], versionInfo[@"build"]] forType:@"IOSVersion"];    
+    [self setValueForType:versionInfo[@"build"] forType:@"IOSBuild"];    
 
     return versionInfo;
 }
@@ -406,7 +406,7 @@
         self.error = [[SystemUUIDManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:bootUUID forType:@"SystemBootUUID"];    
+    [self setValueForType:bootUUID forType:@"SystemBootUUID"];    
     return bootUUID;
 }
 
@@ -416,7 +416,7 @@
         self.error = [[DyldCacheUUIDManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:dyldUUID forType:@"DyldCacheUUID"];        
+    [self setValueForType:dyldUUID forType:@"DyldCacheUUID"];        
     return dyldUUID;
 }
 
@@ -426,7 +426,7 @@
         self.error = [[PasteboardUUIDManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:pasteboardUUID forType:@"PasteboardUUID"];        
+    [self setValueForType:pasteboardUUID forType:@"PasteboardUUID"];        
 
     return pasteboardUUID;
 }
@@ -437,7 +437,7 @@
         self.error = [[KeychainUUIDManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:keychainUUID forType:@"KeychainUUID"];        
+    [self setValueForType:keychainUUID forType:@"KeychainUUID"];        
 
     return keychainUUID;
 }
@@ -448,7 +448,7 @@
         self.error = [[UserDefaultsUUIDManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:userDefaultsUUID forType:@"UserDefaultsUUID"];        
+    [self setValueForType:userDefaultsUUID forType:@"UserDefaultsUUID"];        
 
     return userDefaultsUUID;
 }
@@ -459,7 +459,7 @@
         self.error = [[AppGroupUUIDManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:appGroupUUID forType:@"AppGroupUUID"];        
+    [self setValueForType:appGroupUUID forType:@"AppGroupUUID"];        
     return appGroupUUID;
 }
 
@@ -469,33 +469,31 @@
         self.error = [[CoreDataUUIDManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:coreDataUUID forType:@"CoreDataUUID"];           
+    [self setValueForType:coreDataUUID forType:@"CoreDataUUID"];           
     return coreDataUUID;
 }
 
 - (NSString *)generateSystemUptime {
-    NSString *profilePath = [self profileIdentityPath];
-    NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptimeForProfile:profilePath];
+    NSTimeInterval uptime = [[UptimeManager sharedManager] generateUptime];
     if (uptime <= 0) {
         self.error = [[UptimeManager sharedManager] lastError];
         return nil;
     }
     NSString *uptimeString = [NSString stringWithFormat:@"%.0f", uptime];
-    [self saveCustomValue:uptimeString forType:@"SystemUptime"];           
+    [self setValueForType:uptimeString forType:@"SystemUptime"];           
 
     // Return formatted uptime string (in hours for display)
     return [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
 }
 
 - (NSString *)generateBootTime {
-    NSString *profilePath = [self profileIdentityPath];
-    NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:profilePath];
+    NSDate *bootTime = [[UptimeManager sharedManager] generateBootTime];
     if (!bootTime) {
         self.error = [[UptimeManager sharedManager] lastError];
         return nil;
     }
     NSString *bootTimeString = [NSString stringWithFormat:@"%.0f", [bootTime timeIntervalSince1970]];
-    [self saveCustomValue:bootTimeString forType:@"BootTime"];           
+    [self setValueForType:bootTimeString forType:@"BootTime"];           
 
     // Return formatted date for display
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
@@ -510,7 +508,7 @@
         self.error = [[AppInstallUUIDManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:appInstallUUID forType:@"AppInstallUUID"];
+    [self setValueForType:appInstallUUID forType:@"AppInstallUUID"];
     return appInstallUUID;
 }
 
@@ -520,7 +518,7 @@
         self.error = [[AppContainerUUIDManager sharedManager] lastError];
         return nil;
     }
-    [self saveCustomValue:appContainerUUID forType:@"AppContainerUUID"];
+    [self setValueForType:appContainerUUID forType:@"AppContainerUUID"];
     return appContainerUUID;
 }
 
@@ -597,12 +595,10 @@
         [self generateCoreDataUUID];
     }
     if ([self isIdentifierEnabled:@"SystemUptime"]) {
-        NSString *profilePath = [self profileIdentityPath];
-        [[UptimeManager sharedManager] generateUptimeForProfile:profilePath];
+        [self generateSystemUptime];
     }
     if ([self isIdentifierEnabled:@"BootTime"]) {
-        NSString *profilePath = [self profileIdentityPath];
-        [[UptimeManager sharedManager] generateBootTimeForProfile:profilePath];
+        [self generateBootTime];
     }
     // Even though we already generated WiFi info above, check if it's specifically enabled
     if ([self isIdentifierEnabled:@"WiFi"]) {
@@ -733,12 +729,10 @@
                 [self generateCoreDataUUID];
             }
             else if ([type isEqualToString:@"SystemUptime"]) {
-                NSString *profilePath = [self profileIdentityPath];
-                [[UptimeManager sharedManager] generateUptimeForProfile:profilePath];
+                [self generateSystemUptime];
             }
             else if ([type isEqualToString:@"BootTime"]) {
-                NSString *profilePath = [self profileIdentityPath];
-                [[UptimeManager sharedManager] generateBootTimeForProfile:profilePath];
+                [self generateBootTime];
             }
             else if ([type isEqualToString:@"WiFi"]) {
                 // Use WiFiManager to generate new WiFi info
@@ -866,21 +860,39 @@
 }
 
 #pragma mark - Current Values
-
+- (NSTimeInterval) currentUptime{
+    NSTimeInterval uptime = [_deviceData[@"SystemUptime"] doubleValue];
+    return uptime;
+}
+- (NSDate *)currentBootTime {
+    NSTimeInterval timestamp = [_deviceData[@"BootTime"] doubleValue];
+    if (timestamp > 0) {
+        return [NSDate dateWithTimeIntervalSince1970:timestamp];
+    }
+    return [NSDate dateWithTimeIntervalSinceNow:-(12 * 3600)]; // 12 hours ago as safe default
+}
+- (NSDictionary *)currentIOSVersionInfo {
+    NSString *version = [[IdentifierManager sharedManager] getValueForType:@"IOSVersion"];
+    NSString *build = [[IdentifierManager sharedManager] getValueForType:@"IOSBuild"];
+    return @{
+      @"version": version,
+      @"build": build
+    };
+}
 - (NSString *)currentValueForIdentifier:(NSString *)type {
     // Special hardcoded serial number for Filza and ADManager
-    if ([type isEqualToString:@"SerialNumber"]) {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (bundleID) {
-            if ([bundleID isEqualToString:@"com.tigisoftware.Filza"] || 
-                [bundleID isEqualToString:@"com.tigisoftware.ADManager"]) {
-                // Return hardcoded serial number for these specific apps
-                NSString *hardcodedSerial = @"FCCC15Q4HG04";
-                PXLog(@"[WeaponX] 📱 Returning hardcoded serial number for %@: %@", bundleID, hardcodedSerial);
-                return hardcodedSerial;
-            }
-        }
-    }
+    // if ([type isEqualToString:@"SerialNumber"]) {
+    //     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    //     if (bundleID) {
+    //         if ([bundleID isEqualToString:@"com.tigisoftware.Filza"] || 
+    //             [bundleID isEqualToString:@"com.tigisoftware.ADManager"]) {
+    //             // Return hardcoded serial number for these specific apps
+    //             NSString *hardcodedSerial = @"FCCC15Q4HG04";
+    //             PXLog(@"[WeaponX] 📱 Returning hardcoded serial number for %@: %@", bundleID, hardcodedSerial);
+    //             return hardcodedSerial;
+    //         }
+    //     }
+    // }
     
     // First try to get from profile-specific storage
     NSString *identityDir = [self profileIdentityPath];
@@ -894,96 +906,9 @@
             return value;
         }
         
-        // If not found in combined file, try type-specific files
-        if ([type isEqualToString:@"IDFA"]) {
-            NSString *idfaPath = [identityDir stringByAppendingPathComponent:@"advertising_id.plist"];
-            NSDictionary *idfaDict = [NSDictionary dictionaryWithContentsOfFile:idfaPath];
-            if (idfaDict && idfaDict[@"value"]) {
-                PXLog(@"Found IDFA in advertising_id.plist: %@", idfaDict[@"value"]);
-                return idfaDict[@"value"];
-            }
-        } 
-        else if ([type isEqualToString:@"IDFV"]) {
-            NSString *idfvPath = [identityDir stringByAppendingPathComponent:@"vendor_id.plist"];
-            NSDictionary *idfvDict = [NSDictionary dictionaryWithContentsOfFile:idfvPath];
-            if (idfvDict && idfvDict[@"value"]) {
-                PXLog(@"Found IDFV in vendor_id.plist: %@", idfvDict[@"value"]);
-                return idfvDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"SystemBootUUID"]) {
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"system_boot_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"]) {
-                PXLog(@"Found SystemBootUUID in system_boot_uuid.plist: %@", uuidDict[@"value"]);
-                return uuidDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"DyldCacheUUID"]) {
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"dyld_cache_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"]) {
-                PXLog(@"Found DyldCacheUUID in dyld_cache_uuid.plist: %@", uuidDict[@"value"]);
-                return uuidDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"PasteboardUUID"]) {
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"pasteboard_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"]) {
-                PXLog(@"Found PasteboardUUID in pasteboard_uuid.plist: %@", uuidDict[@"value"]);
-                return uuidDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"KeychainUUID"]) {
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"keychain_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"]) {
-                PXLog(@"Found KeychainUUID in keychain_uuid.plist: %@", uuidDict[@"value"]);
-                return uuidDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"UserDefaultsUUID"]) {
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"userdefaults_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"]) {
-                PXLog(@"Found UserDefaultsUUID in userdefaults_uuid.plist: %@", uuidDict[@"value"]);
-                return uuidDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"CoreDataUUID"]) {
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"coredata_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"]) {
-                PXLog(@"Found CoreDataUUID in coredata_uuid.plist: %@", uuidDict[@"value"]);
-                return uuidDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"AppInstallUUID"]) {
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appinstall_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"]) {
-                PXLog(@"Found AppInstallUUID in appinstall_uuid.plist: %@", uuidDict[@"value"]);
-                return uuidDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"AppContainerUUID"]) {
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appcontainer_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"]) {
-                PXLog(@"Found AppContainerUUID in appcontainer_uuid.plist: %@", uuidDict[@"value"]);
-                return uuidDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"AppGroupUUID"]) {
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appgroup_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"]) {
-                PXLog(@"Found AppGroupUUID in appgroup_uuid.plist: %@", uuidDict[@"value"]);
-                return uuidDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"IMEI"]) {
+
+
+        if ([type isEqualToString:@"IMEI"]) {
             NSString *imeiPath = [identityDir stringByAppendingPathComponent:@"imei.plist"];
             NSDictionary *imeiDict = [NSDictionary dictionaryWithContentsOfFile:imeiPath];
             if (imeiDict && imeiDict[@"value"]) {
@@ -999,30 +924,7 @@
                 return meidDict[@"value"];
             }
         }
-        else if ([type isEqualToString:@"DeviceModel"]) {
-            NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-            NSDictionary *modelDict = [NSDictionary dictionaryWithContentsOfFile:modelPath];
-            if (modelDict && modelDict[@"value"]) {
-                PXLog(@"Found DeviceModel in device_model.plist: %@", modelDict[@"value"]);
-                return modelDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"DeviceName"]) {
-            NSString *deviceNamePath = [identityDir stringByAppendingPathComponent:@"device_name.plist"];
-            NSDictionary *deviceNameDict = [NSDictionary dictionaryWithContentsOfFile:deviceNamePath];
-            if (deviceNameDict && deviceNameDict[@"value"]) {
-                PXLog(@"Found DeviceName in device_name.plist: %@", deviceNameDict[@"value"]);
-                return deviceNameDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"SerialNumber"]) {
-            NSString *serialPath = [identityDir stringByAppendingPathComponent:@"serial_number.plist"];
-            NSDictionary *serialDict = [NSDictionary dictionaryWithContentsOfFile:serialPath];
-            if (serialDict && serialDict[@"value"]) {
-                PXLog(@"Found SerialNumber in serial_number.plist: %@", serialDict[@"value"]);
-                return serialDict[@"value"];
-            }
-        }
+
         else if ([type isEqualToString:@"WiFi"]) {
             // Check for WiFi info in the profile
             NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
@@ -1052,37 +954,37 @@
                 return batteryDict[type];
             }
         }
-        else if ([type isEqualToString:@"SystemUptime"]) {
-            NSString *profilePath = [self profileIdentityPath];
-            NSString *uptimePath = [profilePath stringByAppendingPathComponent:@"system_uptime.plist"];
-            NSDictionary *uptimeDict = [NSDictionary dictionaryWithContentsOfFile:uptimePath];
-            if (uptimeDict && uptimeDict[@"value"]) {
-                NSTimeInterval uptime = [uptimeDict[@"value"] doubleValue];
-                if (uptime > 0) {
-                    NSString *formattedUptime = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
-                    PXLog(@"[WeaponX] 📄 Showing SystemUptime from system_uptime.plist: %@", formattedUptime);
-                    return formattedUptime;
-                }
-            }
-            return @"Not Set";
-        }
-        else if ([type isEqualToString:@"BootTime"]) {
-            NSString *profilePath = [self profileIdentityPath];
-            NSString *bootTimePath = [profilePath stringByAppendingPathComponent:@"boot_time.plist"];
-            NSDictionary *bootTimeDict = [NSDictionary dictionaryWithContentsOfFile:bootTimePath];
-            if (bootTimeDict && bootTimeDict[@"value"]) {
-                NSDate *bootTime = bootTimeDict[@"value"];
-                if ([bootTime isKindOfClass:[NSDate class]]) {
-                    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-                    formatter.dateStyle = NSDateFormatterMediumStyle;
-                    formatter.timeStyle = NSDateFormatterMediumStyle;
-                    NSString *formattedBootTime = [formatter stringFromDate:bootTime];
-                    PXLog(@"[WeaponX] 📄 Showing BootTime from boot_time.plist: %@", formattedBootTime);
-                    return formattedBootTime;
-                }
-            }
-            return @"Not Set";
-        }
+        // else if ([type isEqualToString:@"SystemUptime"]) {
+        //     NSString *profilePath = [self profileIdentityPath];
+        //     NSString *uptimePath = [profilePath stringByAppendingPathComponent:@"system_uptime.plist"];
+        //     NSDictionary *uptimeDict = [NSDictionary dictionaryWithContentsOfFile:uptimePath];
+        //     if (uptimeDict && uptimeDict[@"value"]) {
+        //         NSTimeInterval uptime = [uptimeDict[@"value"] doubleValue];
+        //         if (uptime > 0) {
+        //             NSString *formattedUptime = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
+        //             PXLog(@"[WeaponX] 📄 Showing SystemUptime from system_uptime.plist: %@", formattedUptime);
+        //             return formattedUptime;
+        //         }
+        //     }
+        //     return @"Not Set";
+        // }
+        // else if ([type isEqualToString:@"BootTime"]) {
+        //     NSString *profilePath = [self profileIdentityPath];
+        //     NSString *bootTimePath = [profilePath stringByAppendingPathComponent:@"boot_time.plist"];
+        //     NSDictionary *bootTimeDict = [NSDictionary dictionaryWithContentsOfFile:bootTimePath];
+        //     if (bootTimeDict && bootTimeDict[@"value"]) {
+        //         NSDate *bootTime = bootTimeDict[@"value"];
+        //         if ([bootTime isKindOfClass:[NSDate class]]) {
+        //             NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+        //             formatter.dateStyle = NSDateFormatterMediumStyle;
+        //             formatter.timeStyle = NSDateFormatterMediumStyle;
+        //             NSString *formattedBootTime = [formatter stringFromDate:bootTime];
+        //             PXLog(@"[WeaponX] 📄 Showing BootTime from boot_time.plist: %@", formattedBootTime);
+        //             return formattedBootTime;
+        //         }
+        //     }
+        //     return @"Not Set";
+        // }
             
         PXLog(@"No %@ value found in profile-specific files", type);
     } else {
@@ -1286,15 +1188,13 @@
     
     // Special handling for SystemUptime/BootTime
     if ([type isEqualToString:@"SystemUptime"]) {
-        NSString *profilePath = [self profileIdentityPath];
-        NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptimeForProfile:profilePath];
+        NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptime];
         NSString *result = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
         PXLog(@"Default SystemUptime value: %@", result);
         return result;
     }
     else if ([type isEqualToString:@"BootTime"]) {
-        NSString *profilePath = [self profileIdentityPath];
-        NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:profilePath];
+        NSDate *bootTime = [[UptimeManager sharedManager] currentBootTime];
         NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
         formatter.dateStyle = NSDateFormatterMediumStyle;
         formatter.timeStyle = NSDateFormatterMediumStyle;
@@ -2035,51 +1935,6 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 }
 
 #pragma mark - Custom Values
-
-- (BOOL)saveCustomValue:(NSString *)value forType:(NSString *)type {
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (!identityDir) {
-        PXLog(@"[WeaponX] ❌ Failed to get profile identity path");
-        return NO;
-    }
-    
-    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-    NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                        [NSMutableDictionary dictionary];
-    deviceIds[type] = value;
-    BOOL success = [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    
-    PXLog(@"[WeaponX] ✅ Custom %@ saved: %@", type, value);
-    
-    // For specific types, also update the respective manager
-    if ([type isEqualToString:@"IDFA"]) {
-        [[IDFAManager sharedManager] setCurrentIDFA:value];
-    } else if ([type isEqualToString:@"IDFV"]) {
-        [[IDFVManager sharedManager] setCurrentIDFV:value];
-    } else if ([type isEqualToString:@"SystemBootUUID"]) {
-        [[SystemUUIDManager sharedManager] setCurrentBootUUID:value];
-    } else if ([type isEqualToString:@"DyldCacheUUID"]) {
-        [[DyldCacheUUIDManager sharedManager] setCurrentDyldCacheUUID:value];
-    } else if ([type isEqualToString:@"PasteboardUUID"]) {
-        [[PasteboardUUIDManager sharedManager] setCurrentPasteboardUUID:value];
-    } else if ([type isEqualToString:@"KeychainUUID"]) {
-        [[KeychainUUIDManager sharedManager] setCurrentKeychainUUID:value];
-    } else if ([type isEqualToString:@"UserDefaultsUUID"]) {
-        [[UserDefaultsUUIDManager sharedManager] setCurrentUserDefaultsUUID:value];
-    } else if ([type isEqualToString:@"AppGroupUUID"]) {
-        [[AppGroupUUIDManager sharedManager] setCurrentAppGroupUUID:value];
-    } else if ([type isEqualToString:@"CoreDataUUID"]) {
-        [[CoreDataUUIDManager sharedManager] setCurrentCoreDataUUID:value];
-    } else if ([type isEqualToString:@"AppInstallUUID"]) {
-        [[AppInstallUUIDManager sharedManager] setCurrentAppInstallUUID:value];
-    } else if ([type isEqualToString:@"AppContainerUUID"]) {
-        [[AppContainerUUIDManager sharedManager] setCurrentAppContainerUUID:value];
-    }
-    
-    
-    return success;
-}
 
 
 

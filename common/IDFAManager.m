@@ -17,13 +17,6 @@
     });
     return sharedManager;
 }
-// - (instancetype)init {
-//     if (self = [super init]) {
-//         [[IdentifierManager sharedManager] currentValueForIdentifier:IDFA];
-//         [self setCurrentIDFA:];
-//     }
-//     return self;
-// }
 
 - (NSString *)generateIDFA {
     self.error = nil;

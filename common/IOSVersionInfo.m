@@ -200,13 +200,7 @@
 }
 
 - (NSDictionary *)currentIOSVersionInfo {
-    // return self.currentVersionInfo;
-    NSString *version = [[IdentifierManager sharedManager] getValueForType:@"IOSVersion"];
-    NSString *build = [[IdentifierManager sharedManager] getValueForType:@"IOSBuild"];
-    return @{
-      @"version": version,
-      @"build": build
-    };
+    return self.currentVersionInfo;
 }
 
 - (void)setCurrentIOSVersionInfo:(NSDictionary *)versionInfo {

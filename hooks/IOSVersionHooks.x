@@ -261,7 +261,7 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
 
 // Get the current iOS version information from the profile
 static NSDictionary *getIOSVersionInfo() {
-    return [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+    return [[IdentifierManager sharedManager] currentIOSVersionInfo];
 }
 
 // Extract just the version number from the full version info

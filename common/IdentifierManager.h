@@ -41,6 +41,9 @@
 - (BOOL)setCustomAppInstallUUID:(NSString *)value;
 - (BOOL)setCustomAppContainerUUID:(NSString *)value;
 
+- (NSDictionary *)currentIOSVersionInfo;
+
+
 // Canvas Fingerprinting Protection
 - (BOOL)toggleCanvasFingerprintProtection;
 - (BOOL)isCanvasFingerprintProtectionEnabled;

@@ -1924,33 +1924,6 @@
         isRestricted = restrictedAccess ? [restrictedAccess boolValue] : NO;
     }
     
-    // If user doesn't have an active plan, show alert and prevent action
-    // if (isRestricted) {
-    //     UIAlertController *alert = [UIAlertController 
-    //         alertControllerWithTitle:@"Access Restricted" 
-    //         message:@"Please subscribe to a plan to use the generate feature." 
-    //         preferredStyle:UIAlertControllerStyleAlert];
-        
-    //     [alert addAction:[UIAlertAction 
-    //         actionWithTitle:@"View Plans" 
-    //         style:UIAlertActionStyleDefault 
-    //         handler:^(UIAlertAction * _Nonnull action) {
-    //             // Switch to account tab to view plans
-    //             UITabBarController *tabController = [self findTabBarController];
-    //             if ([tabController respondsToSelector:@selector(switchToAccountTab)]) {
-    //                 [tabController performSelector:@selector(switchToAccountTab)];
-    //             }
-    //         }]];
-        
-    //     [alert addAction:[UIAlertAction 
-    //         actionWithTitle:@"Cancel" 
-    //         style:UIAlertActionStyleCancel 
-    //         handler:nil]];
-        
-    //     [self presentViewController:alert animated:YES completion:nil];
-    //     return;
-    // }
-    
     // Determine which identifier type based on the button's tag
     NSString *identifierType;
     if (sender.tag == 1) {
@@ -2089,13 +2062,9 @@
                 newValue = [NSString stringWithFormat:@"%d%%", randomPercentage];
             }
         } else if ([identifierType isEqualToString:@"SystemUptime"]) {
-            NSString *profilePath = [self.manager profileIdentityPath];
-            [[UptimeManager sharedManager] generateUptimeForProfile:profilePath];
-            newValue = [self.manager currentValueForIdentifier:@"SystemUptime"];
+            newValue = [self.manager generateSystemUptime];
         } else if ([identifierType isEqualToString:@"BootTime"]) {
-            NSString *profilePath = [self.manager profileIdentityPath];
-            [[UptimeManager sharedManager] generateBootTimeForProfile:profilePath];
-            newValue = [self.manager currentValueForIdentifier:@"BootTime"];
+            newValue = [self.manager generateBootTime];
         } else if ([identifierType isEqualToString:@"CoreDataUUID"]) {
             newValue = [self.manager generateCoreDataUUID];
         } else if ([identifierType isEqualToString:@"AppInstallUUID"]) {
@@ -3028,8 +2997,8 @@
         [self.manager regenerateAllEnabledIdentifiers];
         
         // Get the new values for UI update
-        NSString *newIDFA = [self.manager currentValueForIdentifier:@"IDFA"];
-        NSString *newIDFV = [self.manager currentValueForIdentifier:@"IDFV"];
+        NSString *newIDFA = [self.manager getValueForType:@"IDFA"];
+        NSString *newIDFV = [self.manager getValueForType:@"IDFV"];
         NSString *newDeviceName = [self.manager currentValueForIdentifier:@"DeviceName"];
         NSString *newSerialNumber = [self.manager currentValueForIdentifier:@"SerialNumber"];
         NSString *newIOSVersion = [self.manager currentValueForIdentifier:@"IOSVersion"];
@@ -3222,13 +3191,13 @@
                         [self.manager regenerateAllEnabledIdentifiers];
                         
                         // Explicitly generate device model if it's not already set
-                        if (![self.manager currentValueForIdentifier:@"DeviceModel"]) {
+                        if (![self.manager getValueForType:@"DeviceModel"]) {
                             NSString *deviceModel = [self.manager generateDeviceModel];
                             if (deviceModel) [self.manager setCustomDeviceModel:deviceModel];
                         }
                         
                         // Explicitly generate device theme if it's not already set
-                        if (![self.manager currentValueForIdentifier:@"DeviceTheme"] && 
+                        if (![self.manager getValueForType:@"DeviceTheme"] && 
                             [self.manager respondsToSelector:@selector(generateDeviceTheme)]) {
                             NSString *deviceTheme = [self.manager generateDeviceTheme];
                             if (deviceTheme && [self.manager respondsToSelector:@selector(setCustomDeviceTheme:)]) {
@@ -4104,7 +4073,7 @@ else if ([identifierType isEqualToString:@"AppContainerUUID"])
         BOOL success = YES;
         
         // Save the custom value depending on identifier type
-        [self.manager saveCustomValue:value forType:type];
+        [self.manager setValueForType:value forType:type];
         
         // Update UI
         dispatch_async(dispatch_get_main_queue(), ^{
@@ -4238,13 +4207,9 @@ else if ([identifierType isEqualToString:@"AppContainerUUID"])
                 newValue = [NSString stringWithFormat:@"%d%%", randomPercentage];
             }
         } else if ([identifierType isEqualToString:@"SystemUptime"]) {
-            NSString *profilePath = [self.manager profileIdentityPath];
-            [[UptimeManager sharedManager] generateUptimeForProfile:profilePath];
-            newValue = [self.manager currentValueForIdentifier:@"SystemUptime"];
+            newValue = [self.manager generateSystemUptime];
         } else if ([identifierType isEqualToString:@"BootTime"]) {
-            NSString *profilePath = [self.manager profileIdentityPath];
-            [[UptimeManager sharedManager] generateBootTimeForProfile:profilePath];
-            newValue = [self.manager currentValueForIdentifier:@"BootTime"];
+            newValue = [self.manager generateBootTime];
         }
         
         // Update UI

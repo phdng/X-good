@@ -8,21 +8,15 @@ NS_ASSUME_NONNULL_BEGIN
 + (instancetype)sharedManager;
 
 // System Uptime Generation (legacy)
-- (NSString *)generateUptime;
+- (NSTimeInterval)generateUptime;
 - (NSTimeInterval)currentUptime;
 - (void)setCurrentUptime:(NSTimeInterval)uptime;
 
 // Boot Time Generation (legacy)
-- (NSString *)generateBootTime;
+- (NSDate *)generateBootTime;
 - (NSDate *)currentBootTime;
 - (void)setCurrentBootTime:(NSDate *)bootTime;
 
-// New profile-specific methods
-- (NSString *)generateUptimeForProfile:(NSString *)profilePath;
-- (NSTimeInterval)currentUptimeForProfile:(NSString *)profilePath;
-- (NSString *)generateBootTimeForProfile:(NSString *)profilePath;
-- (NSDate *)currentBootTimeForProfile:(NSString *)profilePath;
-- (void)generateConsistentUptimeAndBootTimeForProfile:(NSString *)profilePath;
 
 // Data validation
 - (BOOL)validateBootTimeConsistencyForProfile:(NSString *)profilePath;

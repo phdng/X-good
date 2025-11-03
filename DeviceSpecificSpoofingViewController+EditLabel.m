@@ -11,7 +11,7 @@
     // Set the title based on the key
     NSString *title = key;  // Default to the key itself
     
-    NSString *currentValue = [[IdentifierManager sharedManager] currentValueForIdentifier:key] ?: @"";
+    NSString *currentValue = [[IdentifierManager sharedManager] getValueForType:key] ?: @"";
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:[NSString stringWithFormat:@"Edit %@", title]
                                                                    message:nil
                                                             preferredStyle:UIAlertControllerStyleAlert];

@@ -252,13 +252,14 @@ static void updateCachedBootTimeValues(void) {
         if (!uptimeManager) return;
         
         // Get spoofed boot time and uptime
-        NSDate *bootTime = [uptimeManager currentBootTimeForProfile:profilePath];
-        NSTimeInterval uptime = [uptimeManager currentUptimeForProfile:profilePath];
+        NSDate *bootTime = [[UptimeManager sharedManager] currentBootTime];
+        NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptime];
         
         if (!bootTime || uptime <= 0) {
-            [uptimeManager generateConsistentUptimeAndBootTimeForProfile:profilePath];
-            bootTime = [uptimeManager currentBootTimeForProfile:profilePath];
-            uptime = [uptimeManager currentUptimeForProfile:profilePath];
+            [[IdentifierManager sharedManager] generateSystemUptime];
+            [[IdentifierManager sharedManager] generateBootTime];
+            bootTime = [[UptimeManager sharedManager] currentBootTime];
+            uptime = [[UptimeManager sharedManager] currentUptime];
         }
         
         // Validate the data before caching

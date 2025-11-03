@@ -143,7 +143,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         [propertyString isEqualToString:@"UniqueDeviceIDData"]) {
         
         if ([manager isIdentifierEnabled:@"UDID"]) {
-            NSString *spoofedUDID = [manager currentValueForIdentifier:@"UDID"];
+            NSString *spoofedUDID = [manager getValueForType:@"UDID"];
             if (spoofedUDID) {
                 PXLog(@"Spoofing UDID with: %@", spoofedUDID);
                 return spoofedUDID;
@@ -160,7 +160,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         }
         
         if ([manager isIdentifierEnabled:@"SerialNumber"]) {
-            NSString *spoofedSerial = [manager currentValueForIdentifier:@"SerialNumber"];
+            NSString *spoofedSerial = [manager getValueForType:@"SerialNumber"];
             if (spoofedSerial) {
                 PXLog(@"Spoofing Serial Number with: %@", spoofedSerial);
                 return spoofedSerial;
@@ -203,7 +203,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     }
     
     if ([manager isIdentifierEnabled:@"IDFA"]) {
-        NSString *idfaString = [manager currentValueForIdentifier:@"IDFA"];
+        NSString *idfaString = [manager getValueForType:@"IDFA"];
         if (idfaString) {
             PXLog(@"Spoofing IDFA with: %@", idfaString);
             return [[NSUUID alloc] initWithUUIDString:idfaString];
@@ -237,7 +237,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         
         // In iOS 15+, this is the preferred identifier checked by many apps
         if ([manager isIdentifierEnabled:@"IDFV"]) {
-            NSString *idfvString = [manager currentValueForIdentifier:@"IDFV"];
+            NSString *idfvString = [manager getValueForType:@"IDFV"];
             if (idfvString) {
                 // Create a static cache keyed by bundle ID to ensure consistent values
                 static NSMutableDictionary *idfvCache = nil;
@@ -286,7 +286,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         }
         
         if ([manager isIdentifierEnabled:@"DeviceName"]) {
-            NSString *deviceName = [manager currentValueForIdentifier:@"DeviceName"];
+            NSString *deviceName = [manager getValueForType:@"DeviceName"];
             if (deviceName && deviceName.length > 0) {
                 // Cache the name for this process to ensure consistency
                 static NSString *cachedHostName = nil;
@@ -384,7 +384,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         }
         
         if ([manager isIdentifierEnabled:@"DeviceName"]) {
-            NSString *deviceName = [manager currentValueForIdentifier:@"DeviceName"];
+            NSString *deviceName = [manager getValueForType:@"DeviceName"];
             if (deviceName && deviceName.length > 0) {
                 // Cache the name for this process to ensure consistency
                 static NSString *cachedHostName = nil;
@@ -1869,7 +1869,7 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
             }
             
             if ([manager isIdentifierEnabled:@"SerialNumber"]) {
-                NSString *spoofedSerial = [manager currentValueForIdentifier:@"SerialNumber"];
+                NSString *spoofedSerial = [manager getValueForType:@"SerialNumber"];
                 if (spoofedSerial) {
                     PXLog(@"Spoofing IOPlatformSerialNumber with: %@", spoofedSerial);
                     // Ensure proper memory management with CoreFoundation objects

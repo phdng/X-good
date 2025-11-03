@@ -86,7 +86,7 @@
                 }
 
                 // Generate Device Model if missing for the new profile
-                if (![manager currentValueForIdentifier:@"DeviceModel"]) {
+                if (![manager getValueForType:@"DeviceModel"]) {
                     NSString *deviceModel = [manager generateDeviceModel];
                     if (deviceModel) {
                         [manager setCustomDeviceModel:deviceModel];
@@ -95,7 +95,7 @@
                 }
                 
                 // Generate Device Theme if missing for the new profile
-                if (![manager currentValueForIdentifier:@"DeviceTheme"]) {
+                if (![manager getValueForType:@"DeviceTheme"]) {
                     NSString *deviceTheme = [manager generateDeviceTheme];
                     if (deviceTheme) {
                         [manager setCustomDeviceTheme:deviceTheme];
