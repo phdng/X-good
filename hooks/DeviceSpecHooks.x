@@ -206,11 +206,6 @@ static NSString *getSpoofedDeviceModel() {
             // Build path to identity directory
             NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
             
-            // First try device_model.plist (detailed specs)
-            NSString *deviceModelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-            NSDictionary *deviceModelDict = [NSDictionary dictionaryWithContentsOfFile:deviceModelPath];
-            deviceModel = deviceModelDict[@"value"];
-            
             if (!deviceModel || deviceModel.length == 0) {
                 // Fallback to device_ids.plist (combined storage)
                 NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
@@ -262,23 +257,7 @@ static NSDictionary *getDeviceSpecs() {
         if (profileId) {
             NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
             
-            // First try device_model.plist (has all detailed specs)
-            NSString *deviceModelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-            NSDictionary *deviceModelDict = [NSDictionary dictionaryWithContentsOfFile:deviceModelPath];
-            
-            if (deviceModelDict && deviceModelDict.count > 0) {
-                // We have the full specs in the plist, use them directly
-                PXLog(@"[DeviceSpec] Loaded device specs from device_model.plist");
-                
-                // Cache the specifications
-                @synchronized(deviceSpecsCache) {
-                    deviceSpecsCache[@"specs"] = deviceModelDict;
-                    cacheTimestamp = [NSDate date];
-                }
-                
-                return deviceModelDict;
-            }
-            
+     
             // Fallback to device_ids.plist and reconstruct specs
             NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
             NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];

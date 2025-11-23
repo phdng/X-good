@@ -25,20 +25,7 @@
 
 #pragma mark - Custom Values
 
-// Set custom values for identifiers
-- (BOOL)setCustomIDFA:(NSString *)value;
-- (BOOL)setCustomIDFV:(NSString *)value;
-- (BOOL)setCustomDeviceName:(NSString *)value;
-- (BOOL)setCustomSerialNumber:(NSString *)value;
-- (BOOL)setCustomSystemBootUUID:(NSString *)value;
-- (BOOL)setCustomDyldCacheUUID:(NSString *)value;
-- (BOOL)setCustomPasteboardUUID:(NSString *)value;
-- (BOOL)setCustomKeychainUUID:(NSString *)value;
-- (BOOL)setCustomUserDefaultsUUID:(NSString *)value;
-- (BOOL)setCustomAppGroupUUID:(NSString *)value;
-- (BOOL)setCustomCoreDataUUID:(NSString *)value;
-- (BOOL)setCustomAppInstallUUID:(NSString *)value;
-- (BOOL)setCustomAppContainerUUID:(NSString *)value;
+- (BOOL)saveCustomValue:(NSString *)value forType:(NSString *)type;
 
 // Canvas Fingerprinting Protection
 - (BOOL)toggleCanvasFingerprintProtection;
