@@ -24,7 +24,8 @@
 - (void)saveScopedApps;
 
 #pragma mark - Custom Values
-
+- (NSString *) getValueForType:(NSString *)type;
+- (BOOL) setValueForType: (NSString *) value forType:(NSString *)type;
 // Set custom values for identifiers
 - (BOOL)setCustomIDFA:(NSString *)value;
 - (BOOL)setCustomIDFV:(NSString *)value;

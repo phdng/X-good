@@ -1,6 +1,6 @@
 #import "IOSVersionInfo.h"
 #import <Security/Security.h>
-
+#import "IdentifierManager.h"
 @interface IOSVersionInfo ()
 @property (nonatomic, strong) NSDictionary *currentVersionInfo;
 @property (nonatomic, strong) NSError *error;
@@ -200,7 +200,13 @@
 }
 
 - (NSDictionary *)currentIOSVersionInfo {
-    return self.currentVersionInfo;
+    // return self.currentVersionInfo;
+    NSString *version = [[IdentifierManager sharedManager] getValueForType:@"IOSVersion"];
+    NSString *build = [[IdentifierManager sharedManager] getValueForType:@"IOSBuild"];
+    return @{
+      @"version": version,
+      @"build": build
+    };
 }
 
 - (void)setCurrentIOSVersionInfo:(NSDictionary *)versionInfo {

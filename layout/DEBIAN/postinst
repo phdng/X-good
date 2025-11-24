@@ -1,0 +1,28 @@
+#!/bin/sh
+
+# Post-installation script for ProjectX
+
+# Mark script execution
+echo "Running WeaponX post-installation script..."
+echo "===================================="
+
+# Detect rootless or traditional jailbreak
+if [ -d /var/jb ]; then
+    JBPREFIX="/var/jb"
+    echo "✅ Rootless jailbreak detected, using prefix: $JBPREFIX"
+else
+    JBPREFIX=""
+    echo "✅ Traditional jailbreak detected, using no prefix"
+fi
+
+# Create required directories with proper permissions
+echo "📂 Creating required directories..."
+
+# Create WeaponX directory
+mkdir -p "$JBPREFIX/var/mobile/Library/WeaponX"
+chmod 755 "$JBPREFIX/var/mobile/Library/WeaponX"
+chown mobile:mobile "$JBPREFIX/var/mobile/Library/WeaponX"
+
+
+echo "✅ WeaponX installation completed!"
+exit 0 

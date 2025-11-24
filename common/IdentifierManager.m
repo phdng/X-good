@@ -47,7 +47,9 @@
 @property (nonatomic, strong) NSMutableDictionary *spoofCache;
 @end
 
-@implementation IdentifierManager
+@implementation IdentifierManager{
+    NSMutableDictionary *_deviceData;
+}
 
 #pragma mark - Device Model
 
@@ -228,9 +230,36 @@
         _scopedApps = [NSMutableDictionary dictionary];
         _spoofCache = [NSMutableDictionary dictionary];
     }
+    // 读取配置文件
+    NSString *identityDir = [self profileIdentityPath];
+    if (!identityDir) {
+        PXLog(@"[WeaponX] ❌ Failed to get profile identity path");
+        return NO;
+    }
+    
+    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+    _deviceData = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
+                                        [NSMutableDictionary dictionary];
     return self;
 }
-
+- (NSString *)getValueForType:(NSString *)type{
+    return _deviceData[type];
+}
+- (BOOL)setValueForType: (NSString *) value forType:(NSString *)type{
+    _deviceData[type] = value;
+    NSString *identityDir = [self profileIdentityPath];
+    if (!identityDir) {
+        PXLog(@"[WeaponX] ❌ Failed to get profile identity path");
+        return NO;
+    }
+    // 写入文件
+    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+    NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
+                                        [NSMutableDictionary dictionary];
+    deviceIds[type] = value;
+    BOOL success = [deviceIds writeToFile:deviceIdsPath atomically:YES];
+    return success;
+}
 #pragma mark - Profile Integration
 
 - (NSString *)getActiveProfileId {
@@ -645,7 +674,7 @@
 
 - (NSString *)generateSystemUptime {
     NSString *profilePath = [self profileIdentityPath];
-NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptimeForProfile:profilePath];
+    NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptimeForProfile:profilePath];
     if (uptime <= 0) {
         self.error = [[UptimeManager sharedManager] lastError];
         return nil;
@@ -676,7 +705,7 @@ NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptimeForProfile:p
 
 - (NSString *)generateBootTime {
     NSString *profilePath = [self profileIdentityPath];
-NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:profilePath];
+    NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:profilePath];
     if (!bootTime) {
         self.error = [[UptimeManager sharedManager] lastError];
         return nil;

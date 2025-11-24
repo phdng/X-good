@@ -227,27 +227,20 @@ static NSString *getSpoofedPasteboardUUID() {
     NSString *identityDir = nil;
     
     // Try to determine profile directory from common paths
-    NSArray *possibleProfilePaths = @[
-        @"/var/jb/var/mobile/Library/WeaponX/Profiles",
-        @"/var/jb/private/var/mobile/Library/WeaponX/Profiles", 
-        @"/var/mobile/Library/WeaponX/Profiles"
-    ];
-    
+
+    NSString *profileBasePath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    for (NSString *profileBasePath in possibleProfilePaths) {
-        if ([fileManager fileExistsAtPath:profileBasePath]) {
-            // Get current profile ID
-            NSString *currentProfileInfoPath = [profileBasePath stringByAppendingPathComponent:@"current_profile_info.plist"];
-            NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
-            NSString *profileId = currentProfileInfo[@"ProfileId"];
-            
-            if (profileId) {
-                identityDir = [[profileBasePath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
-                break;
-            }
+    if ([fileManager fileExistsAtPath:profileBasePath]) {
+        // Get current profile ID
+        NSString *currentProfileInfoPath = [profileBasePath stringByAppendingPathComponent:@"current_profile_info.plist"];
+        NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
+        NSString *profileId = currentProfileInfo[@"ProfileId"];
+        
+        if (profileId) {
+            identityDir = [[profileBasePath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
         }
     }
-    
+
     if (identityDir) {
         // First try the combined device_ids.plist
         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];

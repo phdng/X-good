@@ -197,41 +197,29 @@ static WeaponXThemeStyle getThemeStyleFromProfile(void) {
     NSString *themeValue = nil;
     
     // Try to get the current profile directory
-    NSArray *possibleProfilePaths = @[
-        @"/var/jb/var/mobile/Library/WeaponX/Profiles",
-        @"/var/jb/private/var/mobile/Library/WeaponX/Profiles", 
-        @"/var/mobile/Library/WeaponX/Profiles"
-    ];
-    
+
+    NSString *profileBasePath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    for (NSString *profileBasePath in possibleProfilePaths) {
-        if ([fileManager fileExistsAtPath:profileBasePath]) {
-            // Get current profile ID
-            NSString *currentProfileInfoPath = [profileBasePath stringByAppendingPathComponent:@"current_profile_info.plist"];
-            NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
-            NSString *profileId = currentProfileInfo[@"ProfileId"];
-            
-            if (profileId) {
-                // Try to read theme from device_ids.plist
-                NSString *identityDir = [[profileBasePath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
-                NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-                themeValue = deviceIds[@"DeviceTheme"];
-                
-                if (themeValue) {
-                    break;
-                }
-                
-                // Try to read from device_theme.plist
-                NSString *deviceThemePath = [identityDir stringByAppendingPathComponent:@"device_theme.plist"];
-                NSDictionary *deviceTheme = [NSDictionary dictionaryWithContentsOfFile:deviceThemePath];
-                themeValue = deviceTheme[@"value"];
-                
-                if (themeValue) {
-                    break;
-                }
-            }
+    if ([fileManager fileExistsAtPath:profileBasePath]) {
+        // Get current profile ID
+        NSString *currentProfileInfoPath = [profileBasePath stringByAppendingPathComponent:@"current_profile_info.plist"];
+        NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
+        NSString *profileId = currentProfileInfo[@"ProfileId"];
+        
+        if (profileId) {
+            // Try to read theme from device_ids.plist
+            NSString *identityDir = [[profileBasePath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
+            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+            themeValue = deviceIds[@"DeviceTheme"];
+
+            // Try to read from device_theme.plist
+            NSString *deviceThemePath = [identityDir stringByAppendingPathComponent:@"device_theme.plist"];
+            NSDictionary *deviceTheme = [NSDictionary dictionaryWithContentsOfFile:deviceThemePath];
+            themeValue = deviceTheme[@"value"];
+
         }
+        
     }
     
     // Fallback to default if nothing found

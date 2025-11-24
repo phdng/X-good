@@ -35,7 +35,6 @@ include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = ProjectXTweak
 APPLICATION_NAME = ProjectX
-TOOL_NAME = WeaponXDaemon
 
 # Tweak files
 ProjectXTweak_FILES = $(wildcard hooks/*.x) $(wildcard common/*.m) $(wildcard hooks/*.m)
@@ -55,13 +54,7 @@ ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit 
 ProjectX_CODESIGN_FLAGS = -Sent.plist
 ProjectX_CFLAGS = -fobjc-arc -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1  -I./common
 
-# Daemon files
-WeaponXDaemon_FILES = daemon/WeaponXDaemon.m
-WeaponXDaemon_CFLAGS = -fobjc-arc
-WeaponXDaemon_FRAMEWORKS = Foundation IOKit
-WeaponXDaemon_INSTALL_PATH = /Library/WeaponX
-WeaponXDaemon_CODESIGN_FLAGS = -Sent.plist
-WeaponXDaemon_LDFLAGS = -framework IOKit
+
 
 # Ensure app is installed to the correct location with proper permissions
 ProjectX_INSTALL_PATH = /Applications
@@ -75,60 +68,8 @@ include $(THEOS_MAKE_PATH)/application.mk
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/tool.mk
 
-# Custom rule to ensure our scripts are included in the package
-internal-stage::
-	@echo "Adding custom scripts to package..."
-	@mkdir -p $(THEOS_STAGING_DIR)/DEBIAN
-	@cp -a DEBIAN/postinst $(THEOS_STAGING_DIR)/DEBIAN/
-	@cp -a DEBIAN/preinst $(THEOS_STAGING_DIR)/DEBIAN/
-	@cp -a DEBIAN/prerm $(THEOS_STAGING_DIR)/DEBIAN/
-	@chmod 755 $(THEOS_STAGING_DIR)/DEBIAN/postinst
-	@chmod 755 $(THEOS_STAGING_DIR)/DEBIAN/preinst
-	@chmod 755 $(THEOS_STAGING_DIR)/DEBIAN/prerm
-	@echo "Adding setup script to package..."
-	@mkdir -p $(THEOS_STAGING_DIR)/usr/bin
-	@echo "Creating MobileSubstrate directories for compatibility..."
-	@mkdir -p $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/
-	@cp -a $(THEOS_OBJ_DIR)/ProjectXTweak.* $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/
-	@echo "Ensuring LaunchScreen.storyboard is properly compiled..."
-	@if [ -f "LaunchScreen.storyboard" ]; then \
-		mkdir -p $(THEOS_STAGING_DIR)/Applications/ProjectX.app/; \
-		ibtool --compile $(THEOS_STAGING_DIR)/Applications/ProjectX.app/LaunchScreen.storyboardc LaunchScreen.storyboard || true; \
-		cp -a LaunchScreen.storyboard $(THEOS_STAGING_DIR)/Applications/ProjectX.app/; \
-	fi
-	@echo "Adding LaunchDaemon for persistent operation..."
-	@mkdir -p $(THEOS_STAGING_DIR)/Library/LaunchDaemons
-	@mkdir -p $(THEOS_STAGING_DIR)/Library/WeaponX/Guardian
-	@mkdir -p $(THEOS_STAGING_DIR)/var/mobile/Library/Preferences
-	@cp -a com.hydra.weaponx.guardian.plist $(THEOS_STAGING_DIR)/Library/LaunchDaemons/
-	@chmod 644 $(THEOS_STAGING_DIR)/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist
-	@chmod 755 $(THEOS_STAGING_DIR)/Library/WeaponX
-	@chmod 755 $(THEOS_STAGING_DIR)/Library/WeaponX/Guardian
-	@touch $(THEOS_STAGING_DIR)/Library/WeaponX/Guardian/daemon.log
-	@touch $(THEOS_STAGING_DIR)/Library/WeaponX/Guardian/guardian-stdout.log
-	@touch $(THEOS_STAGING_DIR)/Library/WeaponX/Guardian/guardian-stderr.log
-	@chmod 664 $(THEOS_STAGING_DIR)/Library/WeaponX/Guardian/*.log
-	@echo "Installing WeaponXDaemon..."
-	@cp -a $(THEOS_OBJ_DIR)/WeaponXDaemon $(THEOS_STAGING_DIR)/Library/WeaponX/
-	@chmod 755 $(THEOS_STAGING_DIR)/Library/WeaponX/WeaponXDaemon
+
 
 export CFLAGS = -fobjc-arc -Wno-error
 
-after-package::
-	@echo "🔍 Checking package contents..."
-	@mkdir -p $(THEOS_STAGING_DIR)/../debug
-	@PACKAGE_FILE="$$(ls -t ./packages/com.hydra.projectx_*_iphoneos-arm64.deb | head -1)" && \
-	if [ -f "$$PACKAGE_FILE" ]; then \
-		echo "Extracting $$PACKAGE_FILE"; \
-		(cd $(THEOS_STAGING_DIR)/../debug && ar -x "../../$$PACKAGE_FILE" && tar -xf data.tar.*); \
-	else \
-		echo "❌ Package file not found!"; \
-		exit 1; \
-	fi
-	@echo "✅ Checking WeaponXDaemon executable..."
-	@ls -la $(THEOS_STAGING_DIR)/../debug/var/jb/Library/WeaponX/WeaponXDaemon || echo "❌ WeaponXDaemon not found!"
-	@echo "✅ Checking LaunchDaemon plist..."
-	@ls -la $(THEOS_STAGING_DIR)/../debug/var/jb/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist || echo "❌ LaunchDaemon plist not found!"
-	@echo "✅ Checking Guardian directory and log files..."
-	@ls -la $(THEOS_STAGING_DIR)/../debug/var/jb/Library/WeaponX/Guardian/ || echo "❌ Guardian directory not found!"
-	@echo "Package check completed!"
+
