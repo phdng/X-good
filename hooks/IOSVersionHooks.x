@@ -9,6 +9,7 @@
 #import <dlfcn.h>
 #import <ellekit/ellekit.h>
 #import <mach/mach_time.h>
+#import "IdentifierManager.h"
 
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";

@@ -3015,32 +3015,6 @@
         isRestricted = restrictedAccess ? [restrictedAccess boolValue] : NO;
     }
     
-    // If user doesn't have an active plan, show alert and prevent action
-    // if (isRestricted) {
-    //     UIAlertController *alert = [UIAlertController 
-    //         alertControllerWithTitle:@"Access Restricted" 
-    //         message:@"Please subscribe to a plan to use the generate feature." 
-    //         preferredStyle:UIAlertControllerStyleAlert];
-        
-    //     [alert addAction:[UIAlertAction 
-    //         actionWithTitle:@"View Plans" 
-    //         style:UIAlertActionStyleDefault 
-    //         handler:^(UIAlertAction * _Nonnull action) {
-    //             // Switch to account tab to view plans
-    //             UITabBarController *tabController = [self findTabBarController];
-    //             if ([tabController respondsToSelector:@selector(switchToAccountTab)]) {
-    //                 [tabController performSelector:@selector(switchToAccountTab)];
-    //             }
-    //         }]];
-        
-    //     [alert addAction:[UIAlertAction 
-    //         actionWithTitle:@"Cancel" 
-    //         style:UIAlertActionStyleCancel 
-    //         handler:nil]];
-        
-    //     [self presentViewController:alert animated:YES completion:nil];
-    //     return;
-    // }
     
     // Disable button temporarily
     sender.enabled = NO;
@@ -4127,36 +4101,10 @@ else if ([identifierType isEqualToString:@"AppContainerUUID"])
     // We need to forward it to the appropriate manager
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        BOOL success = NO;
+        BOOL success = YES;
         
         // Save the custom value depending on identifier type
-        if ([type isEqualToString:@"IDFA"]) {
-            success = [self.manager setCustomIDFA:value];
-        } else if ([type isEqualToString:@"IDFV"]) {
-            success = [self.manager setCustomIDFV:value];
-        } else if ([type isEqualToString:@"DeviceName"]) {
-            success = [self.manager setCustomDeviceName:value];
-        } else if ([type isEqualToString:@"SerialNumber"]) {
-            success = [self.manager setCustomSerialNumber:value];
-        } else if ([type isEqualToString:@"SystemBootUUID"]) {
-            success = [self.manager setCustomSystemBootUUID:value];
-        } else if ([type isEqualToString:@"DyldCacheUUID"]) {
-            success = [self.manager setCustomDyldCacheUUID:value];
-        } else if ([type isEqualToString:@"PasteboardUUID"]) {
-            success = [self.manager setCustomPasteboardUUID:value];
-        } else if ([type isEqualToString:@"KeychainUUID"]) {
-            success = [self.manager setCustomKeychainUUID:value];
-        } else if ([type isEqualToString:@"UserDefaultsUUID"]) {
-            success = [self.manager setCustomUserDefaultsUUID:value];
-        } else if ([type isEqualToString:@"AppGroupUUID"]) {
-            success = [self.manager setCustomAppGroupUUID:value];
-        } else if ([type isEqualToString:@"CoreDataUUID"]) {
-            success = [self.manager setCustomCoreDataUUID:value];
-        } else if ([type isEqualToString:@"AppInstallUUID"]) {
-            success = [self.manager setCustomAppInstallUUID:value];
-        } else if ([type isEqualToString:@"AppContainerUUID"]) {
-            success = [self.manager setCustomAppContainerUUID:value];
-        }
+        [self.manager saveCustomValue:value forType:type];
         
         // Update UI
         dispatch_async(dispatch_get_main_queue(), ^{

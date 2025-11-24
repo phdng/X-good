@@ -102,9 +102,7 @@
             @"lastUpdated": [NSDate date]
         };
         
-        NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-        [modelDict writeToFile:modelPath atomically:YES];
-        
+
         // Also update the combined device_ids.plist
         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
         NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
@@ -180,9 +178,7 @@
             @"lastUpdated": [NSDate date]
         };
         
-        NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-        success = [modelDict writeToFile:modelPath atomically:YES];
-        
+
         // Also update the combined device_ids.plist
         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
         NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
@@ -349,22 +345,7 @@
         self.error = [[IDFAManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *idfaDict = @{@"value": idfa, @"lastUpdated": [NSDate date]};
-        NSString *idfaPath = [identityDir stringByAppendingPathComponent:@"advertising_id.plist"];
-        [idfaDict writeToFile:idfaPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"IDFA"] = idfa;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
-    
+    [self saveCustomValue:idfa forType:@"IDFA"];    
     return idfa;
 }
 
@@ -375,21 +356,8 @@
         return nil;
     }
     
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *idfvDict = @{@"value": idfv, @"lastUpdated": [NSDate date]};
-        NSString *idfvPath = [identityDir stringByAppendingPathComponent:@"vendor_id.plist"];
-        [idfvDict writeToFile:idfvPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"IDFV"] = idfv;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
-    
+    [self saveCustomValue:idfv forType:@"IDFV"];    
+
     return idfv;
 }
 
@@ -400,21 +368,7 @@
         return nil;
     }
     
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *deviceNameDict = @{@"value": deviceName, @"lastUpdated": [NSDate date]};
-        NSString *deviceNamePath = [identityDir stringByAppendingPathComponent:@"device_name.plist"];
-        [deviceNameDict writeToFile:deviceNamePath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"DeviceName"] = deviceName;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
-    
+    [self saveCustomValue:deviceName forType:@"DeviceName"];    
     return deviceName;
 }
 
@@ -426,21 +380,7 @@
         self.error = [[SerialNumberManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *serialDict = @{@"value": serialNumber, @"lastUpdated": [NSDate date]};
-        NSString *serialPath = [identityDir stringByAppendingPathComponent:@"serial_number.plist"];
-        [serialDict writeToFile:serialPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"SerialNumber"] = serialNumber;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-    }
+    [self saveCustomValue:serialNumber forType:@"SerialNumber"];    
     
     return serialNumber;
 }
@@ -453,35 +393,12 @@
         self.error = [[IOSVersionInfo sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSMutableDictionary *versionDict = [NSMutableDictionary dictionaryWithDictionary:versionInfo];
-        [versionDict setObject:[NSDate date] forKey:@"lastUpdated"];
-        
-        NSString *versionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
-        [versionDict writeToFile:versionPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        
-        // Store both version and build in device_ids.plist
-        deviceIds[@"IOSVersion"] = [NSString stringWithFormat:@"%@ (%@)", versionInfo[@"version"], versionInfo[@"build"]];
-        deviceIds[@"IOSBuild"] = versionInfo[@"build"];  // Keep this for compatibility
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] Stored iOS version: %@ with build: %@", versionInfo[@"version"], versionInfo[@"build"]);
-    }
-    
+    [self saveCustomValue:[NSString stringWithFormat:@"%@ (%@)", versionInfo[@"version"], versionInfo[@"build"]] forType:@"IOSVersion"];    
+    [self saveCustomValue:versionInfo[@"build"] forType:@"IOSBuild"];    
+
     return versionInfo;
 }
 
-- (NSDictionary *)generateiOSVersion {
-    return [self generateIOSVersion];
-}
 
 - (NSString *)generateSystemBootUUID {
     NSString *bootUUID = [[SystemUUIDManager sharedManager] generateBootUUID];
@@ -489,24 +406,7 @@
         self.error = [[SystemUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": bootUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"system_boot_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"SystemBootUUID"] = bootUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🆔 Generated System Boot UUID: %@", bootUUID);
-    }
-    
+    [self saveCustomValue:bootUUID forType:@"SystemBootUUID"];    
     return bootUUID;
 }
 
@@ -516,24 +416,7 @@
         self.error = [[DyldCacheUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": dyldUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"dyld_cache_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"DyldCacheUUID"] = dyldUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🆔 Generated Dyld Cache UUID: %@", dyldUUID);
-    }
-    
+    [self saveCustomValue:dyldUUID forType:@"DyldCacheUUID"];        
     return dyldUUID;
 }
 
@@ -543,24 +426,8 @@
         self.error = [[PasteboardUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": pasteboardUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"pasteboard_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"PasteboardUUID"] = pasteboardUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🆔 Generated Pasteboard UUID: %@", pasteboardUUID);
-    }
-    
+    [self saveCustomValue:pasteboardUUID forType:@"PasteboardUUID"];        
+
     return pasteboardUUID;
 }
 
@@ -570,24 +437,8 @@
         self.error = [[KeychainUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": keychainUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"keychain_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"KeychainUUID"] = keychainUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🔑 Generated Keychain UUID: %@", keychainUUID);
-    }
-    
+    [self saveCustomValue:keychainUUID forType:@"KeychainUUID"];        
+
     return keychainUUID;
 }
 
@@ -597,24 +448,8 @@
         self.error = [[UserDefaultsUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": userDefaultsUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"userdefaults_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"UserDefaultsUUID"] = userDefaultsUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🔄 Generated UserDefaults UUID: %@", userDefaultsUUID);
-    }
-    
+    [self saveCustomValue:userDefaultsUUID forType:@"UserDefaultsUUID"];        
+
     return userDefaultsUUID;
 }
 
@@ -624,24 +459,7 @@
         self.error = [[AppGroupUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": appGroupUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appgroup_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"AppGroupUUID"] = appGroupUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 👥 Generated App Group UUID: %@", appGroupUUID);
-    }
-    
+    [self saveCustomValue:appGroupUUID forType:@"AppGroupUUID"];        
     return appGroupUUID;
 }
 
@@ -651,24 +469,7 @@
         self.error = [[CoreDataUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": coreDataUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"coredata_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"CoreDataUUID"] = coreDataUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 📦 Generated Core Data UUID: %@", coreDataUUID);
-    }
-    
+    [self saveCustomValue:coreDataUUID forType:@"CoreDataUUID"];           
     return coreDataUUID;
 }
 
@@ -679,26 +480,9 @@
         self.error = [[UptimeManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        // Format uptime as string (in seconds)
-        NSString *uptimeString = [NSString stringWithFormat:@"%.0f", uptime];
-        NSDictionary *uptimeDict = @{@"value": uptimeString, @"lastUpdated": [NSDate date]};
-        NSString *uptimePath = [identityDir stringByAppendingPathComponent:@"system_uptime.plist"];
-        [uptimeDict writeToFile:uptimePath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"SystemUptime"] = uptimeString;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🕒 Generated System Uptime: %.2f hours", uptime / 3600.0);
-    }
-    
+    NSString *uptimeString = [NSString stringWithFormat:@"%.0f", uptime];
+    [self saveCustomValue:uptimeString forType:@"SystemUptime"];           
+
     // Return formatted uptime string (in hours for display)
     return [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
 }
@@ -710,27 +494,9 @@
         self.error = [[UptimeManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *bootTimeDict = @{@"value": bootTime, @"lastUpdated": [NSDate date]};
-        NSString *bootTimePath = [identityDir stringByAppendingPathComponent:@"boot_time.plist"];
-        [bootTimeDict writeToFile:bootTimePath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        
-        // Store timestamp as a string for consistency
-        NSString *bootTimeString = [NSString stringWithFormat:@"%.0f", [bootTime timeIntervalSince1970]];
-        deviceIds[@"BootTime"] = bootTimeString;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 🕒 Generated Boot Time: %@", bootTime);
-    }
-    
+    NSString *bootTimeString = [NSString stringWithFormat:@"%.0f", [bootTime timeIntervalSince1970]];
+    [self saveCustomValue:bootTimeString forType:@"BootTime"];           
+
     // Return formatted date for display
     NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
     formatter.dateStyle = NSDateFormatterMediumStyle;
@@ -744,24 +510,7 @@
         self.error = [[AppInstallUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": appInstallUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appinstall_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"AppInstallUUID"] = appInstallUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 📱 Generated App Install UUID: %@", appInstallUUID);
-    }
-    
+    [self saveCustomValue:appInstallUUID forType:@"AppInstallUUID"];
     return appInstallUUID;
 }
 
@@ -771,24 +520,7 @@
         self.error = [[AppContainerUUIDManager sharedManager] lastError];
         return nil;
     }
-    
-    // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSDictionary *uuidDict = @{@"value": appContainerUUID, @"lastUpdated": [NSDate date]};
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"appcontainer_uuid.plist"];
-        [uuidDict writeToFile:uuidPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[@"AppContainerUUID"] = appContainerUUID;
-        [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] 📦 Generated App Container UUID: %@", appContainerUUID);
-    }
-    
+    [self saveCustomValue:appContainerUUID forType:@"AppContainerUUID"];
     return appContainerUUID;
 }
 
@@ -866,11 +598,11 @@
     }
     if ([self isIdentifierEnabled:@"SystemUptime"]) {
         NSString *profilePath = [self profileIdentityPath];
-[[UptimeManager sharedManager] generateUptimeForProfile:profilePath];
+        [[UptimeManager sharedManager] generateUptimeForProfile:profilePath];
     }
     if ([self isIdentifierEnabled:@"BootTime"]) {
         NSString *profilePath = [self profileIdentityPath];
-[[UptimeManager sharedManager] generateBootTimeForProfile:profilePath];
+        [[UptimeManager sharedManager] generateBootTimeForProfile:profilePath];
     }
     // Even though we already generated WiFi info above, check if it's specifically enabled
     if ([self isIdentifierEnabled:@"WiFi"]) {
@@ -1002,11 +734,11 @@
             }
             else if ([type isEqualToString:@"SystemUptime"]) {
                 NSString *profilePath = [self profileIdentityPath];
-[[UptimeManager sharedManager] generateUptimeForProfile:profilePath];
+                [[UptimeManager sharedManager] generateUptimeForProfile:profilePath];
             }
             else if ([type isEqualToString:@"BootTime"]) {
                 NSString *profilePath = [self profileIdentityPath];
-[[UptimeManager sharedManager] generateBootTimeForProfile:profilePath];
+                [[UptimeManager sharedManager] generateBootTimeForProfile:profilePath];
             }
             else if ([type isEqualToString:@"WiFi"]) {
                 // Use WiFiManager to generate new WiFi info
@@ -1322,36 +1054,36 @@
         }
         else if ([type isEqualToString:@"SystemUptime"]) {
             NSString *profilePath = [self profileIdentityPath];
-NSString *uptimePath = [profilePath stringByAppendingPathComponent:@"system_uptime.plist"];
-NSDictionary *uptimeDict = [NSDictionary dictionaryWithContentsOfFile:uptimePath];
-if (uptimeDict && uptimeDict[@"value"]) {
-    NSTimeInterval uptime = [uptimeDict[@"value"] doubleValue];
-    if (uptime > 0) {
-        NSString *formattedUptime = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
-        PXLog(@"[WeaponX] 📄 Showing SystemUptime from system_uptime.plist: %@", formattedUptime);
-        return formattedUptime;
-    }
-}
-return @"Not Set";
+            NSString *uptimePath = [profilePath stringByAppendingPathComponent:@"system_uptime.plist"];
+            NSDictionary *uptimeDict = [NSDictionary dictionaryWithContentsOfFile:uptimePath];
+            if (uptimeDict && uptimeDict[@"value"]) {
+                NSTimeInterval uptime = [uptimeDict[@"value"] doubleValue];
+                if (uptime > 0) {
+                    NSString *formattedUptime = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
+                    PXLog(@"[WeaponX] 📄 Showing SystemUptime from system_uptime.plist: %@", formattedUptime);
+                    return formattedUptime;
+                }
+            }
+            return @"Not Set";
         }
         else if ([type isEqualToString:@"BootTime"]) {
             NSString *profilePath = [self profileIdentityPath];
-NSString *bootTimePath = [profilePath stringByAppendingPathComponent:@"boot_time.plist"];
-NSDictionary *bootTimeDict = [NSDictionary dictionaryWithContentsOfFile:bootTimePath];
-if (bootTimeDict && bootTimeDict[@"value"]) {
-    NSDate *bootTime = bootTimeDict[@"value"];
-    if ([bootTime isKindOfClass:[NSDate class]]) {
-        NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-        formatter.dateStyle = NSDateFormatterMediumStyle;
-        formatter.timeStyle = NSDateFormatterMediumStyle;
-        NSString *formattedBootTime = [formatter stringFromDate:bootTime];
-        PXLog(@"[WeaponX] 📄 Showing BootTime from boot_time.plist: %@", formattedBootTime);
-        return formattedBootTime;
-    }
-}
-return @"Not Set";
+            NSString *bootTimePath = [profilePath stringByAppendingPathComponent:@"boot_time.plist"];
+            NSDictionary *bootTimeDict = [NSDictionary dictionaryWithContentsOfFile:bootTimePath];
+            if (bootTimeDict && bootTimeDict[@"value"]) {
+                NSDate *bootTime = bootTimeDict[@"value"];
+                if ([bootTime isKindOfClass:[NSDate class]]) {
+                    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+                    formatter.dateStyle = NSDateFormatterMediumStyle;
+                    formatter.timeStyle = NSDateFormatterMediumStyle;
+                    NSString *formattedBootTime = [formatter stringFromDate:bootTime];
+                    PXLog(@"[WeaponX] 📄 Showing BootTime from boot_time.plist: %@", formattedBootTime);
+                    return formattedBootTime;
+                }
+            }
+            return @"Not Set";
         }
-        
+            
         PXLog(@"No %@ value found in profile-specific files", type);
     } else {
         PXLog(@"Could not access identity directory for profile");
@@ -1378,15 +1110,6 @@ return @"Not Set";
             if (version && build) {
                 NSString *formattedVersion = [NSString stringWithFormat:@"%@ (%@)", version, build];
                 PXLog(@"[WeaponX] Formatted iOS version from components: %@", formattedVersion);
-                return formattedVersion;
-            }
-            
-            // If not found in combined file, try ios_version.plist
-            NSString *versionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
-            NSDictionary *versionDict = [NSDictionary dictionaryWithContentsOfFile:versionPath];
-            if (versionDict && versionDict[@"version"] && versionDict[@"build"]) {
-                NSString *formattedVersion = [NSString stringWithFormat:@"%@ (%@)", versionDict[@"version"], versionDict[@"build"]];
-                PXLog(@"[WeaponX] Formatted iOS version from ios_version.plist: %@", formattedVersion);
                 return formattedVersion;
             }
         }
@@ -1564,14 +1287,14 @@ return @"Not Set";
     // Special handling for SystemUptime/BootTime
     if ([type isEqualToString:@"SystemUptime"]) {
         NSString *profilePath = [self profileIdentityPath];
-NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptimeForProfile:profilePath];
+        NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptimeForProfile:profilePath];
         NSString *result = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
         PXLog(@"Default SystemUptime value: %@", result);
         return result;
     }
     else if ([type isEqualToString:@"BootTime"]) {
         NSString *profilePath = [self profileIdentityPath];
-NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:profilePath];
+        NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:profilePath];
         NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
         formatter.dateStyle = NSDateFormatterMediumStyle;
         formatter.timeStyle = NSDateFormatterMediumStyle;
@@ -2321,107 +2044,45 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         return NO;
     }
     
-    // Create the dictionary with timestamp
-    NSDictionary *valueDict = @{@"value": value, @"lastUpdated": [NSDate date]};
+    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+    NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
+                                        [NSMutableDictionary dictionary];
+    deviceIds[type] = value;
+    BOOL success = [deviceIds writeToFile:deviceIdsPath atomically:YES];
     
-    // Determine the file path based on type
-    NSString *filePath = nil;
+    PXLog(@"[WeaponX] ✅ Custom %@ saved: %@", type, value);
+    
+    // For specific types, also update the respective manager
     if ([type isEqualToString:@"IDFA"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"advertising_id.plist"];
+        [[IDFAManager sharedManager] setCurrentIDFA:value];
     } else if ([type isEqualToString:@"IDFV"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"vendor_id.plist"];
-    } else if ([type isEqualToString:@"DeviceName"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"device_name.plist"];
-    } else if ([type isEqualToString:@"SerialNumber"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"serial_number.plist"];
-    } else if ([type isEqualToString:@"IMEI"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"imei.plist"];
-    } else if ([type isEqualToString:@"MEID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"meid.plist"];
+        [[IDFVManager sharedManager] setCurrentIDFV:value];
     } else if ([type isEqualToString:@"SystemBootUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"system_boot_uuid.plist"];
+        [[SystemUUIDManager sharedManager] setCurrentBootUUID:value];
     } else if ([type isEqualToString:@"DyldCacheUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"dyld_cache_uuid.plist"];
+        [[DyldCacheUUIDManager sharedManager] setCurrentDyldCacheUUID:value];
     } else if ([type isEqualToString:@"PasteboardUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"pasteboard_uuid.plist"];
+        [[PasteboardUUIDManager sharedManager] setCurrentPasteboardUUID:value];
     } else if ([type isEqualToString:@"KeychainUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"keychain_uuid.plist"];
+        [[KeychainUUIDManager sharedManager] setCurrentKeychainUUID:value];
     } else if ([type isEqualToString:@"UserDefaultsUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"userdefaults_uuid.plist"];
+        [[UserDefaultsUUIDManager sharedManager] setCurrentUserDefaultsUUID:value];
     } else if ([type isEqualToString:@"AppGroupUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"appgroup_uuid.plist"];
+        [[AppGroupUUIDManager sharedManager] setCurrentAppGroupUUID:value];
     } else if ([type isEqualToString:@"CoreDataUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"coredata_uuid.plist"];
+        [[CoreDataUUIDManager sharedManager] setCurrentCoreDataUUID:value];
     } else if ([type isEqualToString:@"AppInstallUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"appinstall_uuid.plist"];
+        [[AppInstallUUIDManager sharedManager] setCurrentAppInstallUUID:value];
     } else if ([type isEqualToString:@"AppContainerUUID"]) {
-        filePath = [identityDir stringByAppendingPathComponent:@"appcontainer_uuid.plist"];
-    } else {
-        PXLog(@"[WeaponX] ❌ Unknown identifier type: %@", type);
-        return NO;
+        [[AppContainerUUIDManager sharedManager] setCurrentAppContainerUUID:value];
     }
     
-    // Write the value to file
-    BOOL success = [valueDict writeToFile:filePath atomically:YES];
-    
-    // Also update the combined device_ids.plist
-    if (success) {
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
-                                         [NSMutableDictionary dictionary];
-        deviceIds[type] = value;
-        success = [deviceIds writeToFile:deviceIdsPath atomically:YES];
-        
-        PXLog(@"[WeaponX] ✅ Custom %@ saved: %@", type, value);
-        
-        // For specific types, also update the respective manager
-        if ([type isEqualToString:@"IDFA"]) {
-            [[IDFAManager sharedManager] setCurrentIDFA:value];
-        } else if ([type isEqualToString:@"IDFV"]) {
-            [[IDFVManager sharedManager] setCurrentIDFV:value];
-        } else if ([type isEqualToString:@"SystemBootUUID"]) {
-            [[SystemUUIDManager sharedManager] setCurrentBootUUID:value];
-        } else if ([type isEqualToString:@"DyldCacheUUID"]) {
-            [[DyldCacheUUIDManager sharedManager] setCurrentDyldCacheUUID:value];
-        } else if ([type isEqualToString:@"PasteboardUUID"]) {
-            [[PasteboardUUIDManager sharedManager] setCurrentPasteboardUUID:value];
-        } else if ([type isEqualToString:@"KeychainUUID"]) {
-            [[KeychainUUIDManager sharedManager] setCurrentKeychainUUID:value];
-        } else if ([type isEqualToString:@"UserDefaultsUUID"]) {
-            [[UserDefaultsUUIDManager sharedManager] setCurrentUserDefaultsUUID:value];
-        } else if ([type isEqualToString:@"AppGroupUUID"]) {
-            [[AppGroupUUIDManager sharedManager] setCurrentAppGroupUUID:value];
-        } else if ([type isEqualToString:@"CoreDataUUID"]) {
-            [[CoreDataUUIDManager sharedManager] setCurrentCoreDataUUID:value];
-        } else if ([type isEqualToString:@"AppInstallUUID"]) {
-            [[AppInstallUUIDManager sharedManager] setCurrentAppInstallUUID:value];
-        } else if ([type isEqualToString:@"AppContainerUUID"]) {
-            [[AppContainerUUIDManager sharedManager] setCurrentAppContainerUUID:value];
-        }
-    }
     
     return success;
 }
 
-- (BOOL)setCustomIDFA:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"IDFA"];
-}
 
-#pragma mark - IMEI/MEID Spoofing
 
-- (BOOL)setCustomIMEI:(NSString *)value {
-    // Validate IMEI: must be 15 digits, Luhn valid, and start with a US TAC (e.g., 353918, 356938, 359254, etc.)
-    if (![self isValidIMEI:value]) return NO;
-    return [self saveCustomValue:value forType:@"IMEI"];
-}
-
-- (BOOL)setCustomMEID:(NSString *)value {
-    // Validate MEID: must be 14 hex digits, and start with a US prefix (e.g., A00000, A10000, 990000, etc.)
-    if (![self isValidMEID:value]) return NO;
-    return [self saveCustomValue:value forType:@"MEID"];
-}
 
 - (NSString *)generateIMEI {
     // Use a realistic US iPhone TAC (Type Allocation Code)
@@ -2496,77 +2157,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     return ([string rangeOfCharacterFromSet:nonDigits].location == NSNotFound);
 }
 
-- (BOOL)setCustomIDFV:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"IDFV"];
-}
 
-- (BOOL)setCustomDeviceName:(NSString *)value {
-    // No special validation for device name
-    return [self saveCustomValue:value forType:@"DeviceName"];
-}
 
-- (BOOL)setCustomSerialNumber:(NSString *)value {
-    // Serial numbers have specific format requirements
-    // This is a simplified validation - implement appropriate validation for serial numbers
-    if (!value || value.length < 8) return NO;
-    return [self saveCustomValue:value forType:@"SerialNumber"];
-}
-
-- (BOOL)setCustomSystemBootUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"SystemBootUUID"];
-}
-
-- (BOOL)setCustomDyldCacheUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"DyldCacheUUID"];
-}
-
-- (BOOL)setCustomPasteboardUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"PasteboardUUID"];
-}
-
-- (BOOL)setCustomKeychainUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"KeychainUUID"];
-}
-
-- (BOOL)setCustomUserDefaultsUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"UserDefaultsUUID"];
-}
-
-- (BOOL)setCustomAppGroupUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"AppGroupUUID"];
-}
-
-- (BOOL)setCustomCoreDataUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"CoreDataUUID"];
-}
-
-- (BOOL)setCustomAppInstallUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"AppInstallUUID"];
-}
-
-- (BOOL)setCustomAppContainerUUID:(NSString *)value {
-    // Validate UUID format
-    if (![self validateUUID:value]) return NO;
-    return [self saveCustomValue:value forType:@"AppContainerUUID"];
-}
 
 - (BOOL)validateUUID:(NSString *)uuid {
     if (!uuid) return NO;
