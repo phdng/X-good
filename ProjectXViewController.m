@@ -646,15 +646,7 @@
     [tableView deselectRowAtIndexPath:indexPath animated:YES];
     
     if (tableView == self.installedAppsTableView) {
-        // Restrict adding if user has no plan
-        // if (![[APIManager sharedManager] userHasPlan]) {
-        //     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Plan Required"
-        //                                                                    message:@"You need an active plan to add apps to scope."
-        //                                                             preferredStyle:UIAlertControllerStyleAlert];
-        //     [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        //     [self presentViewController:alert animated:YES completion:nil];
-        //     return;
-        // }
+
         // Handle installed apps selection
         NSDictionary *selectedApp = self.filteredApps[indexPath.row];
         NSString *bundleID = selectedApp[@"bundleID"];
@@ -698,14 +690,6 @@
             UIAlertAction *addWithExtensionsAction = [UIAlertAction actionWithTitle:@"Add with Extensions"
                                                                             style:UIAlertActionStyleDefault
                                                                           handler:^(UIAlertAction * _Nonnull action) {
-                // if (![[APIManager sharedManager] userHasPlan]) {
-                //     UIAlertController *planAlert = [UIAlertController alertControllerWithTitle:@"Plan Required"
-                //                                                                       message:@"You need an active plan to add apps with extensions to scope."
-                //                                                                preferredStyle:UIAlertControllerStyleAlert];
-                //     [planAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                //     [self presentViewController:planAlert animated:YES completion:nil];
-                //     return;
-                // }
                 [self addApplicationWithExtensionsToScope:bundleID];
             }];
             
@@ -1858,14 +1842,7 @@
 }
 
 - (void)addAppButtonTapped:(UIButton *)sender {
-    // if (![[APIManager sharedManager] userHasPlan]) {
-    //     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Plan Required"
-    //                                                                    message:@"You need an active plan to add apps to scope."
-    //                                                             preferredStyle:UIAlertControllerStyleAlert];
-    //     [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-    //     [self presentViewController:alert animated:YES completion:nil];
-    //     return;
-    // }
+
     NSString *bundleID = self.bundleIDTextField.text;
     if (!bundleID.length) {
         [self showError:[NSError errorWithDomain:@"com.hydra.projectx" 
@@ -3085,7 +3062,7 @@
             if ([self.manager isIdentifierEnabled:@"SystemUptime"]) {
                 [self directUpdateIdentifierValue:@"SystemUptime" withValue:newSystemUptime];
             }
-            
+      
             if ([self.manager isIdentifierEnabled:@"BootTime"]) {
                 [self directUpdateIdentifierValue:@"BootTime" withValue:newBootTime];
             }
@@ -3105,9 +3082,7 @@
             // Always update the device model
             [self directUpdateIdentifierValue:@"DeviceModel" withValue:newDeviceModel];
             
-            if ([self.manager isIdentifierEnabled:@"SystemUptime"]) {
-                [self directUpdateIdentifierValue:@"SystemUptime" withValue:newSystemUptime];
-            }
+      
             
             // Show success feedback
             UIAlertController *alert = [UIAlertController 
@@ -3801,7 +3776,7 @@
         tag = 17;
     else if ([identifierType isEqualToString:@"AppInstallUUID"])
         tag = 18;
-else if ([identifierType isEqualToString:@"AppContainerUUID"])
+    else if ([identifierType isEqualToString:@"AppContainerUUID"])
         tag = 19;
     if (tag > 0) {
         [self generateButtonTapped:[self buttonWithTag:tag]];

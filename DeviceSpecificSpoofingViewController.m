@@ -76,11 +76,11 @@
 
                 // Generate IMEI/MEID if missing for the new profile
                 IdentifierManager *manager = [IdentifierManager sharedManager];
-                if (![manager currentValueForIdentifier:@"IMEI"]) {
+                if (![manager getValueForType:@"IMEI"]) {
                     NSString *imei = [manager generateIMEI];
                     if (imei) [manager setCustomIMEI:imei];
                 }
-                if (![manager currentValueForIdentifier:@"MEID"]) {
+                if (![manager getValueForType:@"MEID"]) {
                     NSString *meid = [manager generateMEID];
                     if (meid) [manager setCustomMEID:meid];
                 }

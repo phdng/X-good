@@ -561,7 +561,7 @@
     if (deviceModel) [self setCustomDeviceModel:deviceModel];
     
     // Always generate device theme if it doesn't exist
-    if (![self currentValueForIdentifier:@"DeviceTheme"]) {
+    if (![self getValueForType:@"DeviceTheme"]) {
         NSString *deviceTheme = [self generateDeviceTheme];
         if (deviceTheme) {
             [self setCustomDeviceTheme:deviceTheme];
@@ -795,7 +795,7 @@
     }
     
     // Always ensure device model exists
-    if (![self currentValueForIdentifier:@"DeviceModel"]) {
+    if (![self getValueForType:@"DeviceModel"]) {
         NSString *deviceModel = [self generateDeviceModel];
         if (deviceModel) [self setCustomDeviceModel:deviceModel];
     }
@@ -880,6 +880,7 @@
     };
 }
 - (NSString *)currentValueForIdentifier:(NSString *)type {
+    NSLog([@"[debug]" stringByAppendingString:type]);
     // Special hardcoded serial number for Filza and ADManager
     // if ([type isEqualToString:@"SerialNumber"]) {
     //     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
@@ -896,101 +897,166 @@
     
     // First try to get from profile-specific storage
     NSString *identityDir = [self profileIdentityPath];
-    if (identityDir) {
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-        NSString *value = deviceIds[type];
+    //   NSString *identityDir = [self profileIdentityPath];
+//     if (identityDir) {
+//         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+//         NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+//         NSString *value = deviceIds[type];
         
-        if (value) {
-            PXLog(@"Found %@ value in device_ids.plist: %@", type, value);
-            return value;
-        }
+//         if (value) {
+//             PXLog(@"Found %@ value in device_ids.plist: %@", type, value);
+//             return value;
+//         }
+        
+//         // If not found in combined file, try type-specific files
+//         else if ([type isEqualToString:@"DeviceModel"]) {
+//             NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
+//             NSDictionary *modelDict = [NSDictionary dictionaryWithContentsOfFile:modelPath];
+//             if (modelDict && modelDict[@"value"]) {
+//                 PXLog(@"Found DeviceModel in device_model.plist: %@", modelDict[@"value"]);
+//                 return modelDict[@"value"];
+//             }
+//         }
+//         else if ([type isEqualToString:@"DeviceName"]) {
+//             NSString *deviceNamePath = [identityDir stringByAppendingPathComponent:@"device_name.plist"];
+//             NSDictionary *deviceNameDict = [NSDictionary dictionaryWithContentsOfFile:deviceNamePath];
+//             if (deviceNameDict && deviceNameDict[@"value"]) {
+//                 PXLog(@"Found DeviceName in device_name.plist: %@", deviceNameDict[@"value"]);
+//                 return deviceNameDict[@"value"];
+//             }
+//         }
+//         else if ([type isEqualToString:@"SerialNumber"]) {
+//             NSString *serialPath = [identityDir stringByAppendingPathComponent:@"serial_number.plist"];
+//             NSDictionary *serialDict = [NSDictionary dictionaryWithContentsOfFile:serialPath];
+//             if (serialDict && serialDict[@"value"]) {
+//                 PXLog(@"Found SerialNumber in serial_number.plist: %@", serialDict[@"value"]);
+//                 return serialDict[@"value"];
+//             }
+//         }
+//         else if ([type isEqualToString:@"WiFi"]) {
+//             // Check for WiFi info in the profile
+//             NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
+//             NSDictionary *wifiInfo = [NSDictionary dictionaryWithContentsOfFile:wifiInfoPath];
+//             if (wifiInfo && wifiInfo[@"ssid"] && wifiInfo[@"bssid"]) {
+//                 NSString *formattedValue = [NSString stringWithFormat:@"%@ (%@)", wifiInfo[@"ssid"], wifiInfo[@"bssid"]];
+//                 PXLog(@"Found WiFi info in wifi_info.plist: %@", formattedValue);
+//                 return formattedValue;
+//             }
+//         }
+//         else if ([type isEqualToString:@"StorageSystem"]) {
+//             NSString *storagePath = [identityDir stringByAppendingPathComponent:@"storage.plist"];
+//             NSDictionary *storageDict = [NSDictionary dictionaryWithContentsOfFile:storagePath];
+//             if (storageDict && storageDict[@"TotalStorage"] && storageDict[@"FreeStorage"]) {
+//                 NSString *formattedStorage = [NSString stringWithFormat:@"Total: %@ GB, Free: %@ GB", 
+//                                              storageDict[@"TotalStorage"], 
+//                                              storageDict[@"FreeStorage"]];
+//                 PXLog(@"Found Storage info in storage.plist: %@", formattedStorage);
+//                 return formattedStorage;
+//             }
+//         }
+//         else if ([type isEqualToString:@"BatteryLevel"] || [type isEqualToString:@"LowPowerMode"]) {
+//             NSString *batteryPath = [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
+//             NSDictionary *batteryDict = [NSDictionary dictionaryWithContentsOfFile:batteryPath];
+//             if (batteryDict && batteryDict[type]) {
+//                 PXLog(@"Found %@ in battery_info.plist: %@", type, batteryDict[type]);
+//                 return batteryDict[type];
+//             }
+//         }
+//         else if ([type isEqualToString:@"SystemUptime"]) {
+//             NSString *profilePath = [self profileIdentityPath];
+// NSString *uptimePath = [profilePath stringByAppendingPathComponent:@"system_uptime.plist"];
+// NSDictionary *uptimeDict = [NSDictionary dictionaryWithContentsOfFile:uptimePath];
+// if (uptimeDict && uptimeDict[@"value"]) {
+//     NSTimeInterval uptime = [uptimeDict[@"value"] doubleValue];
+//     if (uptime > 0) {
+//         NSString *formattedUptime = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
+//         PXLog(@"[WeaponX] 📄 Showing SystemUptime from system_uptime.plist: %@", formattedUptime);
+//         return formattedUptime;
+//     }
+// }
+// return @"Not Set";
+//         }
+//         else if ([type isEqualToString:@"BootTime"]) {
+//             NSString *profilePath = [self profileIdentityPath];
+// NSString *bootTimePath = [profilePath stringByAppendingPathComponent:@"boot_time.plist"];
+// NSDictionary *bootTimeDict = [NSDictionary dictionaryWithContentsOfFile:bootTimePath];
+// if (bootTimeDict && bootTimeDict[@"value"]) {
+//     NSDate *bootTime = bootTimeDict[@"value"];
+//     if ([bootTime isKindOfClass:[NSDate class]]) {
+//         NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+//         formatter.dateStyle = NSDateFormatterMediumStyle;
+//         formatter.timeStyle = NSDateFormatterMediumStyle;
+//         NSString *formattedBootTime = [formatter stringFromDate:bootTime];
+//         PXLog(@"[WeaponX] 📄 Showing BootTime from boot_time.plist: %@", formattedBootTime);
+//         return formattedBootTime;
+//     }
+// }
+// return @"Not Set";
+//         }
+        
+//         PXLog(@"No %@ value found in profile-specific files", type);
+//     } else {
+//         PXLog(@"Could not access identity directory for profile");
+//     }
         
 
-
-        if ([type isEqualToString:@"IMEI"]) {
-            NSString *imeiPath = [identityDir stringByAppendingPathComponent:@"imei.plist"];
-            NSDictionary *imeiDict = [NSDictionary dictionaryWithContentsOfFile:imeiPath];
-            if (imeiDict && imeiDict[@"value"]) {
-                PXLog(@"Found IMEI in imei.plist: %@", imeiDict[@"value"]);
-                return imeiDict[@"value"];
-            }
-        }
-        else if ([type isEqualToString:@"MEID"]) {
-            NSString *meidPath = [identityDir stringByAppendingPathComponent:@"meid.plist"];
-            NSDictionary *meidDict = [NSDictionary dictionaryWithContentsOfFile:meidPath];
-            if (meidDict && meidDict[@"value"]) {
-                PXLog(@"Found MEID in meid.plist: %@", meidDict[@"value"]);
-                return meidDict[@"value"];
-            }
-        }
-
-        else if ([type isEqualToString:@"WiFi"]) {
-            // Check for WiFi info in the profile
-            NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
-            NSDictionary *wifiInfo = [NSDictionary dictionaryWithContentsOfFile:wifiInfoPath];
-            if (wifiInfo && wifiInfo[@"ssid"] && wifiInfo[@"bssid"]) {
-                NSString *formattedValue = [NSString stringWithFormat:@"%@ (%@)", wifiInfo[@"ssid"], wifiInfo[@"bssid"]];
-                PXLog(@"Found WiFi info in wifi_info.plist: %@", formattedValue);
-                return formattedValue;
-            }
-        }
-        else if ([type isEqualToString:@"StorageSystem"]) {
-            NSString *storagePath = [identityDir stringByAppendingPathComponent:@"storage.plist"];
-            NSDictionary *storageDict = [NSDictionary dictionaryWithContentsOfFile:storagePath];
-            if (storageDict && storageDict[@"TotalStorage"] && storageDict[@"FreeStorage"]) {
-                NSString *formattedStorage = [NSString stringWithFormat:@"Total: %@ GB, Free: %@ GB", 
-                                             storageDict[@"TotalStorage"], 
-                                             storageDict[@"FreeStorage"]];
-                PXLog(@"Found Storage info in storage.plist: %@", formattedStorage);
-                return formattedStorage;
-            }
-        }
-        else if ([type isEqualToString:@"BatteryLevel"] || [type isEqualToString:@"LowPowerMode"]) {
-            NSString *batteryPath = [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
-            NSDictionary *batteryDict = [NSDictionary dictionaryWithContentsOfFile:batteryPath];
-            if (batteryDict && batteryDict[type]) {
-                PXLog(@"Found %@ in battery_info.plist: %@", type, batteryDict[type]);
-                return batteryDict[type];
-            }
-        }
-        // else if ([type isEqualToString:@"SystemUptime"]) {
-        //     NSString *profilePath = [self profileIdentityPath];
-        //     NSString *uptimePath = [profilePath stringByAppendingPathComponent:@"system_uptime.plist"];
-        //     NSDictionary *uptimeDict = [NSDictionary dictionaryWithContentsOfFile:uptimePath];
-        //     if (uptimeDict && uptimeDict[@"value"]) {
-        //         NSTimeInterval uptime = [uptimeDict[@"value"] doubleValue];
-        //         if (uptime > 0) {
-        //             NSString *formattedUptime = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
-        //             PXLog(@"[WeaponX] 📄 Showing SystemUptime from system_uptime.plist: %@", formattedUptime);
-        //             return formattedUptime;
-        //         }
-        //     }
-        //     return @"Not Set";
-        // }
-        // else if ([type isEqualToString:@"BootTime"]) {
-        //     NSString *profilePath = [self profileIdentityPath];
-        //     NSString *bootTimePath = [profilePath stringByAppendingPathComponent:@"boot_time.plist"];
-        //     NSDictionary *bootTimeDict = [NSDictionary dictionaryWithContentsOfFile:bootTimePath];
-        //     if (bootTimeDict && bootTimeDict[@"value"]) {
-        //         NSDate *bootTime = bootTimeDict[@"value"];
-        //         if ([bootTime isKindOfClass:[NSDate class]]) {
-        //             NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-        //             formatter.dateStyle = NSDateFormatterMediumStyle;
-        //             formatter.timeStyle = NSDateFormatterMediumStyle;
-        //             NSString *formattedBootTime = [formatter stringFromDate:bootTime];
-        //             PXLog(@"[WeaponX] 📄 Showing BootTime from boot_time.plist: %@", formattedBootTime);
-        //             return formattedBootTime;
-        //         }
-        //     }
-        //     return @"Not Set";
-        // }
-            
-        PXLog(@"No %@ value found in profile-specific files", type);
-    } else {
-        PXLog(@"Could not access identity directory for profile");
+    if ([type isEqualToString:@"SystemUptime"]) {
+        NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptime];
+        NSString *result = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
+        return result;
+    }
+    else if ([type isEqualToString:@"BootTime"]) {
+        NSDate *bootTime = [[UptimeManager sharedManager] currentBootTime];
+        NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+        formatter.dateStyle = NSDateFormatterMediumStyle;
+        formatter.timeStyle = NSDateFormatterMediumStyle;
+        NSString *result = [formatter stringFromDate:bootTime];
+        return result;
     }
     
+    NSString *value = _deviceData[type];
+
+    if (value) {
+        PXLog(@"Found %@ value in device_ids.plist: %@", type, value);
+        return value;
+    }
+    
+
+
+    if ([type isEqualToString:@"WiFi"]) {
+        // Check for WiFi info in the profile
+        NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
+        NSDictionary *wifiInfo = [NSDictionary dictionaryWithContentsOfFile:wifiInfoPath];
+        if (wifiInfo && wifiInfo[@"ssid"] && wifiInfo[@"bssid"]) {
+            NSString *formattedValue = [NSString stringWithFormat:@"%@ (%@)", wifiInfo[@"ssid"], wifiInfo[@"bssid"]];
+            PXLog(@"Found WiFi info in wifi_info.plist: %@", formattedValue);
+            return formattedValue;
+        }
+    }
+    else if ([type isEqualToString:@"StorageSystem"]) {
+        NSString *storagePath = [identityDir stringByAppendingPathComponent:@"storage.plist"];
+        NSDictionary *storageDict = [NSDictionary dictionaryWithContentsOfFile:storagePath];
+        if (storageDict && storageDict[@"TotalStorage"] && storageDict[@"FreeStorage"]) {
+            NSString *formattedStorage = [NSString stringWithFormat:@"Total: %@ GB, Free: %@ GB", 
+                                            storageDict[@"TotalStorage"], 
+                                            storageDict[@"FreeStorage"]];
+            PXLog(@"Found Storage info in storage.plist: %@", formattedStorage);
+            return formattedStorage;
+        }
+    }
+    else if ([type isEqualToString:@"BatteryLevel"] || [type isEqualToString:@"LowPowerMode"]) {
+        NSString *batteryPath = [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
+        NSDictionary *batteryDict = [NSDictionary dictionaryWithContentsOfFile:batteryPath];
+        if (batteryDict && batteryDict[type]) {
+            PXLog(@"Found %@ in battery_info.plist: %@", type, batteryDict[type]);
+            return batteryDict[type];
+        }
+    }
+
+        
+    PXLog(@"No %@ value found in profile-specific files", type);
+    
+
     // Special handling for IOS Version which returns a composite string
     if ([type isEqualToString:@"IOSVersion"]) {
         // First try to get from profile-specific storage
@@ -1958,6 +2024,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     }
     int checkDigit = (10 - (sum % 10)) % 10;
     [imei appendFormat:@"%d", checkDigit];
+    [self setValueForType:imei forType:@"IMEI"];
     return imei;
 }
 
@@ -1970,6 +2037,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     for (int i = 0; i < 8; i++) {
         [meid appendFormat:@"%X", arc4random_uniform(16)];
     }
+    [self setValueForType:meid forType:@"MEID"];
     return meid;
 }
 
@@ -2169,7 +2237,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (NSString *)toggleDeviceTheme {
     // Get current theme
-    NSString *currentTheme = [self currentValueForIdentifier:@"DeviceTheme"];
+    NSString *currentTheme = [self getValueForType:@"DeviceTheme"];
     
     // Toggle between Light and Dark
     NSString *newTheme;

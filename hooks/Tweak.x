@@ -171,7 +171,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
              [propertyString isEqualToString:@"MobileEquipmentIdentifier"]) {
         
         if ([manager isIdentifierEnabled:@"IMEI"]) {
-            NSString *spoofedIMEI = [manager currentValueForIdentifier:@"IMEI"];
+            NSString *spoofedIMEI = [manager getValueForType:@"IMEI"];
             if (spoofedIMEI) {
                 PXLog(@"Spoofing IMEI with: %@", spoofedIMEI);
                 return spoofedIMEI;
@@ -1878,33 +1878,17 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
             }
         }
         
-        // WiFi/Ethernet MAC Address
-        if (([keyString isEqualToString:@"IOMACAddress"] || [keyString isEqualToString:@"WiFiAddress"] || 
-             [keyString isEqualToString:@"BSDName"]) && [manager isIdentifierEnabled:@"WiFiAddress"]) {
-            NSString *spoofedMAC = [manager currentValueForIdentifier:@"WiFiAddress"];
-            if (spoofedMAC) {
-                PXLog(@"Spoofing MAC address identifier %@ with: %@", keyString, spoofedMAC);
-                return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)spoofedMAC);
-            }
-        }
         
         // IMEI for cellular devices
         if ([keyString isEqualToString:@"kIMEIKey"] && [manager isIdentifierEnabled:@"IMEI"]) {
-            NSString *spoofedIMEI = [manager currentValueForIdentifier:@"IMEI"];
+            NSString *spoofedIMEI = [manager getValueForType:@"IMEI"];
             if (spoofedIMEI) {
                 PXLog(@"Spoofing IMEI with: %@", spoofedIMEI);
                 return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)spoofedIMEI);
             }
         }
         
-        // Hardware UUID - relevant for iOS 15+
-        if ([keyString isEqualToString:@"IOPlatformUUID"] && [manager isIdentifierEnabled:@"HardwareUUID"]) {
-            NSString *spoofedUUID = [manager currentValueForIdentifier:@"HardwareUUID"];
-            if (spoofedUUID) {
-                PXLog(@"Spoofing IOPlatformUUID with: %@", spoofedUUID);
-                return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)spoofedUUID);
-            }
-        }
+
     } @catch (NSException *exception) {
         PXLog(@"Exception in IORegistryEntryCreateCFProperty hook: %@", exception);
     }
@@ -1944,7 +1928,7 @@ static char* hook_GSSystemGetSerialNo(void) {
     }
     
     if ([manager isIdentifierEnabled:@"SerialNumber"]) {
-        NSString *spoofedSerial = [manager currentValueForIdentifier:@"SerialNumber"];
+        NSString *spoofedSerial = [manager getValueForType:@"SerialNumber"];
         if (spoofedSerial) {
             PXLog(@"Spoofing GSSystemGetSerialNo with: %@", spoofedSerial);
             
