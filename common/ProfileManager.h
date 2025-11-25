@@ -49,7 +49,8 @@ NS_ASSUME_NONNULL_BEGIN
 
 // Profile ID generation
 - (NSString *)generateProfileID;
-
+- (NSString *)profileIdentityPath;
+- (NSString *)getActiveProfileId;
 @end
 
 NS_ASSUME_NONNULL_END 

@@ -44,11 +44,9 @@
 
 - (void)loadFromCurrentProfile {
     // Get active profile ID
-    NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-    NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
-    
-    if (currentProfileInfo && currentProfileInfo[@"ProfileId"]) {
-        NSString *profileId = currentProfileInfo[@"ProfileId"];
+
+    NSString *profileId = [[ProfileManager sharedManager] getActiveProfileId];
+    if (profileId) {
         [self loadFromProfile:profileId];
     } else {
         // Default values if no profile
@@ -238,11 +236,9 @@
 
 - (void)saveToCurrentProfile {
     // Get active profile ID
-    NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-    NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
-    
-    if (currentProfileInfo && currentProfileInfo[@"ProfileId"]) {
-        NSString *profileId = currentProfileInfo[@"ProfileId"];
+    NSString *profileId = [[ProfileManager sharedManager] getActiveProfileId];
+
+    if (profileId) {
         [self saveToProfile:profileId];
     }
 }

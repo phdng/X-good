@@ -5,6 +5,7 @@
 #import "IdentifierManager.h"
 #import "UserDefaultsUUIDManager.h"
 #import <ellekit/ellekit.h>
+#import "ProfileManager.h"
 
 // Function declarations
 static NSString *getSpoofedUserDefaultsUUID();
@@ -75,48 +76,26 @@ static NSString *getSpoofedUserDefaultsUUID() {
         return uuid;
     }
     
-    // If UserDefaultsUUIDManager failed, read directly from active profile
-    NSString *activeProfileId = nil;
+
+    // Build path to the profile's identity directory
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     
-    // Get active profile ID from central profile info
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-    if (centralInfo && centralInfo[@"ProfileId"]) {
-        activeProfileId = centralInfo[@"ProfileId"];
-    } else {
-        // Try fallback location for profile ID
-        NSString *fallbackPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-        NSDictionary *fallbackInfo = [NSDictionary dictionaryWithContentsOfFile:fallbackPath];
-        if (fallbackInfo && fallbackInfo[@"ProfileId"]) {
-            activeProfileId = fallbackInfo[@"ProfileId"];
-        }
+    // Read from device_ids.plist first (combined identifiers file)
+    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+    NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+    if (deviceIds && deviceIds[@"UserDefaultsUUID"]) {
+        PXLog(@"[WeaponX] 🔍 Found UserDefaults UUID in device_ids.plist: %@", deviceIds[@"UserDefaultsUUID"]);
+        return deviceIds[@"UserDefaultsUUID"];
     }
     
-    if (activeProfileId) {
-        // Build path to the profile's identity directory
-        NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", activeProfileId];
-        NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
-        
-        // Read from device_ids.plist first (combined identifiers file)
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-        if (deviceIds && deviceIds[@"UserDefaultsUUID"]) {
-            PXLog(@"[WeaponX] 🔍 Found UserDefaults UUID in device_ids.plist: %@", deviceIds[@"UserDefaultsUUID"]);
-            return deviceIds[@"UserDefaultsUUID"];
-        }
-        
-        // Try specific userdefaults_uuid.plist as fallback
-        NSString *userDefaultsUUIDPath = [identityDir stringByAppendingPathComponent:@"userdefaults_uuid.plist"];
-        NSDictionary *userDefaultsInfo = [NSDictionary dictionaryWithContentsOfFile:userDefaultsUUIDPath];
-        if (userDefaultsInfo && userDefaultsInfo[@"value"]) {
-            PXLog(@"[WeaponX] 🔍 Found UserDefaults UUID in userdefaults_uuid.plist: %@", userDefaultsInfo[@"value"]);
-            return userDefaultsInfo[@"value"];
-        }
-        
-        PXLog(@"[WeaponX] ⚠️ Could not find UserDefaults UUID in profile %@", activeProfileId);
-    } else {
-        PXLog(@"[WeaponX] ⚠️ Could not determine active profile ID");
+    // Try specific userdefaults_uuid.plist as fallback
+    NSString *userDefaultsUUIDPath = [identityDir stringByAppendingPathComponent:@"userdefaults_uuid.plist"];
+    NSDictionary *userDefaultsInfo = [NSDictionary dictionaryWithContentsOfFile:userDefaultsUUIDPath];
+    if (userDefaultsInfo && userDefaultsInfo[@"value"]) {
+        PXLog(@"[WeaponX] 🔍 Found UserDefaults UUID in userdefaults_uuid.plist: %@", userDefaultsInfo[@"value"]);
+        return userDefaultsInfo[@"value"];
     }
+       
     
     // If all else fails, use a persistent fallback UUID
     NSString *fallbackUUIDPath = @"/var/jb/var/mobile/Library/WeaponX/fallback_userdefaults_uuid.plist";

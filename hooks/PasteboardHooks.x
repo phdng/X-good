@@ -4,7 +4,7 @@
 #import "ProjectXLogging.h"
 #import "PasteboardUUIDManager.h"
 #import <ellekit/ellekit.h>
-
+#import "ProfileManager.h"
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -224,22 +224,8 @@ static NSString *getSpoofedPasteboardUUID() {
     
     // Try to read directly from plist files
     // First try to get the profile directory from environment or fallback
-    NSString *identityDir = nil;
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     
-    // Try to determine profile directory from common paths
-
-    NSString *profileBasePath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if ([fileManager fileExistsAtPath:profileBasePath]) {
-        // Get current profile ID
-        NSString *currentProfileInfoPath = [profileBasePath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
-        NSString *profileId = currentProfileInfo[@"ProfileId"];
-        
-        if (profileId) {
-            identityDir = [[profileBasePath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
-        }
-    }
 
     if (identityDir) {
         // First try the combined device_ids.plist

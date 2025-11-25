@@ -20,6 +20,7 @@
 #import "AppInstallUUIDManager.h"
 #import "AppContainerUUIDManager.h"
 #import <Security/Security.h>
+#import "ProfileManager.h"
 
 @interface LSApplicationWorkspace
 + (id)defaultWorkspace;
@@ -32,12 +33,6 @@
 @property(readonly) NSString *localizedName;
 @property(readonly) NSString *shortVersionString;
 @property(readonly) NSString *bundleVersion;
-@end
-
-// Forward declare what we need from Profile
-@interface Profile : NSObject
-@property (nonatomic, strong, readonly) NSString *profileId;
-@property (nonatomic, strong) NSString *name;
 @end
 
 @interface IdentifierManager ()
@@ -81,7 +76,7 @@
     NSString *hwModel = [deviceManager hwModelForModel:deviceModel];
     
     // Save to profile-specific path
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (identityDir) {
         // Create a full dictionary with all device specs
         NSDictionary *modelDict = @{
@@ -135,7 +130,7 @@
         self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:2003 userInfo:@{NSLocalizedDescriptionKey: @"Invalid Device Model"}];
         return NO;
     }
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     BOOL success = NO;
     
     // Get all device specifications
@@ -227,7 +222,7 @@
         _spoofCache = [NSMutableDictionary dictionary];
     }
     // 读取配置文件
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) {
         PXLog(@"[WeaponX] ❌ Failed to get profile identity path");
         return NO;
@@ -243,7 +238,7 @@
 }
 - (BOOL)setValueForType: (NSString *) value forType:(NSString *)type{
     _deviceData[type] = value;
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) {
         PXLog(@"[WeaponX] ❌ Failed to get profile identity path");
         return NO;
@@ -258,84 +253,6 @@
 }
 #pragma mark - Profile Integration
 
-- (NSString *)getActiveProfileId {
-    // First check the primary profile info file
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-    
-    NSString *profileId = centralInfo[@"ProfileId"];
-    if (!profileId) {
-        // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-        NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
-        profileId = activeInfo[@"ProfileId"];
-        
-        NSLog(@"[WeaponX] 🔍 CRITICAL CHECK - Primary profile info not found, checked backup: %@", profileId ? @"✅ found" : @"❌ not found");
-    }
-    
-    if (!profileId) {
-        NSLog(@"[WeaponX] Warning: No active profile ID found, using default");
-        // Try to find any profile directory as a fallback
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        NSError *error = nil;
-        NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
-        
-        if (!error && contents.count > 0) {
-            // Use the first directory found as a fallback
-            for (NSString *item in contents) {
-                BOOL isDir = NO;
-                NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
-                [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
-                
-                if (isDir) {
-                    profileId = item;
-                    NSLog(@"[WeaponX] Using fallback profile ID: %@", profileId);
-                    break;
-                }
-            }
-        }
-        
-        // If we still don't have a profile ID, give up
-        if (!profileId) {
-            NSLog(@"[WeaponX] Error: Could not find any profile");
-            return nil;
-        }
-    }
-    
-    return profileId;
-}
-
-- (NSString *)profileIdentityPath {
-    // Get current profile ID without directly using ProfileManager
-    NSString *profileId = [self getActiveProfileId];
-    if (!profileId) {
-        NSLog(@"[WeaponX] Error: No active profile when getting identity path");
-        return nil;
-    }
-    
-    // Build the path to this profile's identity directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
-    
-    // Create the directory if it doesn't exist
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:identityDir]) {
-        NSDictionary *attributes = @{NSFilePosixPermissions: @0755,
-                                    NSFileOwnerAccountName: @"mobile"};
-        
-        NSError *dirError = nil;
-        if (![fileManager createDirectoryAtPath:identityDir 
-                    withIntermediateDirectories:YES 
-                                     attributes:attributes
-                                          error:&dirError]) {
-            NSLog(@"[WeaponX] Error creating identity directory: %@", dirError);
-            return nil;
-        }
-    }
-    
-    return identityDir;
-}
 
 #pragma mark - Identifier Management
 
@@ -393,7 +310,7 @@
         self.error = [[IOSVersionInfo sharedManager] lastError];
         return nil;
     }
-    [self setValueForType:[NSString stringWithFormat:@"%@ (%@)", versionInfo[@"version"], versionInfo[@"build"]] forType:@"IOSVersion"];    
+    [self setValueForType: versionInfo[@"version"] forType:@"IOSVersion"];    
     [self setValueForType:versionInfo[@"build"] forType:@"IOSBuild"];    
 
     return versionInfo;
@@ -879,6 +796,7 @@
       @"build": build
     };
 }
+// 页面展示用的 里面带格式化
 - (NSString *)currentValueForIdentifier:(NSString *)type {
     NSLog([@"[debug]" stringByAppendingString:type]);
     // Special hardcoded serial number for Filza and ADManager
@@ -896,7 +814,7 @@
     // }
     
     // First try to get from profile-specific storage
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     //   NSString *identityDir = [self profileIdentityPath];
 //     if (identityDir) {
 //         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
@@ -1012,6 +930,12 @@
         formatter.timeStyle = NSDateFormatterMediumStyle;
         NSString *result = [formatter stringFromDate:bootTime];
         return result;
+    }else if([type isEqualToString:@"IOSVersion"]){
+        NSDictionary *currentVersion = [self currentIOSVersionInfo];
+        if (currentVersion && currentVersion[@"version"] && currentVersion[@"build"]) {
+            NSString *formattedVersion = [NSString stringWithFormat:@"%@ (%@)", currentVersion[@"version"], currentVersion[@"build"]];
+            return formattedVersion;
+        }
     }
     
     NSString *value = _deviceData[type];
@@ -1060,7 +984,7 @@
     // Special handling for IOS Version which returns a composite string
     if ([type isEqualToString:@"IOSVersion"]) {
         // First try to get from profile-specific storage
-        NSString *identityDir = [self profileIdentityPath];
+        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
         if (identityDir) {
             // First try to get from device_ids.plist
             NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
@@ -2101,7 +2025,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 #pragma mark - Device Model Specifications
 
 - (NSDictionary *)getDeviceModelSpecifications {
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) return nil;
     
     // First, check the device_model.plist file for detailed specifications
@@ -2260,7 +2184,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         return NO;
     }
     
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     BOOL success = NO;
     
     if (identityDir) {

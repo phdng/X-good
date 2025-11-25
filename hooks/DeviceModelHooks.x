@@ -63,10 +63,8 @@ static NSString* getSpoofedDeviceModel() {
         // METHOD 1: Try direct access from profile plist for highest reliability
         // First get current profile ID
         NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        
-        NSString *profileId = centralInfo[@"ProfileId"];
+
+        NSString *profileId = [[ProfileManager sharedManager] getActiveProfileId];
         if (profileId) {
             // Get the model value from settings.plist in the profile directory
             NSString *settingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
@@ -127,24 +125,18 @@ static NSString* getSpoofedBoardID() {
             return nil;
         }
         
-        // METHOD 1: Try to get from device_ids.plist directly
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        NSString *profileId = centralInfo[@"ProfileId"];
+ 
+        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
+        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
         
-        if (profileId) {
-            NSString *identityDir = [profilesPath stringByAppendingPathComponent:profileId];
-            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-            
-            NSString *boardID = deviceIds[@"BoardID"];
-            if (boardID.length > 0) {
-                PXLog(@"[model] Found board ID %@ directly in device_ids.plist", boardID);
-                return boardID;
-            }
+        NSString *boardID = deviceIds[@"BoardID"];
+        if (boardID.length > 0) {
+            PXLog(@"[model] Found board ID %@ directly in device_ids.plist", boardID);
+            return boardID;
         }
-        
+    
+    
         // METHOD 2: Use DeviceModelManager to look up the board ID for this model
         if (NSClassFromString(@"DeviceModelManager")) {
             DeviceModelManager *deviceManager = [NSClassFromString(@"DeviceModelManager") sharedManager];
@@ -175,23 +167,17 @@ static NSString* getSpoofedHWModel() {
             return nil;
         }
         
-        // METHOD 1: Try to get from device_ids.plist directly
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        NSString *profileId = centralInfo[@"ProfileId"];
+  
+        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
+        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
         
-        if (profileId) {
-            NSString *identityDir = [profilesPath stringByAppendingPathComponent:profileId];
-            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-            
-            NSString *hwModel = deviceIds[@"HwModel"];
-            if (hwModel.length > 0) {
-                PXLog(@"[model] Found hw.model %@ directly in device_ids.plist", hwModel);
-                return hwModel;
-            }
+        NSString *hwModel = deviceIds[@"HwModel"];
+        if (hwModel.length > 0) {
+            PXLog(@"[model] Found hw.model %@ directly in device_ids.plist", hwModel);
+            return hwModel;
         }
+        
         
         // METHOD 2: Use DeviceModelManager to look up the hwModel for this device
         if (NSClassFromString(@"DeviceModelManager")) {

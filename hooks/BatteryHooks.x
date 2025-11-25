@@ -4,6 +4,7 @@
 #import <ellekit/ellekit.h>
 #import "BatteryManager.h"
 #import "IdentifierManager.h"
+#import "ProfileManager.h"
 
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -160,16 +161,7 @@ static BOOL isBatterySpoofingEnabled(void) {
 static NSString *getProfileBatteryLevel(void) {
     @try {
         // Get current profile ID
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-        NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
-        if (!currentProfileInfo) {
-            return nil;
-        }
-        NSString *profileId = currentProfileInfo[@"ProfileId"];
-        if (!profileId) {
-            return nil;
-        }
-        NSString *identityDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
         NSString *batteryInfoPath = [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
         NSDictionary *batteryInfo = [NSDictionary dictionaryWithContentsOfFile:batteryInfoPath];
         if (!batteryInfo) {

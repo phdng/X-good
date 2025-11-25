@@ -2951,17 +2951,6 @@
 }
 
 - (void)generateAllButtonTapped:(UIButton *)sender {
-    // Check if user has an active plan
-    BOOL isRestricted = [[NSUserDefaults standardUserDefaults] boolForKey:@"WeaponXRestrictedAccess"];
-    
-    // Also check associated object as a backup
-    if (!isRestricted) {
-        UIViewController *topVC = [self findTopViewController];
-        NSNumber *restrictedAccess = objc_getAssociatedObject(topVC, "WeaponXRestrictedAccess");
-        isRestricted = restrictedAccess ? [restrictedAccess boolValue] : NO;
-    }
-    
-    
     // Disable button temporarily
     sender.enabled = NO;
     
@@ -2989,8 +2978,6 @@
         NSString *newUserDefaultsUUID = [self.manager currentValueForIdentifier:@"UserDefaultsUUID"];
         NSString *newAppGroupUUID = [self.manager currentValueForIdentifier:@"AppGroupUUID"];
         NSString *newDeviceModel = [self.manager currentValueForIdentifier:@"DeviceModel"];
-        [self.manager generateSystemUptime];
-        [self.manager generateBootTime];
         NSString *newSystemUptime = [self.manager currentValueForIdentifier:@"SystemUptime"];
         NSString *newBootTime = [self.manager currentValueForIdentifier:@"BootTime"];
         NSString *newCoreDataUUID = [self.manager generateCoreDataUUID];

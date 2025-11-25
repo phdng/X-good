@@ -1,5 +1,5 @@
 #import "AppVersionSpoofingViewController.h"
-
+#import "ProfileManager.h"
 // Class extension for private method declaration
 @interface AppVersionSpoofingViewController ()
 // All private properties
@@ -230,36 +230,7 @@
     if (!bundleID) return nil;
     
     // Get the active profile ID
-    NSString *profileId = nil;
-    
-    // Try to get from IdentifierManager if available
-    Class idManagerClass = NSClassFromString(@"IdentifierManager");
-    if (idManagerClass && [idManagerClass respondsToSelector:@selector(sharedManager)]) {
-        id idManager = [idManagerClass performSelector:@selector(sharedManager)];
-        if ([idManager respondsToSelector:@selector(getActiveProfileId)]) {
-            profileId = [idManager performSelector:@selector(getActiveProfileId)];
-        }
-    }
-    
-    // Fallback if no profile ID found
-    if (!profileId) {
-        // First check the primary profile info file
-        NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        
-        profileId = centralInfo[@"ProfileId"];
-        if (!profileId) {
-            // If not found, check the legacy active_profile_info.plist
-            NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-            NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
-            profileId = activeInfo[@"ProfileId"];
-        }
-        
-        if (!profileId) {
-            PXLog(@"[AppVersionSpoofing] No profile ID found, using default shared storage");
-            return nil;
-        }
-    }
+    NSString *profileId = [[ProfileManager sharedManager] getActiveProfileId];
     
     // Build the path to this profile's app versions directory
     NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];

@@ -3,9 +3,6 @@
 #import "ProjectX.h"
 
 // Declare this in a category to avoid duplicate interface
-@interface IdentifierManager (ProfilePath)
-- (NSString *)profileIdentityPath;
-@end
 
 @interface IdentifierManager (AppManagement)
 

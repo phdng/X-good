@@ -11,6 +11,7 @@
 #import <ifaddrs.h>
 #import <arpa/inet.h>
 #import "NetworkManager.h"
+#import "ProfileManager.h"
 
 // Constants for connection types
 typedef NS_ENUM(NSInteger, NetworkConnectionType) {
@@ -119,57 +120,10 @@ static NSString *getCurrentISOCountryCode() {
     return isoCode;
 }
 
-// Get the path to the current profile's identity directory
-static NSString *getProfileIdentityPath() {
-    // Get current profile ID
-    NSString *profileId = nil;
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-    
-    profileId = centralInfo[@"ProfileId"];
-    if (!profileId) {
-        // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-        NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
-        profileId = activeInfo[@"ProfileId"];
-    }
-    
-    if (!profileId) {
-        // Fallback approach: try to find any profile directory
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        NSError *error = nil;
-        NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
-        
-        if (!error && contents.count > 0) {
-            // Use the first directory found as a fallback
-            for (NSString *item in contents) {
-                BOOL isDir = NO;
-                NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
-                [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
-                
-                if (isDir) {
-                    profileId = item;
-                    break;
-                }
-            }
-        }
-        
-        if (!profileId) {
-            return nil;
-        }
-    }
-    
-    // Build the path to this profile's identity directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
-    
-    return identityDir;
-}
 
 // Get the local IP address from the current profile
 static NSString *getProfileLocalIPAddress() {
-    NSString *identityDir = getProfileIdentityPath();
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) {
         return @"192.168.1.1"; // Default fallback
     }
@@ -428,7 +382,7 @@ static NSDictionary *getCarrierDetailsFromProfile() {
     NSString *mobileNetworkCode = kFakeMobileNetworkCode;
     
     // Get the profile identity path
-    NSString *identityDir = getProfileIdentityPath();
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (identityDir) {
         // Build path to carrier_details.plist
         NSString *carrierDetailsPath = [identityDir stringByAppendingPathComponent:@"carrier_details.plist"];

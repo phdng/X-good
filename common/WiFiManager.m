@@ -56,49 +56,9 @@
     }];
 }
 
-- (NSString *)getCurrentProfileID {
-    // First try via ProfileManager
-    id profileManager = NSClassFromString(@"ProfileManager");
-    if (profileManager) {
-        id sharedManager = [profileManager sharedManager];
-        if ([sharedManager respondsToSelector:@selector(currentProfile)]) {
-            id currentProfile = [sharedManager currentProfile];
-            if (currentProfile && [currentProfile respondsToSelector:@selector(profileId)]) {
-                NSString *profileId = [currentProfile profileId];
-                if (profileId) {
-                    return profileId;
-                }
-            }
-        }
-    }
-    
-    // Fallback to direct file read if ProfileManager isn't available
-    NSString *currentProfileInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-    NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
-    
-    if (profileInfo && profileInfo[@"ProfileId"]) {
-        id profileIdValue = profileInfo[@"ProfileId"];
-        NSString *profileId = nil;
-        
-        // Handle both NSNumber and NSString types properly
-        if ([profileIdValue isKindOfClass:[NSNumber class]]) {
-            profileId = [profileIdValue stringValue];
-        } else if ([profileIdValue isKindOfClass:[NSString class]]) {
-            profileId = profileIdValue;
-        } else {
-            profileId = [profileIdValue description];
-        }
-        
-        PXLog(@"[WiFiManager] Got current profile ID from plist: %@", profileId);
-        return profileId;
-    }
-    
-    // If all else fails, use default
-    return @"default";
-}
 
 - (void)loadWiFiInfoFromCurrentProfile {
-    NSString *profileId = [self getCurrentProfileID];
+    NSString *profileId = [[ProfileManager sharedManager] getActiveProfileId];
     if (!profileId) {
         PXLog(@"[WiFiManager] No active profile, cannot load WiFi info");
         return;
@@ -128,17 +88,13 @@
 }
 
 - (void)saveWiFiInfoToCurrentProfile {
-    NSString *profileId = [self getCurrentProfileID];
-    if (!profileId) {
-        PXLog(@"[WiFiManager] No active profile, cannot save WiFi info");
-        return;
-    }
+
     
-    self.currentProfileId = profileId;
+    // self.currentProfileId = profileId;
     
     // Build path to WiFi info file in profile directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
+    // NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
     
     // Ensure directory exists
@@ -161,8 +117,8 @@
     deviceIds[@"BSSID"] = self.wifiInfo[@"bssid"];
     [deviceIds writeToFile:deviceIdsPath atomically:YES];
     
-    PXLog(@"[WiFiManager] Saved WiFi info to profile %@: SSID=%@, BSSID=%@", 
-          profileId, self.wifiInfo[@"ssid"], self.wifiInfo[@"bssid"]);
+    PXLog(@"[WiFiManager] Saved WiFi info to  SSID=%@, BSSID=%@", 
+           self.wifiInfo[@"ssid"], self.wifiInfo[@"bssid"]);
 }
 
 #pragma mark - Core Methods
@@ -519,7 +475,7 @@
 
 - (NSDictionary *)currentWiFiInfo {
     // Always check the current profile ID first
-    NSString *currentId = [self getCurrentProfileID];
+    NSString *currentId = [[ProfileManager sharedManager] getActiveProfileId];
     if (currentId && (self.currentProfileId == nil || ![self.currentProfileId isEqualToString:currentId])) {
         PXLog(@"[WiFiManager] Profile change detected (%@ → %@), reloading WiFi info", 
               self.currentProfileId ?: @"nil", currentId);

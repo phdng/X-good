@@ -19,3 +19,7 @@ NXGetLocalArchInfo 获取CPU架构
 
 每次打开ios版本号随机没固定住
 safari清理/var/mobile/Library/Safari 不然打开会跳出之前的东西
+createProfileZeroImmediately 自动生成0号备份
+generate all按钮按下会生成备份 然后选中该备份
+
+hooks中存在大量自行读取调用[[ProfileManager sharedManager] profileIdentityPath] 然后读文件换为ident读取

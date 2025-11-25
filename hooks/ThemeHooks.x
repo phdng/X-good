@@ -3,7 +3,7 @@
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
 #import <ellekit/ellekit.h>
-
+#import "ProfileManager.h"
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -202,24 +202,17 @@ static WeaponXThemeStyle getThemeStyleFromProfile(void) {
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if ([fileManager fileExistsAtPath:profileBasePath]) {
         // Get current profile ID
-        NSString *currentProfileInfoPath = [profileBasePath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
-        NSString *profileId = currentProfileInfo[@"ProfileId"];
-        
-        if (profileId) {
+
             // Try to read theme from device_ids.plist
-            NSString *identityDir = [[profileBasePath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
-            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-            themeValue = deviceIds[@"DeviceTheme"];
+        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
+        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+        themeValue = deviceIds[@"DeviceTheme"];
 
-            // Try to read from device_theme.plist
-            NSString *deviceThemePath = [identityDir stringByAppendingPathComponent:@"device_theme.plist"];
-            NSDictionary *deviceTheme = [NSDictionary dictionaryWithContentsOfFile:deviceThemePath];
-            themeValue = deviceTheme[@"value"];
-
-        }
-        
+        // Try to read from device_theme.plist
+        NSString *deviceThemePath = [identityDir stringByAppendingPathComponent:@"device_theme.plist"];
+        NSDictionary *deviceTheme = [NSDictionary dictionaryWithContentsOfFile:deviceThemePath];
+        themeValue = deviceTheme[@"value"];
     }
     
     // Fallback to default if nothing found

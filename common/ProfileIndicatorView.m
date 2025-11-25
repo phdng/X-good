@@ -889,26 +889,8 @@ static void springboardBeenUnlockedCallback(CFNotificationCenterRef center, void
 - (void)checkForProfileChanges {
     if (self.floatingWindow && !self.floatingWindow.hidden) {
         NSString *currentProfileId = self.profileLabel.text;
-        NSString *newProfileId = nil;
+        NSString *newProfileId = [[ProfileManager sharedManager] getActiveProfileId];
         
-        // Direct file approach: Read current_profile_info.plist or active_profile_info.plist
-        ProfileManager *profileManager = [ProfileManager sharedManager];
-        NSString *centralProfileInfoPath = [profileManager centralProfileInfoPath];
-        NSString *activeProfileInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-        
-        // Try reading from central profile info first
-        NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:centralProfileInfoPath];
-        if (profileInfo && profileInfo[@"ProfileId"]) {
-            newProfileId = profileInfo[@"ProfileId"];
-        }
-        
-        // If not found, try active profile info
-        if (!newProfileId) {
-            profileInfo = [NSDictionary dictionaryWithContentsOfFile:activeProfileInfoPath];
-            if (profileInfo && profileInfo[@"ProfileId"]) {
-                newProfileId = profileInfo[@"ProfileId"];
-            }
-        }
         
         // If still not found, fallback to NSUserDefaults
         if (!newProfileId) {

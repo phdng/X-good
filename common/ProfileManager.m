@@ -1597,5 +1597,83 @@
     
     NSLog(@"[WeaponX] ✅ Immediately created profile '0' directory structure");
 }
+- (NSString *)getActiveProfileId {
+    // First check the primary profile info file
+    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
+    
+    NSString *profileId = centralInfo[@"ProfileId"];
+    if (!profileId) {
+        // If not found, check the legacy active_profile_info.plist
+        NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
+        profileId = activeInfo[@"ProfileId"];
+        
+        NSLog(@"[WeaponX] 🔍 CRITICAL CHECK - Primary profile info not found, checked backup: %@", profileId ? @"✅ found" : @"❌ not found");
+    }
+    
+    if (!profileId) {
+        NSLog(@"[WeaponX] Warning: No active profile ID found, using default");
+        // Try to find any profile directory as a fallback
+        NSFileManager *fileManager = [NSFileManager defaultManager];
+        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSError *error = nil;
+        NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
+        
+        if (!error && contents.count > 0) {
+            // Use the first directory found as a fallback
+            for (NSString *item in contents) {
+                BOOL isDir = NO;
+                NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
+                [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
+                
+                if (isDir) {
+                    profileId = item;
+                    NSLog(@"[WeaponX] Using fallback profile ID: %@", profileId);
+                    break;
+                }
+            }
+        }
+        
+        // If we still don't have a profile ID, give up
+        if (!profileId) {
+            NSLog(@"[WeaponX] Error: Could not find any profile");
+            return nil;
+        }
+    }
+    
+    return profileId;
+}
+
+- (NSString *)profileIdentityPath {
+    // Get current profile ID without directly using ProfileManager
+    NSString *profileId = [self getActiveProfileId];
+    if (!profileId) {
+        NSLog(@"[WeaponX] Error: No active profile when getting identity path");
+        return nil;
+    }
+    
+    // Build the path to this profile's identity directory
+    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
+    
+    // Create the directory if it doesn't exist
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    if (![fileManager fileExistsAtPath:identityDir]) {
+        NSDictionary *attributes = @{NSFilePosixPermissions: @0755,
+                                    NSFileOwnerAccountName: @"mobile"};
+        
+        NSError *dirError = nil;
+        if (![fileManager createDirectoryAtPath:identityDir 
+                    withIntermediateDirectories:YES 
+                                     attributes:attributes
+                                          error:&dirError]) {
+            NSLog(@"[WeaponX] Error creating identity directory: %@", dirError);
+            return nil;
+        }
+    }
+    
+    return identityDir;
+}
 
 @end 

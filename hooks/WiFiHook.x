@@ -12,6 +12,7 @@
 #import <SystemConfiguration/SystemConfiguration.h>
 #import <ifaddrs.h>
 #import <net/if.h>
+#import "ProfileManager.h"
 
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -122,53 +123,6 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
     return isScoped;
 }
 
-// Helper function to directly get current profile ID from plist
-static NSString *getCurrentProfileID(void) {
-    // Direct access to the current profile info plist
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-    
-    NSString *profileId = centralInfo[@"ProfileId"];
-    if (profileId) {
-        return profileId;
-    }
-    
-    // Fallback to legacy location if needed
-    NSString *legacyInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-    NSDictionary *legacyInfo = [NSDictionary dictionaryWithContentsOfFile:legacyInfoPath];
-    profileId = legacyInfo[@"ProfileId"];
-    
-    if (profileId) {
-        return profileId;
-    }
-    
-    // Last resort - scan for profiles
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-    NSError *error = nil;
-    NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
-    
-    if (!error && contents.count > 0) {
-        // Find the first numeric directory
-        for (NSString *item in contents) {
-            if ([item isEqualToString:@"profiles.plist"] || 
-                [item isEqualToString:@"current_profile_info.plist"]) {
-                continue;
-            }
-            
-            BOOL isDir = NO;
-            NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
-            [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
-            
-            if (isDir) {
-                profileId = item;
-                break;
-            }
-        }
-    }
-    
-    return profileId ?: @"default";
-}
 
 // Get current WiFi info from appropriate profile
 static NSDictionary *getProfileWiFiInfo(void) {
@@ -181,7 +135,7 @@ static NSDictionary *getProfileWiFiInfo(void) {
     // Get current profile ID (use cache if available)
     NSString *profileId = cachedProfileId;
     if (!profileId || shouldRefresh) {
-        profileId = getCurrentProfileID();
+        profileId = [[ProfileManager sharedManager] getActiveProfileId];
         cachedProfileId = profileId;
         cacheTimestamp = [NSDate date];
     }

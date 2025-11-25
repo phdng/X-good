@@ -782,6 +782,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 static CFDictionaryRef (*original_CFCopySystemVersionDictionary)(void);
 CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
     @try {
+        NSLog(@"[debug] version replace hook");
         // Rate limiting to prevent excessive calls
         uint64_t currentTime = mach_absolute_time();
         if (cachedDictResult != NULL && 
@@ -798,6 +799,7 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
             
             if (original_CFCopySystemVersionDictionary) {
                 originalDict = original_CFCopySystemVersionDictionary();
+                NSLog(@"has original_CFCopySystemVersionDictionary");
             } else {
                 // Create a basic dictionary with current system version
                 NSString *actualVersion = [[UIDevice currentDevice] systemVersion];
@@ -822,19 +824,19 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
                     originalDict = fallbackDict;
                     usingFallback = YES;
                     
-                    IOSVERSION_LOG(@"📝 Created fallback dictionary for CFCopySystemVersionDictionary");
+                    NSLog(@"Created fallback dictionary for CFCopySystemVersionDictionary");
                 }
             }
             
             if (!originalDict) {
-                IOSVERSION_LOG(@"⚠️ Failed to get system version dictionary");
+                NSLog(@"Failed to get system version dictionary");
                 return NULL;
             }
             
             // Get spoofed version info
             NSDictionary *versionInfo = getIOSVersionInfo();
             if (!versionInfo || !versionInfo[@"version"] || !versionInfo[@"build"]) {
-                IOSVERSION_LOG(@"⚠️ Missing version info for CFCopySystemVersionDictionary");
+                NSLog(@"Missing version info for CFCopySystemVersionDictionary");
                 if (cachedDictResult != NULL) {
                     CFRelease(cachedDictResult);
                 }
@@ -852,9 +854,8 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
                 CFStringRef origBuildKey = CFSTR("ProductBuildVersion");
                 CFStringRef origVersionValue = CFDictionaryGetValue(originalDict, origVersionKey);
                 CFStringRef origBuildValue = CFDictionaryGetValue(originalDict, origBuildKey);
-                
                 if (origVersionValue && origBuildValue) {
-                    IOSVERSION_LOG(@"🔍 CFCopySystemVersionDictionary original: version=%@ build=%@", 
+                    NSLog(@"CFCopySystemVersionDictionary original: version=%@ build=%@", 
                           (__bridge NSString *)origVersionValue,
                           (__bridge NSString *)origBuildValue);
                 }
@@ -863,7 +864,7 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
             // Create mutable copy to modify
             CFMutableDictionaryRef mutableDict = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, originalDict);
             if (!mutableDict) {
-                IOSVERSION_LOG(@"⚠️ Failed to create mutable copy of system version dictionary");
+                NSLog(@"Failed to create mutable copy of system version dictionary");
                 if (cachedDictResult != NULL) {
                     CFRelease(cachedDictResult);
                 }
@@ -891,7 +892,7 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
             
             // Log the newly set values only occasionally
             if (lastDictCallTime == 0 || (currentTime - lastDictCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                IOSVERSION_LOG(@"✅ CFCopySystemVersionDictionary spoofed: version=%@ build=%@", 
+                NSLog(@"CFCopySystemVersionDictionary spoofed: version=%@ build=%@", 
                       spoofedVersion, spoofedBuild);
             }
             

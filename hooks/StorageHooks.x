@@ -9,7 +9,7 @@
 #import <IOKit/IOKitLib.h>
 #import <execinfo.h>
 #import <mach-o/dyld.h>
-
+#import "ProfileManager.h"
 // Constants for proper size calculations - use only marketing units (1000-based)
 #define BYTES_PER_KB (1000ULL)
 #define BYTES_PER_MB (1000ULL * 1000ULL)
@@ -188,9 +188,7 @@ static NSDictionary *getStorageValues() {
     
     @try {
         // First try to get active profile ID
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-        NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
-        NSString *profileId = currentProfileInfo[@"ProfileId"];
+        NSString *profileId = [[ProfileManager sharedManager] getActiveProfileId];
         
         if (profileId) {
             // Build path to storage.plist for this profile

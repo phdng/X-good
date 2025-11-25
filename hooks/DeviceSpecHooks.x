@@ -193,26 +193,22 @@ static BOOL isSpoofingEnabled(void) {
 // Get the device model from profile
 static NSString *getSpoofedDeviceModel() {
     @try {
-        // Try multiple methods to get the model value
-        NSString *deviceModel = nil;
-        
-        // METHOD 1: Try direct access from profile plist
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        
-        NSString *profileId = centralInfo[@"ProfileId"];
-        if (profileId) {
-            // Build path to identity directory
-            NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
+
+        // Build path to identity directory
+        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
             
-            if (!deviceModel || deviceModel.length == 0) {
-                // Fallback to device_ids.plist (combined storage)
-                NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-                deviceModel = deviceIds[@"DeviceModel"];
-            }
+        // First try device_model.plist (detailed specs)
+        NSString *deviceModelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
+        NSDictionary *deviceModelDict = [NSDictionary dictionaryWithContentsOfFile:deviceModelPath];
+        NSString  *deviceModel = deviceModelDict[@"value"];
+            
+        if (!deviceModel || deviceModel.length == 0) {
+            // Fallback to device_ids.plist (combined storage)
+            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+            deviceModel = deviceIds[@"DeviceModel"];
         }
+        
         
         // METHOD 2: Use DeviceModelManager as fallback
         if (!deviceModel.length && NSClassFromString(@"DeviceModelManager")) {
@@ -249,56 +245,51 @@ static NSDictionary *getDeviceSpecs() {
     
     @try {
         // METHOD 1: Try to get specs directly from profile plist files
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
+
+        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
         
-        NSString *profileId = centralInfo[@"ProfileId"];
-        if (profileId) {
-            NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
+    
+        // Fallback to device_ids.plist and reconstruct specs
+        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+        
+        if (deviceIds && deviceIds[@"DeviceModel"]) {
+            // Reconstruct specs from device_ids.plist
+            NSMutableDictionary *specs = [NSMutableDictionary dictionary];
+            specs[@"value"] = deviceIds[@"DeviceModel"];
+            specs[@"name"] = deviceIds[@"DeviceModelName"] ?: @"Unknown";
+            specs[@"screenResolution"] = deviceIds[@"ScreenResolution"] ?: @"Unknown";
+            specs[@"viewportResolution"] = deviceIds[@"ViewportResolution"] ?: @"Unknown";
+            specs[@"devicePixelRatio"] = deviceIds[@"DevicePixelRatio"] ?: @(0);
+            specs[@"screenDensity"] = deviceIds[@"ScreenDensityPPI"] ?: @(0);
+            specs[@"cpuArchitecture"] = deviceIds[@"CPUArchitecture"] ?: @"Unknown";
+            specs[@"deviceMemory"] = deviceIds[@"DeviceMemory"] ?: @(0);
+            specs[@"gpuFamily"] = deviceIds[@"GPUFamily"] ?: @"Unknown";
+            specs[@"cpuCoreCount"] = deviceIds[@"CPUCoreCount"] ?: @(0);
+            specs[@"metalFeatureSet"] = deviceIds[@"MetalFeatureSet"] ?: @"Unknown";
             
-     
-            // Fallback to device_ids.plist and reconstruct specs
-            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+            // Reconstruct webGLInfo
+            NSMutableDictionary *webGLInfo = [NSMutableDictionary dictionary];
+            webGLInfo[@"webglVendor"] = deviceIds[@"WebGLVendor"] ?: @"Apple";
+            webGLInfo[@"webglRenderer"] = deviceIds[@"WebGLRenderer"] ?: @"Apple GPU";
+            webGLInfo[@"unmaskedVendor"] = @"Apple Inc.";
+            webGLInfo[@"unmaskedRenderer"] = deviceIds[@"GPUFamily"] ?: @"Apple GPU";
+            webGLInfo[@"webglVersion"] = @"WebGL 2.0";
+            webGLInfo[@"maxTextureSize"] = @(16384);
+            webGLInfo[@"maxRenderBufferSize"] = @(16384);
+            specs[@"webGLInfo"] = webGLInfo;
             
-            if (deviceIds && deviceIds[@"DeviceModel"]) {
-                // Reconstruct specs from device_ids.plist
-                NSMutableDictionary *specs = [NSMutableDictionary dictionary];
-                specs[@"value"] = deviceIds[@"DeviceModel"];
-                specs[@"name"] = deviceIds[@"DeviceModelName"] ?: @"Unknown";
-                specs[@"screenResolution"] = deviceIds[@"ScreenResolution"] ?: @"Unknown";
-                specs[@"viewportResolution"] = deviceIds[@"ViewportResolution"] ?: @"Unknown";
-                specs[@"devicePixelRatio"] = deviceIds[@"DevicePixelRatio"] ?: @(0);
-                specs[@"screenDensity"] = deviceIds[@"ScreenDensityPPI"] ?: @(0);
-                specs[@"cpuArchitecture"] = deviceIds[@"CPUArchitecture"] ?: @"Unknown";
-                specs[@"deviceMemory"] = deviceIds[@"DeviceMemory"] ?: @(0);
-                specs[@"gpuFamily"] = deviceIds[@"GPUFamily"] ?: @"Unknown";
-                specs[@"cpuCoreCount"] = deviceIds[@"CPUCoreCount"] ?: @(0);
-                specs[@"metalFeatureSet"] = deviceIds[@"MetalFeatureSet"] ?: @"Unknown";
-                
-                // Reconstruct webGLInfo
-                NSMutableDictionary *webGLInfo = [NSMutableDictionary dictionary];
-                webGLInfo[@"webglVendor"] = deviceIds[@"WebGLVendor"] ?: @"Apple";
-                webGLInfo[@"webglRenderer"] = deviceIds[@"WebGLRenderer"] ?: @"Apple GPU";
-                webGLInfo[@"unmaskedVendor"] = @"Apple Inc.";
-                webGLInfo[@"unmaskedRenderer"] = deviceIds[@"GPUFamily"] ?: @"Apple GPU";
-                webGLInfo[@"webglVersion"] = @"WebGL 2.0";
-                webGLInfo[@"maxTextureSize"] = @(16384);
-                webGLInfo[@"maxRenderBufferSize"] = @(16384);
-                specs[@"webGLInfo"] = webGLInfo;
-                
-                PXLog(@"[DeviceSpec] Reconstructed device specs from device_ids.plist");
-                
-                // Cache the specifications
-                @synchronized(deviceSpecsCache) {
-                    deviceSpecsCache[@"specs"] = specs;
-                    cacheTimestamp = [NSDate date];
-                }
-                
-                return specs;
+            PXLog(@"[DeviceSpec] Reconstructed device specs from device_ids.plist");
+            
+            // Cache the specifications
+            @synchronized(deviceSpecsCache) {
+                deviceSpecsCache[@"specs"] = specs;
+                cacheTimestamp = [NSDate date];
             }
+            
+            return specs;
         }
+    
         
         // METHOD 2: Fallback to DeviceModelManager
         // Get the current spoofed device model

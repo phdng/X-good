@@ -2,7 +2,7 @@
 #import <ifaddrs.h>
 #import <arpa/inet.h>
 #import "ProjectXLogging.h"
-
+#import "ProfileManager.h"
 @implementation NetworkManager
 
 + (instancetype)sharedManager {
@@ -201,80 +201,9 @@
 
 #pragma mark - Profile-based IP Storage
 
-// Helper method to get the path to the current profile's identity directory
-+ (NSString *)profileIdentityPath {
-    // Get current profile ID
-    NSString *profileId = nil;
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-    
-    profileId = centralInfo[@"ProfileId"];
-    if (!profileId) {
-        // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-        NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
-        profileId = activeInfo[@"ProfileId"];
-        
-        PXLog(@"[WeaponX] 🔍 NetworkManager - Primary profile info not found, checked backup: %@", profileId ? @"✅ found" : @"❌ not found");
-    }
-    
-    if (!profileId) {
-        PXLog(@"[WeaponX] Warning: No active profile ID found for NetworkManager");
-        // Fallback approach: try to find any profile directory
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        NSError *error = nil;
-        NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
-        
-        if (!error && contents.count > 0) {
-            // Use the first directory found as a fallback
-            for (NSString *item in contents) {
-                BOOL isDir = NO;
-                NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
-                [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
-                
-                if (isDir) {
-                    profileId = item;
-                    PXLog(@"[WeaponX] NetworkManager using fallback profile ID: %@", profileId);
-                    break;
-                }
-            }
-        }
-        
-        // If we still don't have a profile ID, give up
-        if (!profileId) {
-            PXLog(@"[WeaponX] Error: NetworkManager could not find any profile");
-            return nil;
-        }
-    }
-    
-    // Build the path to this profile's identity directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
-    
-    // Create the directory if it doesn't exist
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:identityDir]) {
-        NSDictionary *attributes = @{
-            NSFilePosixPermissions: @0755,
-            NSFileOwnerAccountName: @"mobile"
-        };
-        
-        NSError *dirError = nil;
-        if (![fileManager createDirectoryAtPath:identityDir 
-                    withIntermediateDirectories:YES 
-                                     attributes:attributes
-                                          error:&dirError]) {
-            PXLog(@"[WeaponX] Error creating identity directory for NetworkManager: %@", dirError);
-            return nil;
-        }
-    }
-    
-    return identityDir;
-}
 
 + (BOOL)saveLocalIPAddress:(NSString *)ipAddress {
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) {
         PXLog(@"[WeaponX] Error: Could not get profile identity path for NetworkManager");
         return NO;
@@ -305,7 +234,7 @@
 
 + (NSString *)getSavedLocalIPAddressWithForcedRefresh:(BOOL)forceRefresh {
     // Get path to current profile's identity directory
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) {
         PXLog(@"[WeaponX] Error: Could not get profile identity path for NetworkManager");
         return nil;
@@ -347,7 +276,7 @@
 }
 
 + (NSString *)getSavedLocalIPv6Address {
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) return nil;
     NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
     NSDictionary *networkDict = [NSDictionary dictionaryWithContentsOfFile:networkPath];
@@ -368,7 +297,7 @@
 
 + (BOOL)saveCarrierDetails:(NSString *)carrierName mcc:(NSString *)mcc mnc:(NSString *)mnc {
     // Get path to current profile's identity directory
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) {
         PXLog(@"[WeaponX] Error: Could not get profile identity path for carrier details");
         return NO;
@@ -423,7 +352,7 @@
 
 + (NSDictionary *)getSavedCarrierDetailsWithForcedRefresh:(BOOL)forceRefresh {
     // Get path to current profile's identity directory
-    NSString *identityDir = [self profileIdentityPath];
+    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) {
         PXLog(@"[WeaponX] Error: Could not get profile identity path for carrier details");
         return nil;
