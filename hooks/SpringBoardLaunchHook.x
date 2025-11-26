@@ -1,7 +1,6 @@
 #import "UIKit/UIKit.h"
-#import "include/ellekit/ellekit.h"
 #include <dlfcn.h>
-
+#import <objc/runtime.h>
 // Independent implementation to check if apps are frozen
 // This avoids any linker dependencies on FreezeManager
 @interface LSApplicationProxy : NSObject

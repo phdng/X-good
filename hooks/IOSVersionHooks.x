@@ -7,10 +7,9 @@
 #import <WebKit/WebKit.h>
 #import <sys/sysctl.h>
 #import <dlfcn.h>
-#import <ellekit/ellekit.h>
 #import <mach/mach_time.h>
 #import "IdentifierManager.h"
-
+#import <substrate.h>
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -35,8 +34,6 @@ static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
 // Forward declarations
 static NSString *getCurrentBundleID(void);
 static NSDictionary *loadScopedApps(void);
-static BOOL isInScopedAppsList(void);
-static BOOL isCriticalSystemProcess(NSString *bundleID);
 static void modifyUserAgentString(NSString **userAgentString, NSString *originalVersion, NSString *spoofedVersion);
 static BOOL isSystemVersionFile(NSString *path);
 static NSDictionary *spoofSystemVersionPlist(NSDictionary *originalPlist);
@@ -154,33 +151,7 @@ static NSDictionary *loadScopedApps(void) {
     }
 }
 
-// Check if the current app is in the scoped apps list
-static BOOL isInScopedAppsList(void) {
-    @try {
-        NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
-    } @catch (NSException *e) {
-        return NO;
-    }
-}
+
 
 // Critical system processes to exclude from spoofing
 static NSSet *criticalSystemBundleIDs() {
@@ -200,64 +171,13 @@ static NSSet *criticalSystemBundleIDs() {
             @"com.apple.tccd",
             @"com.apple.launchd",
             @"com.apple.trustd",
-            @"com.apple.CoreTelephony",
-            // Note: The following browser-related bundle IDs are kept in this list
-            // but special handling in isCriticalSystemProcess allows spoofing for them
-            @"com.apple.mobilesafari",
-            @"com.apple.WebKit",
-            @"com.apple.WebKit.WebContent",
-            @"com.apple.WebKit.Networking"
+            @"com.apple.CoreTelephony"
         ]];
     });
     return criticalBundleIDs;
 }
 
-// Helper function to check if we should spoof for this bundle ID (with caching)
-static BOOL shouldSpoofForBundle(NSString *bundleID) {
-    @try {
-        // Basic validation
-        if (!bundleID) {
-            NSLog(@"[iosversion] Skipping iOS version spoofing for nil bundleID");
-            return NO;
-        }
-        
-        // Check cache first
-        if (!cachedBundleDecisions) {
-            cachedBundleDecisions = [NSMutableDictionary dictionary];
-        } else {
-            NSNumber *cachedDecision = cachedBundleDecisions[bundleID];
-            NSDate *decisionTimestamp = cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]];
-            
-            if (cachedDecision && decisionTimestamp && 
-                [[NSDate date] timeIntervalSinceDate:decisionTimestamp] < kCacheValidityDuration) {
-                return [cachedDecision boolValue];
-            }
-        }
-        
-        // Skip spoofing for system apps and critical processes
-        if (isCriticalSystemProcess(bundleID)) {
-            cachedBundleDecisions[bundleID] = @NO;
-            cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-            return NO;
-        }
-        
-        // Check if the current app is a scoped app
-        BOOL isScoped = isInScopedAppsList();
-        
-        // Cache the decision
-        cachedBundleDecisions[bundleID] = @(isScoped);
-        cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        
-        if (isScoped) {
-            NSLog(@"[iosversion] iOS Version spoofing enabled for %@", bundleID);
-        }
-        
-        return isScoped;
-    } @catch (NSException *e) {
-        NSLog(@"[iosversion] Error in shouldSpoofForBundle: %@", e);
-        return NO; // Default to NO for safety
-    }
-}
+
 
 // Get the current iOS version information from the profile
 static NSDictionary *getIOSVersionInfo() {
@@ -349,24 +269,22 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
             return cachedSystemVersionResult;
         }
         
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID)) {
-            NSString *spoofedVersion = getSpoofedSystemVersion();
-            if (spoofedVersion) {
-                NSString *originalVersion = %orig;
-                
-                // Only log occasionally to reduce overhead
-                if (lastSystemVersionCallTime == 0 || (currentTime - lastSystemVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                    IOSVERSION_LOG(@"UIDevice.systemVersion: %@ → %@", originalVersion, spoofedVersion);
-                }
-                
-                // Update cache and timestamp
-                lastSystemVersionCallTime = currentTime;
-                cachedSystemVersionResult = spoofedVersion;
-                
-                return spoofedVersion;
+        NSString *spoofedVersion = getSpoofedSystemVersion();
+        if (spoofedVersion) {
+            NSString *originalVersion = %orig;
+            
+            // Only log occasionally to reduce overhead
+            if (lastSystemVersionCallTime == 0 || (currentTime - lastSystemVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
+                IOSVERSION_LOG(@"UIDevice.systemVersion: %@ → %@", originalVersion, spoofedVersion);
             }
+            
+            // Update cache and timestamp
+            lastSystemVersionCallTime = currentTime;
+            cachedSystemVersionResult = spoofedVersion;
+            
+            return spoofedVersion;
         }
+    
         
         // Cache the original result too
         NSString *originalResult = %orig;
@@ -389,23 +307,20 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 // Hook operatingSystemVersion to return our spoofed version
 - (NSOperatingSystemVersion)operatingSystemVersion {
     @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID)) {
-            NSString *spoofedVersion = getSpoofedSystemVersion();
-            if (spoofedVersion) {
-                NSOperatingSystemVersion originalVersion = %orig;
-                NSOperatingSystemVersion spoofedStructVersion = getOperatingSystemVersion(spoofedVersion);
-                
-                NSLog(@"[iosversion] NSProcessInfo.operatingSystemVersion: %ld.%ld.%ld → %ld.%ld.%ld", 
-                      (long)originalVersion.majorVersion, 
-                      (long)originalVersion.minorVersion, 
-                      (long)originalVersion.patchVersion,
-                      (long)spoofedStructVersion.majorVersion, 
-                      (long)spoofedStructVersion.minorVersion, 
-                      (long)spoofedStructVersion.patchVersion);
-                
-                return spoofedStructVersion;
-            }
+        NSString *spoofedVersion = getSpoofedSystemVersion();
+        if (spoofedVersion) {
+            NSOperatingSystemVersion originalVersion = %orig;
+            NSOperatingSystemVersion spoofedStructVersion = getOperatingSystemVersion(spoofedVersion);
+            
+            NSLog(@"[iosversion] NSProcessInfo.operatingSystemVersion: %ld.%ld.%ld → %ld.%ld.%ld", 
+                    (long)originalVersion.majorVersion, 
+                    (long)originalVersion.minorVersion, 
+                    (long)originalVersion.patchVersion,
+                    (long)spoofedStructVersion.majorVersion, 
+                    (long)spoofedStructVersion.minorVersion, 
+                    (long)spoofedStructVersion.patchVersion);
+            
+            return spoofedStructVersion;
         }
     } @catch (NSException *e) {
         NSLog(@"[iosversion] Error in operatingSystemVersion hook: %@", e);
@@ -416,27 +331,24 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 // Hook isOperatingSystemAtLeastVersion to handle our spoofed version
 - (BOOL)isOperatingSystemAtLeastVersion:(NSOperatingSystemVersion)version {
     @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID)) {
-            NSString *spoofedVersion = getSpoofedSystemVersion();
-            if (spoofedVersion) {
-                NSOperatingSystemVersion spoofedStructVersion = getOperatingSystemVersion(spoofedVersion);
-                
-                // Implement the comparison logic ourselves instead of calling orig
-                BOOL result = (spoofedStructVersion.majorVersion > version.majorVersion) ||
-                             ((spoofedStructVersion.majorVersion == version.majorVersion) && 
-                              (spoofedStructVersion.minorVersion > version.minorVersion)) ||
-                             ((spoofedStructVersion.majorVersion == version.majorVersion) && 
-                              (spoofedStructVersion.minorVersion == version.minorVersion) && 
-                              (spoofedStructVersion.patchVersion >= version.patchVersion));
-                
-                BOOL originalResult = %orig;
-                NSLog(@"[iosversion] NSProcessInfo.isOperatingSystemAtLeastVersion: %ld.%ld.%ld, original: %d → spoofed: %d", 
-                      (long)version.majorVersion, (long)version.minorVersion, (long)version.patchVersion,
-                      originalResult, result);
-                
-                return result;
-            }
+        NSString *spoofedVersion = getSpoofedSystemVersion();
+        if (spoofedVersion) {
+            NSOperatingSystemVersion spoofedStructVersion = getOperatingSystemVersion(spoofedVersion);
+            
+            // Implement the comparison logic ourselves instead of calling orig
+            BOOL result = (spoofedStructVersion.majorVersion > version.majorVersion) ||
+                            ((spoofedStructVersion.majorVersion == version.majorVersion) && 
+                            (spoofedStructVersion.minorVersion > version.minorVersion)) ||
+                            ((spoofedStructVersion.majorVersion == version.majorVersion) && 
+                            (spoofedStructVersion.minorVersion == version.minorVersion) && 
+                            (spoofedStructVersion.patchVersion >= version.patchVersion));
+            
+            BOOL originalResult = %orig;
+            NSLog(@"[iosversion] NSProcessInfo.isOperatingSystemAtLeastVersion: %ld.%ld.%ld, original: %d → spoofed: %d", 
+                    (long)version.majorVersion, (long)version.minorVersion, (long)version.patchVersion,
+                    originalResult, result);
+            
+            return result;
         }
     } @catch (NSException *e) {
         NSLog(@"[iosversion] Error in isOperatingSystemAtLeastVersion hook: %@", e);
@@ -447,21 +359,18 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 // Additional method to hook for getting raw operating system version string
 - (NSString *)operatingSystemVersionString {
     @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID)) {
-            NSDictionary *versionInfo = getIOSVersionInfo();
-            if (versionInfo && versionInfo[@"version"]) {
-                NSString *originalVersion = %orig;
-                NSString *spoofedVersion = [NSString stringWithFormat:@"Version %@ (Build %@)", 
-                                           versionInfo[@"version"], 
-                                           versionInfo[@"build"]];
-                
-                IOSVERSION_LOG(@"NSProcessInfo.operatingSystemVersionString: %@ → %@", 
-                      originalVersion, spoofedVersion);
-                      
-                return spoofedVersion;
-            }
-        }
+        NSDictionary *versionInfo = getIOSVersionInfo();
+        if (versionInfo && versionInfo[@"version"]) {
+            NSString *originalVersion = %orig;
+            NSString *spoofedVersion = [NSString stringWithFormat:@"Version %@ (Build %@)", 
+                                        versionInfo[@"version"], 
+                                        versionInfo[@"build"]];
+            
+            IOSVERSION_LOG(@"NSProcessInfo.operatingSystemVersionString: %@ → %@", 
+                    originalVersion, spoofedVersion);
+                    
+            return spoofedVersion;
+        } 
     } @catch (NSException *e) {
         IOSVERSION_LOG(@"❌ Error in operatingSystemVersionString hook: %@", e);
     }
@@ -485,7 +394,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
         BOOL forceSpoofForWebKit = [bundleID isEqualToString:@"com.apple.mobilesafari"] || 
                                   [bundleID hasPrefix:@"com.apple.WebKit"];
         
-        if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && resultWebView) {
+        if ((forceSpoofForWebKit) && resultWebView) {
             NSString *spoofedVersion = getSpoofedSystemVersion();
             NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
             
@@ -527,7 +436,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
         BOOL forceSpoofForWebKit = [bundleID isEqualToString:@"com.apple.mobilesafari"] || 
                                   [bundleID hasPrefix:@"com.apple.WebKit"];
         
-        if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && webView) {
+        if ((forceSpoofForWebKit) && webView) {
             NSString *spoofedVersion = getSpoofedSystemVersion();
             NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
             
@@ -592,7 +501,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
         BOOL forceSpoofForWebKit = [bundleID isEqualToString:@"com.apple.mobilesafari"] || 
                                   [bundleID hasPrefix:@"com.apple.WebKit"];
         
-        if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && customUserAgent) {
+        if ((forceSpoofForWebKit) && customUserAgent) {
             NSString *spoofedVersion = getSpoofedSystemVersion();
             NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
             
@@ -630,7 +539,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
         BOOL forceSpoofForWebKit = [bundleID isEqualToString:@"com.apple.mobilesafari"] || 
                                   [bundleID hasPrefix:@"com.apple.WebKit"];
         
-        if (forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) {
+        if (forceSpoofForWebKit) {
             // Wait a short time to let the script execute
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 NSString *spoofedVersion = getSpoofedSystemVersion();
@@ -661,8 +570,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 
 - (void)setApplicationNameForUserAgent:(NSString *)applicationNameForUserAgent {
     @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID) && applicationNameForUserAgent) {
+        if (applicationNameForUserAgent) {
             NSString *spoofedVersion = getSpoofedSystemVersion();
             NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
             
@@ -692,19 +600,16 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 - (void)setValue:(NSString *)value forHTTPHeaderField:(NSString *)field {
     @try {
         if ([field isEqualToString:@"User-Agent"] && value) {
-            NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-            if (shouldSpoofForBundle(bundleID)) {
-                NSString *spoofedVersion = getSpoofedSystemVersion();
-                NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
+            NSString *spoofedVersion = getSpoofedSystemVersion();
+            NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
+            
+            if (spoofedVersion) {
+                NSMutableString *modifiedValue = [value mutableCopy];
+                modifyUserAgentString(&modifiedValue, originalVersion, spoofedVersion);
                 
-                if (spoofedVersion) {
-                    NSMutableString *modifiedValue = [value mutableCopy];
-                    modifyUserAgentString(&modifiedValue, originalVersion, spoofedVersion);
-                    
-                    if (![modifiedValue isEqualToString:value]) {
-                        %orig(modifiedValue, field);
-                        return;
-                    }
+                if (![modifiedValue isEqualToString:value]) {
+                    %orig(modifiedValue, field);
+                    return;
                 }
             }
         }
@@ -791,8 +696,7 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
             return CFRetain(cachedDictResult);
         }
         
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID)) {
+
             // Create a fallback dictionary if original function is NULL
             CFDictionaryRef originalDict = NULL;
             BOOL usingFallback = NO;
@@ -909,7 +813,6 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
             lastDictCallTime = currentTime;
             
             return mutableDict;
-        }
     } @catch (NSException *e) {
         IOSVERSION_LOG(@"❌ Error in CFCopySystemVersionDictionary hook: %@", e);
     }
@@ -973,153 +876,152 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
             }
         });
 
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID)) {
-            // Check if this is a request for full kernel version string
-            if (name && strcmp(name, "kern.version") == 0) {
-                uint64_t currentTime = mach_absolute_time();
-                
-                // Ensure we have a valid cached kernel version string
-                if (cachedKernelVersionStrLen == 0 && cachedVersionInfo && cachedVersionInfo[@"kernel_version"]) {
-                    NSString *kernelVersion = cachedVersionInfo[@"kernel_version"];
-                    strlcpy(cachedKernelVersionStr, [kernelVersion UTF8String], sizeof(cachedKernelVersionStr));
-                    cachedKernelVersionStrLen = strlen(cachedKernelVersionStr) + 1;
-                }
-                
-                // If we have a valid cached kernel version string
-                if (cachedKernelVersionStrLen > 0) {
-                    // Check if this is just a length query (oldp is NULL but oldlenp is not)
-                    if (!oldp && oldlenp) {
-                        *oldlenp = cachedKernelVersionStrLen;
-                        
-                        // Only log occasionally
-                        if (lastKernVersionCallTime == 0 || (currentTime - lastKernVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                            IOSVERSION_LOG(@"ℹ️ Returning required buffer size for kern.version: %zu", cachedKernelVersionStrLen);
-                        }
-                        
-                        lastKernVersionCallTime = currentTime;
-                        return 0;
-                    }
-                    
-                    // Make sure we have enough space in the buffer and that both oldp and oldlenp are valid
-                    if (oldp && oldlenp && *oldlenp >= cachedKernelVersionStrLen) {
-                        memcpy(oldp, cachedKernelVersionStr, cachedKernelVersionStrLen);
-                        *oldlenp = cachedKernelVersionStrLen;
-                        
-                        // Only log occasionally
-                        if (lastKernVersionCallTime == 0 || (currentTime - lastKernVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                            IOSVERSION_LOG(@"✅ Successfully spoofed kern.version to %s", cachedKernelVersionStr);
-                        }
-                        
-                        lastKernVersionCallTime = currentTime;
-                        return 0; // Success
-                    } else if (oldlenp) {
-                        // Not enough space, just set the required length
-                        *oldlenp = cachedKernelVersionStrLen;
-                        
-                        // Only log occasionally
-                        if (lastKernVersionCallTime == 0 || (currentTime - lastKernVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                            IOSVERSION_LOG(@"⚠️ Buffer too small for kern.version (%zu < %zu)", *oldlenp, cachedKernelVersionStrLen);
-                        }
-                        
-                        lastKernVersionCallTime = currentTime;
-                        return 0; // Success (caller will need to provide a bigger buffer)
-                    }
-                } else {
-                    IOSVERSION_LOG(@"❌ Missing cached kernel version string");
-                }
+
+        // Check if this is a request for full kernel version string
+        if (name && strcmp(name, "kern.version") == 0) {
+            uint64_t currentTime = mach_absolute_time();
+            
+            // Ensure we have a valid cached kernel version string
+            if (cachedKernelVersionStrLen == 0 && cachedVersionInfo && cachedVersionInfo[@"kernel_version"]) {
+                NSString *kernelVersion = cachedVersionInfo[@"kernel_version"];
+                strlcpy(cachedKernelVersionStr, [kernelVersion UTF8String], sizeof(cachedKernelVersionStr));
+                cachedKernelVersionStrLen = strlen(cachedKernelVersionStr) + 1;
             }
-            // Check if this is a request for Darwin version number (kern.osrelease)
-            else if (name && strcmp(name, "kern.osrelease") == 0 && cachedVersionInfo && cachedVersionInfo[@"darwin"]) {
-                uint64_t currentTime = mach_absolute_time();
-                
-                // Get Darwin version (format: "21.6.0")
-                NSString *darwinVersion = cachedVersionInfo[@"darwin"];
-                if (darwinVersion) {
-                    const char *darwinVersionStr = [darwinVersion UTF8String];
-                    size_t darwinVersionLen = strlen(darwinVersionStr) + 1; // +1 for null terminator
+            
+            // If we have a valid cached kernel version string
+            if (cachedKernelVersionStrLen > 0) {
+                // Check if this is just a length query (oldp is NULL but oldlenp is not)
+                if (!oldp && oldlenp) {
+                    *oldlenp = cachedKernelVersionStrLen;
                     
-                    // Check if this is just a length query
-                    if (!oldp && oldlenp) {
-                        *oldlenp = darwinVersionLen;
-                        return 0;
+                    // Only log occasionally
+                    if (lastKernVersionCallTime == 0 || (currentTime - lastKernVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
+                        IOSVERSION_LOG(@"ℹ️ Returning required buffer size for kern.version: %zu", cachedKernelVersionStrLen);
                     }
                     
-                    // Copy the version if buffer is big enough
-                    if (oldp && oldlenp && *oldlenp >= darwinVersionLen) {
-                        memcpy(oldp, darwinVersionStr, darwinVersionLen);
-                        *oldlenp = darwinVersionLen;
-                        
-                        // Only log occasionally
-                        if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                            IOSVERSION_LOG(@"✅ Successfully spoofed kern.osrelease to %s", darwinVersionStr);
-                        }
-                        
-                        lastOsVersionCallTime = currentTime;
-                        return 0; // Success
-                    } else if (oldlenp) {
-                        // Not enough space, just set the required length
-                        *oldlenp = darwinVersionLen;
-                        return 0;
-                    }
+                    lastKernVersionCallTime = currentTime;
+                    return 0;
                 }
+                
+                // Make sure we have enough space in the buffer and that both oldp and oldlenp are valid
+                if (oldp && oldlenp && *oldlenp >= cachedKernelVersionStrLen) {
+                    memcpy(oldp, cachedKernelVersionStr, cachedKernelVersionStrLen);
+                    *oldlenp = cachedKernelVersionStrLen;
+                    
+                    // Only log occasionally
+                    if (lastKernVersionCallTime == 0 || (currentTime - lastKernVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
+                        IOSVERSION_LOG(@"✅ Successfully spoofed kern.version to %s", cachedKernelVersionStr);
+                    }
+                    
+                    lastKernVersionCallTime = currentTime;
+                    return 0; // Success
+                } else if (oldlenp) {
+                    // Not enough space, just set the required length
+                    *oldlenp = cachedKernelVersionStrLen;
+                    
+                    // Only log occasionally
+                    if (lastKernVersionCallTime == 0 || (currentTime - lastKernVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
+                        IOSVERSION_LOG(@"⚠️ Buffer too small for kern.version (%zu < %zu)", *oldlenp, cachedKernelVersionStrLen);
+                    }
+                    
+                    lastKernVersionCallTime = currentTime;
+                    return 0; // Success (caller will need to provide a bigger buffer)
+                }
+            } else {
+                IOSVERSION_LOG(@"❌ Missing cached kernel version string");
             }
-            // Check if this is a request for iOS version information
-            else if (name && (strcmp(name, "kern.osversion") == 0)) {
-                // Rate limiting - don't process too many calls
-                uint64_t currentTime = mach_absolute_time();
+        }
+        // Check if this is a request for Darwin version number (kern.osrelease)
+        else if (name && strcmp(name, "kern.osrelease") == 0 && cachedVersionInfo && cachedVersionInfo[@"darwin"]) {
+            uint64_t currentTime = mach_absolute_time();
+            
+            // Get Darwin version (format: "21.6.0")
+            NSString *darwinVersion = cachedVersionInfo[@"darwin"];
+            if (darwinVersion) {
+                const char *darwinVersionStr = [darwinVersion UTF8String];
+                size_t darwinVersionLen = strlen(darwinVersionStr) + 1; // +1 for null terminator
                 
-                // Ensure we have a valid cached build string
-                if (cachedBuildStrLen == 0 && cachedVersionInfo && cachedVersionInfo[@"build"]) {
-                    NSString *buildNumber = cachedVersionInfo[@"build"];
-                    strlcpy(cachedBuildStr, [buildNumber UTF8String], sizeof(cachedBuildStr));
-                    cachedBuildStrLen = strlen(cachedBuildStr) + 1;
+                // Check if this is just a length query
+                if (!oldp && oldlenp) {
+                    *oldlenp = darwinVersionLen;
+                    return 0;
                 }
                 
-                // Skip processing if we have a valid cached build and not enough time has passed
-                if (cachedBuildStrLen > 0) {
-                    // Check if this is just a length query (oldp is NULL but oldlenp is not)
-                    if (!oldp && oldlenp) {
-                        *oldlenp = cachedBuildStrLen;
-                        
-                        // Only log occasionally
-                        if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                            IOSVERSION_LOG(@"ℹ️ Returning required buffer size: %zu", cachedBuildStrLen);
-                        }
-                        
-                        lastOsVersionCallTime = currentTime;
-                        return 0;
+                // Copy the version if buffer is big enough
+                if (oldp && oldlenp && *oldlenp >= darwinVersionLen) {
+                    memcpy(oldp, darwinVersionStr, darwinVersionLen);
+                    *oldlenp = darwinVersionLen;
+                    
+                    // Only log occasionally
+                    if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
+                        IOSVERSION_LOG(@"✅ Successfully spoofed kern.osrelease to %s", darwinVersionStr);
                     }
                     
-                    // Make sure we have enough space in the buffer and that both oldp and oldlenp are valid
-                    if (oldp && oldlenp && *oldlenp >= cachedBuildStrLen) {
-                        memcpy(oldp, cachedBuildStr, cachedBuildStrLen);
-                        *oldlenp = cachedBuildStrLen;
-                        
-                        // Only log occasionally
-                        if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                            IOSVERSION_LOG(@"✅ Successfully spoofed sysctlbyname to %s", cachedBuildStr);
-                        }
-                        
-                        lastOsVersionCallTime = currentTime;
-                        return 0; // Success
-                    } else if (oldlenp) {
-                        // Not enough space, just set the required length
-                        *oldlenp = cachedBuildStrLen;
-                        
-                        // Only log occasionally
-                        if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                            IOSVERSION_LOG(@"⚠️ Buffer too small for sysctlbyname (%zu < %zu)", *oldlenp, cachedBuildStrLen);
-                        }
-                        
-                        lastOsVersionCallTime = currentTime;
-                        return 0; // Success (caller will need to provide a bigger buffer)
-                    }
-                } else {
-                    IOSVERSION_LOG(@"❌ Missing cached build number");
+                    lastOsVersionCallTime = currentTime;
+                    return 0; // Success
+                } else if (oldlenp) {
+                    // Not enough space, just set the required length
+                    *oldlenp = darwinVersionLen;
+                    return 0;
                 }
             }
         }
+        // Check if this is a request for iOS version information
+        else if (name && (strcmp(name, "kern.osversion") == 0)) {
+            // Rate limiting - don't process too many calls
+            uint64_t currentTime = mach_absolute_time();
+            
+            // Ensure we have a valid cached build string
+            if (cachedBuildStrLen == 0 && cachedVersionInfo && cachedVersionInfo[@"build"]) {
+                NSString *buildNumber = cachedVersionInfo[@"build"];
+                strlcpy(cachedBuildStr, [buildNumber UTF8String], sizeof(cachedBuildStr));
+                cachedBuildStrLen = strlen(cachedBuildStr) + 1;
+            }
+            
+            // Skip processing if we have a valid cached build and not enough time has passed
+            if (cachedBuildStrLen > 0) {
+                // Check if this is just a length query (oldp is NULL but oldlenp is not)
+                if (!oldp && oldlenp) {
+                    *oldlenp = cachedBuildStrLen;
+                    
+                    // Only log occasionally
+                    if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
+                        IOSVERSION_LOG(@"ℹ️ Returning required buffer size: %zu", cachedBuildStrLen);
+                    }
+                    
+                    lastOsVersionCallTime = currentTime;
+                    return 0;
+                }
+                
+                // Make sure we have enough space in the buffer and that both oldp and oldlenp are valid
+                if (oldp && oldlenp && *oldlenp >= cachedBuildStrLen) {
+                    memcpy(oldp, cachedBuildStr, cachedBuildStrLen);
+                    *oldlenp = cachedBuildStrLen;
+                    
+                    // Only log occasionally
+                    if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
+                        IOSVERSION_LOG(@"✅ Successfully spoofed sysctlbyname to %s", cachedBuildStr);
+                    }
+                    
+                    lastOsVersionCallTime = currentTime;
+                    return 0; // Success
+                } else if (oldlenp) {
+                    // Not enough space, just set the required length
+                    *oldlenp = cachedBuildStrLen;
+                    
+                    // Only log occasionally
+                    if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
+                        IOSVERSION_LOG(@"⚠️ Buffer too small for sysctlbyname (%zu < %zu)", *oldlenp, cachedBuildStrLen);
+                    }
+                    
+                    lastOsVersionCallTime = currentTime;
+                    return 0; // Success (caller will need to provide a bigger buffer)
+                }
+            } else {
+                IOSVERSION_LOG(@"❌ Missing cached build number");
+            }
+        }
+        
     } @catch (NSException *e) {
         IOSVERSION_LOG(@"❌ Error in sysctlbyname hook: %@", e);
     }
@@ -1134,25 +1036,22 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
 
 - (id)objectForInfoDictionaryKey:(NSString *)key {
     @try {
-        NSString *bundleID = [self bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID)) {
-            // Handle system version info in Info.plist queries
-            if ([key isEqualToString:@"MinimumOSVersion"] || 
-                [key isEqualToString:@"DTPlatformVersion"] ||
-                [key isEqualToString:@"DTSDKName"]) {
-                
-                NSString *spoofedVersion = getSpoofedSystemVersion();
-                if (spoofedVersion) {
-                    // For SDK and platform keys, add iOS prefix if needed
-                    if ([key isEqualToString:@"DTPlatformVersion"] || 
-                        [key isEqualToString:@"DTSDKName"]) {
-                        if (![spoofedVersion hasPrefix:@"iOS"]) {
-                            return [NSString stringWithFormat:@"iOS%@", spoofedVersion];
-                        }
-                        return spoofedVersion;
+        // Handle system version info in Info.plist queries
+        if ([key isEqualToString:@"MinimumOSVersion"] || 
+            [key isEqualToString:@"DTPlatformVersion"] ||
+            [key isEqualToString:@"DTSDKName"]) {
+            
+            NSString *spoofedVersion = getSpoofedSystemVersion();
+            if (spoofedVersion) {
+                // For SDK and platform keys, add iOS prefix if needed
+                if ([key isEqualToString:@"DTPlatformVersion"] || 
+                    [key isEqualToString:@"DTSDKName"]) {
+                    if (![spoofedVersion hasPrefix:@"iOS"]) {
+                        return [NSString stringWithFormat:@"iOS%@", spoofedVersion];
                     }
                     return spoofedVersion;
                 }
+                return spoofedVersion;
             }
         }
     } @catch (NSException *e) {
@@ -1175,33 +1074,31 @@ CFTypeRef replaced_CFBundleGetValueForInfoDictionaryKey(CFBundleRef bundle, CFSt
         // Get the bundle ID for CFBundle
         CFStringRef bundleID = CFBundleGetIdentifier(bundle);
         NSString *nsBundleID = bundleID ? (__bridge NSString*)bundleID : nil;
-        
-        if (shouldSpoofForBundle(nsBundleID)) {
-            // Check for system version keys
-            if (CFEqual(key, CFSTR("MinimumOSVersion")) || 
-                CFEqual(key, CFSTR("DTPlatformVersion")) ||
-                CFEqual(key, CFSTR("DTSDKName"))) {
+        // Check for system version keys
+        if (CFEqual(key, CFSTR("MinimumOSVersion")) || 
+            CFEqual(key, CFSTR("DTPlatformVersion")) ||
+            CFEqual(key, CFSTR("DTSDKName"))) {
+            
+            NSString *spoofedVersion = getSpoofedSystemVersion();
+            if (spoofedVersion) {
+                // Log what we're spoofing
+                NSLog(@"[iosversion] 💉 Spoofing %@ for bundle %@ to %@", 
+                        (__bridge NSString*)key, nsBundleID, spoofedVersion);
                 
-                NSString *spoofedVersion = getSpoofedSystemVersion();
-                if (spoofedVersion) {
-                    // Log what we're spoofing
-                    NSLog(@"[iosversion] 💉 Spoofing %@ for bundle %@ to %@", 
-                          (__bridge NSString*)key, nsBundleID, spoofedVersion);
+                // Create a CFString from our spoofed version
+                if (CFEqual(key, CFSTR("DTPlatformVersion")) || 
+                    CFEqual(key, CFSTR("DTSDKName"))) {
                     
-                    // Create a CFString from our spoofed version
-                    if (CFEqual(key, CFSTR("DTPlatformVersion")) || 
-                        CFEqual(key, CFSTR("DTSDKName"))) {
-                        
-                        if (![spoofedVersion hasPrefix:@"iOS"]) {
-                            NSString *prefixedVersion = [NSString stringWithFormat:@"iOS%@", spoofedVersion];
-                            return CFStringCreateWithCString(NULL, [prefixedVersion UTF8String], kCFStringEncodingUTF8);
-                        }
+                    if (![spoofedVersion hasPrefix:@"iOS"]) {
+                        NSString *prefixedVersion = [NSString stringWithFormat:@"iOS%@", spoofedVersion];
+                        return CFStringCreateWithCString(NULL, [prefixedVersion UTF8String], kCFStringEncodingUTF8);
                     }
-                    
-                    return CFStringCreateWithCString(NULL, [spoofedVersion UTF8String], kCFStringEncodingUTF8);
                 }
+                
+                return CFStringCreateWithCString(NULL, [spoofedVersion UTF8String], kCFStringEncodingUTF8);
             }
         }
+        
     } @catch (NSException *e) {
         NSLog(@"[iosversion] ❌ Error in CFBundleGetValueForInfoDictionaryKey hook: %@", e);
     }
@@ -1236,43 +1133,6 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
     lastVersionLoad = 0;
 }
 
-// Safe check if a bundle ID is a critical system process
-static BOOL isCriticalSystemProcess(NSString *bundleID) {
-    if (!bundleID) return YES; // Treat nil as critical for safety
-    
-    // Check against our critical system bundle IDs list
-    if ([criticalSystemBundleIDs() containsObject:bundleID]) {
-        // Allow spoofing for Safari and WebKit processes, even though they're in the critical list
-        // This is necessary to spoof browser user agents
-        if ([bundleID isEqualToString:@"com.apple.mobilesafari"] ||
-            [bundleID isEqualToString:@"com.apple.WebKit"] ||
-            [bundleID isEqualToString:@"com.apple.WebKit.WebContent"] ||
-            [bundleID isEqualToString:@"com.apple.WebKit.Networking"]) {
-            return NO;
-        }
-        return YES;
-    }
-    
-    // Check for system app prefixes
-    if ([bundleID hasPrefix:@"com.apple."]) {
-        // Allow spoofing for Safari and WebKit processes
-        if ([bundleID isEqualToString:@"com.apple.mobilesafari"] ||
-            [bundleID hasPrefix:@"com.apple.WebKit"]) {
-            return NO;
-        }
-        return YES;
-    }
-    
-    // Check for other known system bundle ID patterns
-    if ([bundleID hasPrefix:@"com.hydra.projectx"] ||
-        [bundleID isEqualToString:@"com.saurik.Cydia"] ||
-        [bundleID isEqualToString:@"org.coolstar.SileoStore"] ||
-        [bundleID isEqualToString:@"xyz.willy.Zebra"]) {
-        return YES;
-    }
-    
-    return NO;
-}
 
 #pragma mark - Constructor
 
@@ -1291,25 +1151,15 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
 }
 
 %ctor {
-    @autoreleasepool {
-        // Get the bundle ID for scope checking
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        // Skip for system processes to avoid potential issues
-        if (isCriticalSystemProcess(bundleID)) {
-            return;
-        }
-        
-        IOSVERSION_LOG(@"Initializing iOS Version Hooks for %@...", bundleID);
-        
+    @autoreleasepool {   
         // CRITICAL: Only install hooks if this app is actually scoped
-        if (!isInScopedAppsList()) {
+        if (!IsScope()) {
             // App is NOT scoped - no hooks, no interference, no crashes
-            IOSVERSION_LOG(@"App %@ is not scoped, skipping iOS version hook installation", bundleID);
+            NSLog(@"App is not scoped, skipping iOS version hook installation");
             return;
         }
         
-        IOSVERSION_LOG(@"App %@ is scoped, installing iOS version hooks", bundleID);
+        NSLog(@"App is scoped, installing iOS version hooks");
         
         // Initialize caches
         cachedBundleDecisions = [NSMutableDictionary dictionary];
@@ -1369,7 +1219,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
             }
             
             if (cfCopySystemVersionDictionaryPtr) {
-                EKHook(cfCopySystemVersionDictionaryPtr, (void *)replaced_CFCopySystemVersionDictionary, (void **)&original_CFCopySystemVersionDictionary);
+                MSHookFunction(cfCopySystemVersionDictionaryPtr, (void *)replaced_CFCopySystemVersionDictionary, (void **)&original_CFCopySystemVersionDictionary);
                 IOSVERSION_LOG(@"Successfully hooked CFCopySystemVersionDictionary");
             } else {
                 // If we can't find the symbol, create a stub implementation
@@ -1397,7 +1247,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
             }
             
             if (cfBundleGetValueForInfoDictionaryKeyPtr) {
-                EKHook(cfBundleGetValueForInfoDictionaryKeyPtr, (void *)replaced_CFBundleGetValueForInfoDictionaryKey, (void **)&original_CFBundleGetValueForInfoDictionaryKey);
+                MSHookFunction(cfBundleGetValueForInfoDictionaryKeyPtr, (void *)replaced_CFBundleGetValueForInfoDictionaryKey, (void **)&original_CFBundleGetValueForInfoDictionaryKey);
                 IOSVERSION_LOG(@"Successfully hooked CFBundleGetValueForInfoDictionaryKey");
             } else {
                 // If we can't find the symbol, create a stub implementation
@@ -1416,7 +1266,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
         if (libSystemHandle) {
             void *sysctlbynamePtr = dlsym(libSystemHandle, "sysctlbyname");
             if (sysctlbynamePtr) {
-                EKHook(sysctlbynamePtr, (void *)hooked_sysctlbyname, (void **)&original_sysctlbyname);
+                MSHookFunction(sysctlbynamePtr, (void *)hooked_sysctlbyname, (void **)&original_sysctlbyname);
                 IOSVERSION_LOG(@"Hooked sysctlbyname");
             } else {
                 IOSVERSION_LOG(@"⚠️ Failed to find sysctlbyname symbol");
@@ -1467,7 +1317,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
         // Initialize Objective-C hooks for scoped apps only
         %init;
         
-        IOSVERSION_LOG(@"iOS Version Hooks successfully initialized for scoped app: %@", bundleID);
+        IOSVERSION_LOG(@"iOS Version Hooks successfully initialized for scoped app");
     }
 }
 
@@ -1487,10 +1337,7 @@ static BOOL isSystemVersionFile(NSString *path) {
 // Function to spoof a system version plist
 static NSDictionary *spoofSystemVersionPlist(NSDictionary *originalPlist) {
     if (!originalPlist) return nil;
-    
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!shouldSpoofForBundle(bundleID)) return originalPlist;
-    
+        
     // Get our spoofed values
     NSDictionary *versionInfo = getIOSVersionInfo();
     if (!versionInfo || !versionInfo[@"version"] || !versionInfo[@"build"]) {
@@ -1522,27 +1369,25 @@ NSData* replaced_NSData_dataWithContentsOfFile(Class self, SEL _cmd, NSString *p
     NSData *originalData = original_NSData_dataWithContentsOfFile(self, _cmd, path);
     
     if (isSystemVersionFile(path)) {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID)) {
-            // Get the plist as a dictionary from the data
-            NSDictionary *plist = [NSPropertyListSerialization propertyListWithData:originalData 
-                                                                            options:0 
-                                                                             format:NULL 
-                                                                              error:NULL];
-            if (plist) {
-                // Spoof the values
-                NSDictionary *spoofedPlist = spoofSystemVersionPlist(plist);
-                
-                // Convert back to data
-                NSData *spoofedData = [NSPropertyListSerialization dataWithPropertyList:spoofedPlist
-                                                                                 format:NSPropertyListXMLFormat_v1_0
-                                                                                options:0
-                                                                                  error:NULL];
-                if (spoofedData) {
-                    return spoofedData;
-                }
+        // Get the plist as a dictionary from the data
+        NSDictionary *plist = [NSPropertyListSerialization propertyListWithData:originalData 
+                                                                        options:0 
+                                                                            format:NULL 
+                                                                            error:NULL];
+        if (plist) {
+            // Spoof the values
+            NSDictionary *spoofedPlist = spoofSystemVersionPlist(plist);
+            
+            // Convert back to data
+            NSData *spoofedData = [NSPropertyListSerialization dataWithPropertyList:spoofedPlist
+                                                                                format:NSPropertyListXMLFormat_v1_0
+                                                                            options:0
+                                                                                error:NULL];
+            if (spoofedData) {
+                return spoofedData;
             }
         }
+        
     }
     
     return originalData;
@@ -1553,10 +1398,8 @@ NSDictionary* replaced_NSDictionary_dictionaryWithContentsOfFile(Class self, SEL
     NSDictionary *originalDict = original_NSDictionary_dictionaryWithContentsOfFile(self, _cmd, path);
     
     if (isSystemVersionFile(path) && originalDict) {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID)) {
-            return spoofSystemVersionPlist(originalDict);
-        }
+        return spoofSystemVersionPlist(originalDict);
+        
     }
     
     return originalDict;
@@ -1567,27 +1410,25 @@ id replaced_NSString_stringWithContentsOfFile(Class self, SEL _cmd, NSString *pa
     id originalString = original_NSString_stringWithContentsOfFile(self, _cmd, path, enc, error);
     
     if (isSystemVersionFile(path) && originalString) {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID)) {
-            // For handling XML/plist files as raw strings
-            NSDictionary *versionInfo = getIOSVersionInfo();
-            if (versionInfo && versionInfo[@"version"] && versionInfo[@"build"]) {
-                NSString *modifiedString = [originalString mutableCopy];
-                modifiedString = [modifiedString stringByReplacingOccurrencesOfString:
-                                      [NSString stringWithFormat:@"<key>ProductVersion</key>\\s*<string>[^<]+</string>"]
-                                      withString:[NSString stringWithFormat:@"<key>ProductVersion</key><string>%@</string>", versionInfo[@"version"]]
-                                      options:NSRegularExpressionSearch
-                                      range:NSMakeRange(0, [modifiedString length])];
-                                      
-                modifiedString = [modifiedString stringByReplacingOccurrencesOfString:
-                                      [NSString stringWithFormat:@"<key>ProductBuildVersion</key>\\s*<string>[^<]+</string>"]
-                                      withString:[NSString stringWithFormat:@"<key>ProductBuildVersion</key><string>%@</string>", versionInfo[@"build"]]
-                                      options:NSRegularExpressionSearch
-                                      range:NSMakeRange(0, [modifiedString length])];
-                                      
-                return modifiedString;
-            }
+        // For handling XML/plist files as raw strings
+        NSDictionary *versionInfo = getIOSVersionInfo();
+        if (versionInfo && versionInfo[@"version"] && versionInfo[@"build"]) {
+            NSString *modifiedString = [originalString mutableCopy];
+            modifiedString = [modifiedString stringByReplacingOccurrencesOfString:
+                                    [NSString stringWithFormat:@"<key>ProductVersion</key>\\s*<string>[^<]+</string>"]
+                                    withString:[NSString stringWithFormat:@"<key>ProductVersion</key><string>%@</string>", versionInfo[@"version"]]
+                                    options:NSRegularExpressionSearch
+                                    range:NSMakeRange(0, [modifiedString length])];
+                                    
+            modifiedString = [modifiedString stringByReplacingOccurrencesOfString:
+                                    [NSString stringWithFormat:@"<key>ProductBuildVersion</key>\\s*<string>[^<]+</string>"]
+                                    withString:[NSString stringWithFormat:@"<key>ProductBuildVersion</key><string>%@</string>", versionInfo[@"build"]]
+                                    options:NSRegularExpressionSearch
+                                    range:NSMakeRange(0, [modifiedString length])];
+                                    
+            return modifiedString;
         }
+    
     }
     
     return originalString;

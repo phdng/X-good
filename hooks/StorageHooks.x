@@ -5,11 +5,12 @@
 #import <Foundation/Foundation.h>
 #import <sys/mount.h>
 #import <dlfcn.h>
-#import <ellekit/ellekit.h>
+#import <substrate.h>
 #import <IOKit/IOKitLib.h>
 #import <execinfo.h>
 #import <mach-o/dyld.h>
 #import "ProfileManager.h"
+
 // Constants for proper size calculations - use only marketing units (1000-based)
 #define BYTES_PER_KB (1000ULL)
 #define BYTES_PER_MB (1000ULL * 1000ULL)
@@ -32,129 +33,10 @@
 // Standard APFS block size
 #define DEFAULT_BLOCK_SIZE (4096ULL)
 
-// Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-
-// Scoped apps cache
-static NSMutableDictionary *scopedAppsCache = nil;
-static NSDate *scopedAppsCacheTimestamp = nil;
-static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
 
 // IOKit function pointer
 static CFTypeRef (*orig_IORegistryEntryCreateCFProperty)(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options);
 
-// Forward declarations
-static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
-static BOOL isInScopedAppsList(void);
-
-// Get the current bundle ID
-static NSString *getCurrentBundleID(void) {
-    @try {
-        NSBundle *mainBundle = [NSBundle mainBundle];
-        if (!mainBundle) {
-            return nil;
-        }
-        return [mainBundle bundleIdentifier];
-    } @catch (NSException *e) {
-        return nil;
-    }
-}
-
-// Load scoped apps from the plist file
-static NSDictionary *loadScopedApps(void) {
-    @try {
-        // Check if cache is valid
-        if (scopedAppsCache && scopedAppsCacheTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:scopedAppsCacheTimestamp] < kScopedAppsCacheValidDuration) {
-            return scopedAppsCache;
-        }
-        
-        // Initialize cache if needed
-        if (!scopedAppsCache) {
-            scopedAppsCache = [NSMutableDictionary dictionary];
-        } else {
-            [scopedAppsCache removeAllObjects];
-        }
-        
-        // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *validPath = nil;
-        
-        for (NSString *path in possiblePaths) {
-            if ([fileManager fileExistsAtPath:path]) {
-                validPath = path;
-                break;
-            }
-        }
-        
-        if (!validPath) {
-            // Don't log this error too frequently to avoid spam
-            static NSDate *lastErrorLog = nil;
-            if (!lastErrorLog || [[NSDate date] timeIntervalSinceDate:lastErrorLog] > 300.0) { // 5 minutes
-                PXLog(@"[StorageHooks] Could not find scoped apps file");
-                lastErrorLog = [NSDate date];
-            }
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
-        if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Get the scoped apps dictionary
-        NSDictionary *scopedApps = plistDict[@"ScopedApps"];
-        if (!scopedApps || ![scopedApps isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Copy the scoped apps to our cache
-        [scopedAppsCache addEntriesFromDictionary:scopedApps];
-        scopedAppsCacheTimestamp = [NSDate date];
-        
-        return scopedAppsCache;
-        
-    } @catch (NSException *e) {
-        scopedAppsCacheTimestamp = [NSDate date];
-        return scopedAppsCache ?: [NSMutableDictionary dictionary];
-    }
-}
-
-// Check if the current app is in the scoped apps list
-static BOOL isInScopedAppsList(void) {
-    @try {
-        NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
-    } @catch (NSException *e) {
-        return NO;
-    }
-}
 
 // Helper function to get consistent storage values directly from storage.plist
 static NSDictionary *getStorageValues() {
@@ -287,90 +169,7 @@ static uint64_t calculateBlockCount(uint64_t bytes, uint32_t blockSize) {
     return (bytes + blockSize - 1) / blockSize;
 }
 
-// Helper function to check if storage spoofing should be applied
-// This centralizes the bundleID checks to avoid repeating them in every hook
-static BOOL shouldApplyStorageSpoofing() {
-    static NSMutableDictionary *cachedDecisions = nil;
-    static NSTimeInterval lastCleanupTime = 0;
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes in seconds
-    
-    // Initialize cache if needed
-    if (!cachedDecisions) {
-        cachedDecisions = [NSMutableDictionary dictionary];
-    }
-    
-    // Clean cache every 5 minutes to prevent memory growth
-    if (now - lastCleanupTime > kCacheValidityDuration) {
-        [cachedDecisions removeAllObjects];
-        lastCleanupTime = now;
-    }
-    
-    // Get current bundle ID
-    NSString *currentBundleID = getCurrentBundleID();
-    if (!currentBundleID || [currentBundleID length] == 0) {
-        return NO;
-    }
-    
-    // Check if we have a cached decision for this bundle ID with a valid timestamp
-    NSNumber *cachedDecision = cachedDecisions[currentBundleID];
-    NSDate *decisionTimestamp = cachedDecisions[[currentBundleID stringByAppendingString:@"_timestamp"]];
-        
-    if (cachedDecision && decisionTimestamp && 
-        [[NSDate date] timeIntervalSinceDate:decisionTimestamp] < kCacheValidityDuration) {
-        return [cachedDecision boolValue];
-    }
-    
-    // Always exclude system processes and critical system apps
-    if ([currentBundleID hasPrefix:@"com.apple."] && 
-        ![currentBundleID isEqualToString:@"com.apple.mobilesafari"] &&
-        ![currentBundleID isEqualToString:@"com.apple.webapp"]) {
-        
-        // Cache the negative decision with timestamp
-        cachedDecisions[currentBundleID] = @NO;
-        cachedDecisions[[currentBundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        return NO;
-    }
-    
-    // Exclude our own apps
-    if ([currentBundleID isEqualToString:@"com.hydra.projectx"] || 
-        [currentBundleID isEqualToString:@"com.hydra.weaponx"]) {
-        cachedDecisions[currentBundleID] = @NO;
-        cachedDecisions[[currentBundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        return NO;
-    }
-    
-    // Additional blacklist for known problematic apps
-    NSArray *problematicApps = @[
-        @"com.toyopagroup.picaboo",    // Snapchat 
-        @"com.atebits.Tweetie2",       // Twitter/X
-        @"com.zhiliaoapp.musically",   // TikTok
-        @"net.whatsapp.WhatsApp",      // WhatsApp
-        @"ph.telegra.Telegraph",       // Telegram 
-        @"ph.telegra.Telegraph.NotificationService", 
-        @"ph.telegra.Telegraph.NotificationContent",
-        @"com.skype.skype",
-        @"com.hammerandchisel.discord",
-        @"com.burbn.instagram",        // Instagram
-        @"com.facebook.Facebook"       // Facebook
-    ];
-    
-    if ([problematicApps containsObject:currentBundleID]) {
-        // Cache the negative decision with timestamp
-        cachedDecisions[currentBundleID] = @NO;
-        cachedDecisions[[currentBundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        return NO;
-    }
-    
-    // Check if the current app is a scoped app
-    BOOL isScoped = isInScopedAppsList();
-    
-    // Cache the decision with timestamp
-    cachedDecisions[currentBundleID] = @(isScoped);
-    cachedDecisions[[currentBundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-    
-    return isScoped;
-}
+
 
 // Function to get storage values with universal compatibility
 static void getStorageValuesForApp(uint64_t *totalBytes, uint64_t *freeBytes) {
@@ -577,7 +376,7 @@ static int replaced_statfs(const char *path, struct statfs *buf) {
     // Call original function
     int ret = orig_statfs(path, buf);
     
-    if (ret == 0 && buf != NULL && shouldApplyStorageSpoofing()) {
+    if (ret == 0 && buf != NULL) {
         @try {
             // Only apply spoofing for the main file system paths
             if (path && (
@@ -607,7 +406,7 @@ static int replaced_statfs64(const char *path, struct statfs64 *buf) {
     // Call original function
     int ret = orig_statfs64(path, buf);
     
-    if (ret == 0 && buf != NULL && shouldApplyStorageSpoofing()) {
+    if (ret == 0 && buf != NULL) {
         @try {
             // Only apply spoofing for the main file system paths
             if (path && (
@@ -637,7 +436,7 @@ static int replaced_getfsstat(struct statfs *buf, int bufsize, int flags) {
     // Call original function
     int ret = orig_getfsstat(buf, bufsize, flags);
     
-    if (ret > 0 && buf != NULL && shouldApplyStorageSpoofing()) {
+    if (ret > 0 && buf != NULL) {
         @try {
             // Loop through all filesystems returned
             for (int i = 0; i < ret; i++) {
@@ -671,7 +470,7 @@ static int replaced_getfsstat64(struct statfs64 *buf, int bufsize, int flags) {
     // Call original function
     int ret = orig_getfsstat64(buf, bufsize, flags);
     
-    if (ret > 0 && buf != NULL && shouldApplyStorageSpoofing()) {
+    if (ret > 0 && buf != NULL) {
         @try {
             // Loop through all filesystems returned
             for (int i = 0; i < ret; i++) {
@@ -700,7 +499,7 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
     // Call original first
     CFTypeRef result = orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
     
-    if (!result || !key || !shouldApplyStorageSpoofing()) {
+    if (!result || !key ) {
         return result;
     }
     
@@ -762,7 +561,7 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 - (NSDictionary *)attributesOfFileSystemForPath:(NSString *)path error:(NSError **)error {
     NSDictionary *originalAttributes = %orig;
     
-    if (!originalAttributes || !shouldApplyStorageSpoofing()) {
+    if (!originalAttributes) {
         return originalAttributes;
     }
     
@@ -801,10 +600,6 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 - (unsigned long long)volumeAvailableCapacityForImportantUsageForURL:(NSURL *)url error:(NSError **)error {
     unsigned long long originalCapacity = %orig;
     
-    if (!shouldApplyStorageSpoofing()) {
-        return originalCapacity;
-    }
-    
     @try {
         // Get storage values with appropriate units for this app
         uint64_t totalBytes, freeBytes;
@@ -824,10 +619,6 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 - (unsigned long long)volumeTotalCapacityForURL:(NSURL *)url error:(NSError **)error {
     unsigned long long originalCapacity = %orig;
     
-    if (!shouldApplyStorageSpoofing()) {
-        return originalCapacity;
-    }
-    
     @try {
         // Get storage values with appropriate units for this app
         uint64_t totalBytes, freeBytes;
@@ -846,10 +637,6 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 // Add iOS 13+ method
 - (unsigned long long)volumeAvailableCapacityForOpportunisticUsageForURL:(NSURL *)url error:(NSError **)error {
     unsigned long long originalCapacity = %orig;
-    
-    if (!shouldApplyStorageSpoofing()) {
-        return originalCapacity;
-    }
     
     @try {
         // Get storage values with appropriate units for this app
@@ -875,7 +662,7 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 - (BOOL)getResourceValue:(id *)value forKey:(NSURLResourceKey)key error:(NSError **)error {
     BOOL result = %orig;
     
-    if (!result || !value || !*value || !key || !shouldApplyStorageSpoofing()) {
+    if (!result || !value || !*value || !key) {
         return result;
     }
     
@@ -930,7 +717,7 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 - (NSDictionary<NSURLResourceKey, id> *)resourceValuesForKeys:(NSArray<NSURLResourceKey> *)keys error:(NSError **)error {
     NSDictionary<NSURLResourceKey, id> *originalValues = %orig;
     
-    if (!originalValues || !keys || !shouldApplyStorageSpoofing()) {
+    if (!originalValues || !keys) {
         return originalValues;
     }
     
@@ -980,31 +767,14 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 %ctor {
     @autoreleasepool {
         @try {
-            PXLog(@"[StorageHooks] Initializing storage hooks");
-            
-            NSString *currentBundleID = getCurrentBundleID();
-            
-            // Skip if we can't get bundle ID
-            if (!currentBundleID || [currentBundleID length] == 0) {
-                return;
-            }
-            
-            // Don't hook system processes and our own apps
-            if ([currentBundleID hasPrefix:@"com.apple."] || 
-                [currentBundleID isEqualToString:@"com.hydra.projectx"] || 
-                [currentBundleID isEqualToString:@"com.hydra.weaponx"]) {
-                PXLog(@"[StorageHooks] Not hooking system process: %@", currentBundleID);
-                return;
-            }
-            
             // CRITICAL: Only install hooks if this app is actually scoped
-            if (!isInScopedAppsList()) {
+            if (!IsScope()) {
                 // App is NOT scoped - no hooks, no interference, no crashes
-                PXLog(@"[StorageHooks] App %@ is not scoped, skipping hook installation", currentBundleID);
+                PXLog(@"[StorageHooks] App is not scoped, skipping hook installation");
                 return;
             }
             
-            PXLog(@"[StorageHooks] App %@ is scoped, setting up storage hooks", currentBundleID);
+            PXLog(@"[StorageHooks] App is scoped, setting up storage hooks");
             
             // Hook statfs
             void *handle = dlopen(NULL, RTLD_GLOBAL);
@@ -1012,28 +782,28 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
             if (handle) {
                 orig_statfs = dlsym(handle, "statfs");
                 if (orig_statfs) {
-                    EKHook((void *)orig_statfs, (void *)replaced_statfs, (void **)&orig_statfs);
+                    MSHookFunction((void *)orig_statfs, (void *)replaced_statfs, (void **)&orig_statfs);
                     PXLog(@"[StorageHooks] Hooked statfs successfully");
                 }
                 
                 // Hook statfs64 (if available)
                 orig_statfs64 = dlsym(handle, "statfs64");
                 if (orig_statfs64) {
-                    EKHook((void *)orig_statfs64, (void *)replaced_statfs64, (void **)&orig_statfs64);
+                    MSHookFunction((void *)orig_statfs64, (void *)replaced_statfs64, (void **)&orig_statfs64);
                     PXLog(@"[StorageHooks] Hooked statfs64 successfully");
                 }
                 
                 // Hook getfsstat
                 orig_getfsstat = dlsym(handle, "getfsstat");
                 if (orig_getfsstat) {
-                    EKHook((void *)orig_getfsstat, (void *)replaced_getfsstat, (void **)&orig_getfsstat);
+                    MSHookFunction((void *)orig_getfsstat, (void *)replaced_getfsstat, (void **)&orig_getfsstat);
                     PXLog(@"[StorageHooks] Hooked getfsstat successfully");
                 }
                 
                 // Hook getfsstat64 (if available)
                 orig_getfsstat64 = dlsym(handle, "getfsstat64");
                 if (orig_getfsstat64) {
-                    EKHook((void *)orig_getfsstat64, (void *)replaced_getfsstat64, (void **)&orig_getfsstat64);
+                    MSHookFunction((void *)orig_getfsstat64, (void *)replaced_getfsstat64, (void **)&orig_getfsstat64);
                     PXLog(@"[StorageHooks] Hooked getfsstat64 successfully");
                 }
                 
@@ -1047,7 +817,7 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
                 void *ioRegEntryCreateCFPropertyPtr = dlsym(ioKitHandle, "IORegistryEntryCreateCFProperty");
                 
                 if (ioRegEntryCreateCFPropertyPtr) {
-                    EKHook(ioRegEntryCreateCFPropertyPtr, (void *)replaced_IORegistryEntryCreateCFProperty, (void **)&orig_IORegistryEntryCreateCFProperty);
+                    MSHookFunction(ioRegEntryCreateCFPropertyPtr, (void *)replaced_IORegistryEntryCreateCFProperty, (void **)&orig_IORegistryEntryCreateCFProperty);
                     PXLog(@"[StorageHooks] Hooked IORegistryEntryCreateCFProperty successfully");
                 }
                 
@@ -1057,7 +827,7 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
             // Initialize Objective-C hooks for scoped apps only
             %init;
             
-            PXLog(@"[StorageHooks] Storage hooks successfully initialized for scoped app: %@", currentBundleID);
+            PXLog(@"[StorageHooks] Storage hooks successfully initialized for scoped app");
             
         } @catch (NSException *e) {
             PXLog(@"[StorageHooks] ❌ Exception in constructor: %@", e);

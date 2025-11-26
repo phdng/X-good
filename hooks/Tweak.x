@@ -2,7 +2,6 @@
 #import "IdentifierManager.h"
 #import <AdSupport/ASIdentifierManager.h>
 #import <UIKit/UIKit.h>
-#import "ellekit/ellekit.h"
 #import <objc/runtime.h>
 #import <dlfcn.h>
 #import "ProjectXLogging.h"
@@ -23,7 +22,6 @@
 #import <Security/Security.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreGraphics/CoreGraphics.h>
-#import <ellekit/ellekit.h>
 #import <CoreMotion/CoreMotion.h> // Import CoreMotion framework for sensor spoofing
 #import "LocationSpoofingManager.h" // Import location spoofing manager
 #import "JailbreakDetectionBypass.h" // Import jailbreak detection bypass manager
@@ -604,20 +602,12 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                     [handledDelegates addObject:delegateID];
                     
                     if (manager && bundleID) {
-                        BOOL isSpoofingEnabled = [manager isSpoofingEnabled];
-                        BOOL shouldSpoofApp = [manager shouldSpoofApp:bundleID];
-                        
-                        if (isSpoofingEnabled && shouldSpoofApp) {
-                            double lat = [manager getSpoofedLatitude];
-                            double lon = [manager getSpoofedLongitude];
-                            PXLog(@"[WeaponX] GPS spoofing is enabled for %@. Using: %.6f, %.6f", 
-                                  bundleID, lat, lon);
-                        } else if (isSpoofingEnabled) {
-                            PXLog(@"[WeaponX] GPS spoofing is enabled globally but not for %@", bundleID);
-                        }
-                        
+                        double lat = [manager getSpoofedLatitude];
+                        double lon = [manager getSpoofedLongitude];
+                        PXLog(@"[WeaponX] GPS spoofing is enabled for %@. Using: %.6f, %.6f", 
+                                bundleID, lat, lon);
                         // In iOS 15+, make sure position variations are enabled
-                        if (isSpoofingEnabled && shouldSpoofApp && manager.jitterEnabled) {
+                        if (manager.jitterEnabled) {
                             // Set position variations to match jitter setting for consistency
                             manager.positionVariationsEnabled = YES;
                         }
@@ -635,19 +625,14 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 - (void)setDesiredAccuracy:(CLLocationAccuracy)accuracy {
     // Check if we should modify accuracy
     @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
+        // Ensure high accuracy for our spoofed locations
+        PXLog(@"[WeaponX] App requested accuracy %.1f, ensuring best accuracy for spoofing", 
+                accuracy);
         
-        // Only proceed if this is an app we're monitoring
-        if (bundleID && manager && [manager isSpoofingEnabled] && [manager shouldSpoofApp:bundleID]) {
-            // Ensure high accuracy for our spoofed locations
-            PXLog(@"[WeaponX] App %@ requested accuracy %.1f, ensuring best accuracy for spoofing", 
-                  bundleID, accuracy);
-            
-            // Override with best accuracy
-            %orig(kCLLocationAccuracyBest);
-            return;
-        }
+        // Override with best accuracy
+        %orig(kCLLocationAccuracyBest);
+        return;
+        
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] Exception in setDesiredAccuracy: %@", exception);
     }
@@ -730,33 +715,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             threadDictionary[kRecursionGuardKey] = nil;
             return originalCoordinate;
         }
-        
-        // Get the LocationSpoofingManager and check if spoofing is enabled
-        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-        if (!manager) {
-            threadDictionary[kRecursionGuardKey] = nil;
-            return originalCoordinate;
-        }
-        
-        // Check if spoofing is enabled - this verifies pinned location exists
-        if (![manager isSpoofingEnabled]) {
-            // Not enabled, return original coordinate
-            threadDictionary[kRecursionGuardKey] = nil;
-            return originalCoordinate;
-        }
-        
-        // Get the current bundle ID
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID) {
-            threadDictionary[kRecursionGuardKey] = nil;
-            return originalCoordinate;
-        }
-        
-        // Check if we should spoof this app
-        if (![manager shouldSpoofApp:bundleID]) {
-            threadDictionary[kRecursionGuardKey] = nil;
-            return originalCoordinate;
-        }
+             
         
         // Use modifySpoofedLocation method which properly handles position variations
         // Create a temporary CLLocation with the original coordinates to modify
@@ -764,6 +723,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                                                              longitude:originalCoordinate.longitude];
         
         // Get a properly spoofed location with all variations applied
+        LocationSpoofingManager * manager = [LocationSpoofingManager sharedManager];
         CLLocation *spoofedLocation = [manager modifySpoofedLocation:tempLocation];
         if (!spoofedLocation) {
             threadDictionary[kRecursionGuardKey] = nil;
@@ -783,8 +743,8 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         if (currentTime - lastLogTime > 30.0) {
             @synchronized([self class]) {
                 if (currentTime - lastLogTime > 30.0) {
-                    PXLog(@"[WeaponX] Using spoofed location for %@: (%.6f, %.6f) with variations", 
-                        bundleID, spoofedCoordinate.latitude, spoofedCoordinate.longitude);
+                    PXLog(@"[WeaponX] Using spoofed location for : (%.6f, %.6f) with variations", 
+                         spoofedCoordinate.latitude, spoofedCoordinate.longitude);
                     lastLogTime = currentTime;
                 }
             }
@@ -816,22 +776,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         return;
     }
     
-    // Get the LocationSpoofingManager
-    LocationSpoofingManager *spoofManager = [LocationSpoofingManager sharedManager];
-    
-    // If spoofing is disabled (no pinned location) or manager is not available, use original location
-    if (!spoofManager || ![spoofManager isSpoofingEnabled]) {
-        %orig;
-        return;
-    }
-    
-    // Get the current bundle ID
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID || ![spoofManager shouldSpoofApp:bundleID]) {
-        %orig;
-        return;
-    }
-    
+
     @try {
         // Create array of spoofed locations
         NSMutableArray *spoofedLocations = [NSMutableArray arrayWithCapacity:locations.count];
@@ -839,6 +784,8 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         // Apply proper position variations to each location using modifySpoofedLocation
         for (CLLocation *originalLocation in locations) {
             // Get a properly spoofed location with all variations applied
+            LocationSpoofingManager * spoofManager = [LocationSpoofingManager sharedManager];
+
             CLLocation *spoofedLocation = [spoofManager modifySpoofedLocation:originalLocation];
             
             if (spoofedLocation) {
@@ -875,23 +822,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         %orig;
         return;
     }
-    
-    // Get the LocationSpoofingManager
-    LocationSpoofingManager *spoofManager = [LocationSpoofingManager sharedManager];
-    
-    // If spoofing is disabled (no pinned location) or manager is not available, use original location
-    if (!spoofManager || ![spoofManager isSpoofingEnabled]) {
-        %orig;
-        return;
-    }
-    
-        // Get the current bundle ID
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID || ![spoofManager shouldSpoofApp:bundleID]) {
-            %orig;
-            return;
-        }
-        
+     
     @try {
         // Performance optimization: throttle excessive legacy updates
         static NSTimeInterval lastLegacyUpdateTime = 0;
@@ -904,6 +835,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             }
         }
         lastLegacyUpdateTime = currentTime;
+        LocationSpoofingManager * spoofManager = [LocationSpoofingManager sharedManager];
         
         // Get spoofed location with position variations applied
         CLLocation *spoofedLocation = [spoofManager modifySpoofedLocation:newLocation];
@@ -912,7 +844,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             // Only log occasionally
             static NSTimeInterval lastLogTime = 0;
             if (currentTime - lastLogTime > 30.0) {
-                PXLog(@"[WeaponX] Using pinned location with variations for %@ (legacy method)", bundleID);
+                PXLog(@"[WeaponX] Using pinned location with variations for (legacy method)");
                 lastLogTime = currentTime;
             }
             
@@ -1102,27 +1034,13 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 %hook CLLocation
 
 - (CLLocationSpeed)speed {
-    LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    if (manager && [manager isSpoofingEnabled] && bundleID && [manager shouldSpoofApp:bundleID]) {
-        // Return a reasonable speed value (walking pace)
-        return 1.5;
-    }
-    
-    return %orig;
+    // Return a reasonable speed value (walking pace)
+    return 1.5;
 }
 
 - (CLLocationDirection)course {
-    LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    if (manager && [manager isSpoofingEnabled] && bundleID && [manager shouldSpoofApp:bundleID]) {
-        // Return a fixed direction (North = 0 degrees)
-        return 0.0;
-    }
-    
-    return %orig;
+    // Return a fixed direction (North = 0 degrees)
+    return 0.0;
 }
 
 %end
@@ -1138,17 +1056,10 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         return;
     }
     
-    LocationSpoofingManager *spoofManager = [LocationSpoofingManager sharedManager];
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    if (!spoofManager || !bundleID || ![spoofManager isSpoofingEnabled] || ![spoofManager shouldSpoofApp:bundleID]) {
-        %orig;
-        return;
-    }
     
     @try {
         // Log the interception
-        PXLog(@"[WeaponX] Intercepted region entry for app %@, region: %@", bundleID, region.identifier);
+        PXLog(@"[WeaponX] Intercepted region entry for app , region: %@", region.identifier);
         
         // We suppress region events when spoofing is active since our location isn't actually moving
         // This prevents apps from getting confusing region notifications
@@ -1167,17 +1078,10 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         return;
     }
     
-    LocationSpoofingManager *spoofManager = [LocationSpoofingManager sharedManager];
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    if (!spoofManager || !bundleID || ![spoofManager isSpoofingEnabled] || ![spoofManager shouldSpoofApp:bundleID]) {
-        %orig;
-        return;
-    }
     
     @try {
         // Log the interception
-        PXLog(@"[WeaponX] Intercepted region exit for app %@, region: %@", bundleID, region.identifier);
+        PXLog(@"[WeaponX] Intercepted region exit for app, region: %@", region.identifier);
         
         // Suppress region exit events when spoofing is active
         // Do not call %orig to suppress the notification
@@ -1195,19 +1099,12 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         return;
     }
     
-    LocationSpoofingManager *spoofManager = [LocationSpoofingManager sharedManager];
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    if (!spoofManager || !bundleID || ![spoofManager isSpoofingEnabled] || ![spoofManager shouldSpoofApp:bundleID]) {
-        %orig;
-        return;
-    }
     
     @try {
         // Create a spoofed heading pointing north
         // This would require creating a custom CLHeading, which is complex
         // For now, we'll just pass through the original heading
-        PXLog(@"[WeaponX] Passing through heading update for app %@", bundleID);
+        PXLog(@"[WeaponX] Passing through heading update for app");
         %orig;
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] Exception in locationManager:didUpdateHeading: %@", exception);
@@ -1224,12 +1121,6 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     MKUserLocation *originalUserLocation = %orig;
     
     @try {
-        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (!manager || !bundleID || ![manager isSpoofingEnabled] || ![manager shouldSpoofApp:bundleID]) {
-            return originalUserLocation;
-        }
         
         // Since we can't directly modify MKUserLocation's coordinate (it's read-only),
         // we rely on our CLLocation hook to handle this
@@ -1239,7 +1130,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         static NSTimeInterval lastLogTime = 0;
         NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
         if (currentTime - lastLogTime > 30.0) {
-            PXLog(@"[WeaponX] App %@ requested map user location", bundleID);
+            PXLog(@"[WeaponX] App requested map user location");
             lastLogTime = currentTime;
         }
     } @catch (NSException *exception) {
@@ -1258,13 +1149,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     CLLocationCoordinate2D originalCoordinate = %orig;
     
     @try {
-        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (!manager || !bundleID || ![manager isSpoofingEnabled] || ![manager shouldSpoofApp:bundleID]) {
-            return originalCoordinate;
-        }
-        
+        LocationSpoofingManager * manager = [LocationSpoofingManager sharedManager];
         // Get spoofed coordinates
         double latitude = [manager getSpoofedLatitude];
         double longitude = [manager getSpoofedLongitude];
@@ -1300,14 +1185,8 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
 - (void)reverseGeocodeLocation:(CLLocation *)location completionHandler:(void (^)(NSArray<CLPlacemark *> *placemarks, NSError *error))completionHandler {
     @try {
-        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (!manager || !bundleID || ![manager isSpoofingEnabled] || ![manager shouldSpoofApp:bundleID] || !location || !completionHandler) {
-            %orig;
-            return;
-        }
-        
+        LocationSpoofingManager * manager = [LocationSpoofingManager sharedManager];
+
         // Create a spoofed location
         CLLocation *spoofedLocation = [manager modifySpoofedLocation:location];
         if (!spoofedLocation) {
@@ -1316,7 +1195,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         }
         
         // Log the reverseGeocoding request
-        PXLog(@"[WeaponX] App %@ requested reverse geocoding, using spoofed location", bundleID);
+        PXLog(@"[WeaponX] App requested reverse geocoding, using spoofed location");
         
         // Create a copy of the completion handler to ensure it stays alive
         void (^wrappedHandler)(NSArray<CLPlacemark *> *, NSError *) = [completionHandler copy];
@@ -1332,16 +1211,9 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 // Add forward geocoding method
 - (void)geocodeAddressString:(NSString *)addressString completionHandler:(void (^)(NSArray<CLPlacemark *> *placemarks, NSError *error))completionHandler {
     @try {
-        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (!manager || !bundleID || ![manager isSpoofingEnabled] || ![manager shouldSpoofApp:bundleID] || !addressString || !completionHandler) {
-            %orig;
-            return;
-        }
         
         // Log the forward geocoding request
-        PXLog(@"[WeaponX] App %@ requested forward geocoding for address: %@", bundleID, addressString);
+        PXLog(@"[WeaponX] App requested forward geocoding for address: %@", addressString);
         
         // Create a copy of the completion handler to ensure it stays alive
         void (^wrappedHandler)(NSArray<CLPlacemark *> *, NSError *) = [completionHandler copy];
@@ -1376,18 +1248,8 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
 - (CMAccelerometerData *)accelerometerData {
     @try {
-        // Check if we should spoof
-        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-        if (!manager || ![manager isSpoofingEnabled]) {
-            return %orig;
-        }
-        
-        // Get the current bundle ID
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID || ![manager shouldSpoofApp:bundleID]) {
-            return %orig;
-        }
-        
+        LocationSpoofingManager * manager = [LocationSpoofingManager sharedManager];
+
         // Get the last spoofed location data
         double speed = manager.lastReportedSpeed;
         double course = manager.lastReportedCourse;
@@ -1438,18 +1300,8 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 // Add gyroscope data spoofing for complete motion data
 - (CMGyroData *)gyroData {
     @try {
-        // Check if we should spoof
-        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-        if (!manager || ![manager isSpoofingEnabled]) {
-            return %orig;
-        }
-        
-        // Get the current bundle ID
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID || ![manager shouldSpoofApp:bundleID]) {
-            return %orig;
-        }
-        
+        LocationSpoofingManager * manager = [LocationSpoofingManager sharedManager];
+
         // Get the last spoofed location data
         double speed = manager.lastReportedSpeed;
         double course = manager.lastReportedCourse;
@@ -1475,6 +1327,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             // Add small course-based rotation to make movements more realistic
             xRotation += sin(courseRad) * 0.01;
             yRotation += cos(courseRad) * 0.01;
+            LocationSpoofingManager * manager = [LocationSpoofingManager sharedManager];
             
             // Add transportation mode specific movements
             if (manager.transportationMode == TransportationModeDriving) {
@@ -1508,18 +1361,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 // Add magnetometer (compass) data spoofing to align with GPS course
 - (CMMagnetometerData *)magnetometerData {
     @try {
-        // Check if we should spoof
-        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-        if (!manager || ![manager isSpoofingEnabled]) {
-            return %orig;
-        }
-        
-        // Get the current bundle ID
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID || ![manager shouldSpoofApp:bundleID]) {
-            return %orig;
-        }
-        
+        LocationSpoofingManager * manager = [LocationSpoofingManager sharedManager];
         // Get the course from the last spoofed location
         double course = manager.lastReportedCourse;
         
@@ -1571,19 +1413,8 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
 - (void)startRelativeAltitudeUpdatesToQueue:(NSOperationQueue *)queue withHandler:(void (^)(CMAltitudeData *altitudeData, NSError *error))handler {
     @try {
-        // Check if we should spoof
-        LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
-        if (!manager || ![manager isSpoofingEnabled]) {
-            %orig;
-            return;
-        }
+
         
-        // Get the current bundle ID
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID || ![manager shouldSpoofApp:bundleID]) {
-            %orig;
-            return;
-        }
         
         // Instead of calling original, we'll handle the queue operations ourselves
         [self stopRelativeAltitudeUpdates]; // Stop any existing updates
@@ -1599,18 +1430,13 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             // Create a timer for regular updates
             NSTimer *timer = [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *timer) {
                 @try {
-                    if (!manager.isSpoofingEnabled) {
-                        [timer invalidate];
-                        objc_setAssociatedObject(self, &kAltimeterTimerKey, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
-                        return;
-                    }
-                    
                     // Create synthetic altitude data
                     CMAltitudeData *altData = [[objc_getClass("CMAltitudeData") alloc] init];
                     
                     // Get current transportation mode and simulate appropriate pressure changes
                     double relativeAltitude = 0.0;
                     double pressure = 1013.25; // Standard pressure at sea level in hPa
+                    LocationSpoofingManager * manager = [LocationSpoofingManager sharedManager];
                     
                     // Adjust based on transportation mode
                     if (manager.transportationMode == TransportationModeDriving) {
@@ -1690,45 +1516,8 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
 %end  // End of SensorSpoofing group
 
-// Early initialization for ElleKit - runs before process fully launches
-static void earlyInitCallback(void) {
-    PXLog(@"ElleKit early initialization phase - preparing identifier spoofing");
-    
-    // Initialize essential components before process starts
-    // This is unique to ElleKit and provides stronger protection
-    valueCache = [NSMutableDictionary dictionary];
-    
-    // We can perform early setup here that will be ready before any app code runs
-    NSString *bundleExecutable = [[[NSBundle mainBundle] infoDictionary] objectForKey:@"CFBundleExecutable"];
-    PXLog(@"Preparing early protection for process: %@", bundleExecutable ?: @"Unknown");
-    
-    // Check if we're using ElleKit
-    if (EKIsElleKitEnv()) {
-        PXLog(@"Running in ElleKit environment - enabling advanced protection");
-    }
-}
 
-static void setupHookingEnvironment() {
-    // Check if we're running in ElleKit and adapt accordingly
-    bool isElleKit = dlsym(RTLD_DEFAULT, "EKHook") != NULL;
-    
-    if (isElleKit) {
-        PXLog(@"ElleKit detected: Using enhanced protection capabilities");
-        
-        // Check ElleKit version (function not actually in ElleKit, just for example)
-        void *ekVersionSym = dlsym(RTLD_DEFAULT, "EKVersion"); 
-        if (ekVersionSym) {
-            PXLog(@"ElleKit version checks passed");
-        }
-        
-        // ElleKit has better optimization for arm64e hardware
-        #ifdef __arm64e__
-        PXLog(@"Running on ARM64e hardware with ElleKit: PAC protection enabled");
-        #endif
-    } else {
-        PXLog(@"Substrate fallback mode: Limited protection capabilities");
-    }
-}
+
 
 // Function pointer declarations for rebinding
 static int (*getifaddrs_orig)(struct ifaddrs **ifap);
@@ -1945,8 +1734,7 @@ static char* hook_GSSystemGetSerialNo(void) {
 
 // Constructor
 %ctor {
-    // Add at beginning of ctor
-    setupHookingEnvironment();
+    if(!IsScope()) return;
     
     PXLog(@"ProjectX tweak initializing...");
     
@@ -1976,11 +1764,6 @@ static char* hook_GSSystemGetSerialNo(void) {
         });
     }
     
-    // Register early initialization callback for ElleKit
-    if (dlsym(RTLD_DEFAULT, "EKEarlyInit")) {
-        EKEarlyInit(earlyInitCallback);
-        PXLog(@"Registered ElleKit early initialization handler");
-    }
     
     // Detect iOS version
     NSOperatingSystemVersion osVersion = [[NSProcessInfo processInfo] operatingSystemVersion];
@@ -1994,47 +1777,7 @@ static char* hook_GSSystemGetSerialNo(void) {
         PXLog(@"iOS 16+ detected, enabling compatibility mode");
     }
     
-    // Detect which hook system is being used
-    NSString *hookSystem = @"Unknown";
-    if (dlsym(RTLD_DEFAULT, "EKMethodsEqual")) {
-        hookSystem = @"ElleKit";
-        
-        // ElleKit-specific function hooking for lower-level identifiers
-        // This utilizes ElleKit's powerful low-level symbol rebinding capabilities
-        void *libSystemHandle = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
-        if (libSystemHandle) {
-            // Find symbols for network-related functions that could leak identifiers
-            void *getifaddrsSymbol = dlsym(libSystemHandle, "getifaddrs");
-            void *gethostnameSymbol = dlsym(libSystemHandle, "gethostname");
-            
-            // Hook these functions using ElleKit's API directly
-            if (getifaddrsSymbol) {
-                PXLog(@"Using ElleKit to hook getifaddrs for MAC address protection");
-                // Use the globally defined function instead of defining it inside the constructor
-                EKHook(getifaddrsSymbol, (void *)getifaddrs_hook, (void **)&getifaddrs_orig);
-            }
-            
-            // Hook gethostname to spoof device name at the system level
-            if (gethostnameSymbol) {
-                PXLog(@"Using ElleKit to hook gethostname for device name protection");
-                // Use the globally defined function instead of defining it inside the constructor
-                EKHook(gethostnameSymbol, (void *)gethostname_hook, (void **)&gethostname_orig);
-            }
-            
-            // Hook sysctlbyname which is commonly used to get device identifiers
-            void *sysctlbynameSymbol = dlsym(libSystemHandle, "sysctlbyname");
-            if (sysctlbynameSymbol) {
-                PXLog(@"Using ElleKit to hook sysctlbyname for system information protection");
-                EKHook(sysctlbynameSymbol, (void *)sysctlbyname_hook, (void **)&sysctlbyname_orig);
-            }
-            
-            dlclose(libSystemHandle);
-        }
-    } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
-        hookSystem = @"MobileSubstrate";
-    }
-    
-    PXLog(@"Using hook system: %@", hookSystem);
+
     
     // Initialize value cache
     valueCache = [NSMutableDictionary dictionary];
@@ -2085,110 +1828,14 @@ static char* hook_GSSystemGetSerialNo(void) {
         });
     }
     
-    // Use ElleKit's memory protection modification for direct memory patching
-    if (dlsym(RTLD_DEFAULT, "EKMemoryProtect")) {
-        // Example: Find and patch in-memory locations that might store identifiers
-        // This is a powerful ElleKit-exclusive capability
-        PXLog(@"Using ElleKit's memory protection features for enhanced security");
-        
-        // Get the main executable's handle
-        const char *appPath = _dyld_get_image_name(0);
-        if (appPath) {
-            // Find symbol offsets for potential identifier storage
-            uint32_t imageCount = _dyld_image_count();
-            for (uint32_t i = 0; i < imageCount; i++) {
-                const char *imageName = _dyld_get_image_name(i);
-                if (imageName && strstr(imageName, "AppTrackingTransparency")) {
-                    PXLog(@"Found AppTrackingTransparency framework, applying additional protections");
-                    
-                    // Use EKMemoryProtect to make certain memory regions writable
-                    // For demonstration only, don't declare unused variables
-                    // Calculate actual addresses to patch in a real implementation
-                    // Use a dummy variable to silence warnings but be cautious about actual implementation
-                    const void *headerPtr = _dyld_get_image_header(i);
-                    PXLog(@"Applied memory protection to ATT framework at %p", headerPtr);
-                    
-                    // For demonstration only - this would need real offset calculations
-                    // EKMemoryProtect((void*)(baseAddress + offset), size, PROT_READ | PROT_WRITE);
-                }
-                
-                // Look for analytics frameworks that might capture device identifiers
-                if (imageName && (strstr(imageName, "Analytics") || 
-                                 strstr(imageName, "Tracking") || 
-                                 strstr(imageName, "Firebase") ||
-                                 strstr(imageName, "Fabric") ||
-                                 strstr(imageName, "Crashlytics"))) {
-                    PXLog(@"Found analytics framework: %s, applying protections", imageName);
-                    // Here we would add protections specific to analytics frameworks
-                }
-            }
-            
-            // Detect anti-jailbreak functionality and neutralize it
-            // This is especially important for banking and high-security apps
-            PXLog(@"Scanning for anti-jailbreak functionality...");
-            
-            // Check if jailbreak detection bypass is enabled
-            NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-            BOOL jailbreakDetectionEnabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
-            
-            if (!jailbreakDetectionEnabled) {
-                PXLog(@"Jailbreak detection bypass is disabled, skipping anti-jailbreak protection");
-                return;
-            }
-            
-            NSBundle *mainBundle = [NSBundle mainBundle];
-            NSString *bundleID = [mainBundle bundleIdentifier];
-            
-            // Check if the current app is in the scoped apps list
-            if (!bundleID) {
-                return;
-            }
-            
-            IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-            if (!manager || ![manager isApplicationEnabled:bundleID]) {
-                PXLog(@"App %@ not in scoped list, skipping anti-jailbreak protection", bundleID);
-                return;
-            }
-            
-            // App is in scoped list and jailbreak detection bypass is enabled
-            PXLog(@"High-security app detected: %@, enabling advanced protection", bundleID);
-            // For apps in the scoped list, use more aggressive hiding techniques
-        }
-    }
-    
-    // Anti-debugging protection for our own tweak
-    // This helps prevent apps from detecting our hooks
-    if (EKIsElleKitEnv()) {
-        // Check if jailbreak detection bypass is enabled
-        NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-        BOOL jailbreakDetectionEnabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
-        
-        if (jailbreakDetectionEnabled) {
-            PXLog(@"Enabling anti-detection measures with ElleKit");
-            
-            // Register callbacks for system events that could expose our tweak
-            if (dlsym(RTLD_DEFAULT, "EKRegisterCallback")) {
-                EKRegisterCallback(antiDetectionCallback);
-            }
-        } else {
-            PXLog(@"Jailbreak detection bypass is disabled, skipping anti-detection measures");
-        }
-    }
-    
     // Hook IOKit for serial number spoofing
     void *IOKitHandle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
     if (IOKitHandle) {
         void *IORegEntryCreateCFPropertyPtr = dlsym(IOKitHandle, "IORegistryEntryCreateCFProperty");
         if (IORegEntryCreateCFPropertyPtr) {
             PXLog(@"Hooking IORegistryEntryCreateCFProperty for serial number spoofing");
-            // Use EKHook for ElleKit or MSHookFunction for Substrate
-            if (EKIsElleKitEnv()) {
-                EKHook(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
-                      (void **)&orig_IORegistryEntryCreateCFProperty);
-            } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
-                MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
-                              (void **)&orig_IORegistryEntryCreateCFProperty);
-            }
+            MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
+                            (void **)&orig_IORegistryEntryCreateCFProperty);
         }
         dlclose(IOKitHandle);
     }
@@ -2199,22 +1846,22 @@ static char* hook_GSSystemGetSerialNo(void) {
         void *GSSystemGetSerialNoPtr = dlsym(GSHandle, "GSSystemGetSerialNo");
         if (GSSystemGetSerialNoPtr) {
             PXLog(@"Hooking GSSystemGetSerialNo for serial number spoofing");
-            if (EKIsElleKitEnv()) {
-                EKHook(GSSystemGetSerialNoPtr, (void *)hook_GSSystemGetSerialNo, 
-                      (void **)&orig_GSSystemGetSerialNo);
-            } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
-                MSHookFunction(GSSystemGetSerialNoPtr, (void *)hook_GSSystemGetSerialNo, 
-                              (void **)&orig_GSSystemGetSerialNo);
-            }
+            MSHookFunction(GSSystemGetSerialNoPtr, (void *)hook_GSSystemGetSerialNo, 
+                            (void **)&orig_GSSystemGetSerialNo);
+            
         }
         dlclose(GSHandle);
     }
     
-    // Initialize the location spoofing hooks
-    %init(LocationSpoofing);
-    
-    // Initialize sensor data spoofing hooks
-    %init(SensorSpoofing);
+    LocationSpoofingManager *manager = [LocationSpoofingManager sharedManager];
+    if([manager isSpoofingEnabled]){
+        // Initialize the location spoofing hooks
+        %init(LocationSpoofing);
+        
+        // Initialize sensor data spoofing hooks
+        %init(SensorSpoofing);
+    }
+
     
     PXLog(@"[WeaponX] Location and sensor spoofing hooks initialized");
 }

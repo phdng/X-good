@@ -23,3 +23,6 @@ createProfileZeroImmediately 自动生成0号备份
 generate all按钮按下会生成备份 然后选中该备份
 
 hooks中存在大量自行读取调用[[ProfileManager sharedManager] profileIdentityPath] 然后读文件换为ident读取
+
+
+检查com.hydra.projectx.carrierDetailsChanged消息是否成对出现

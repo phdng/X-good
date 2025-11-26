@@ -13,9 +13,8 @@
 #import <mach/mach_host.h>
 #import <objc/runtime.h>
 #import <substrate.h>
-#import <ellekit/ellekit.h>
 #import <mach-o/arch.h>
-
+#import <dlfcn.h>
 // Define the swap usage structure if it's not available
 #ifndef HAVE_XSW_USAGE
 struct xsw_usage {
@@ -32,10 +31,7 @@ typedef struct xsw_usage xsw_usage;
 static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 static kern_return_t (*orig_host_statistics64)(host_t host, host_flavor_t flavor, host_info64_t info, mach_msg_type_number_t *count);
 static NXArchInfo* (* orig_nx_get_local_arch_info)();
-// Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -58,10 +54,7 @@ static const NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes
 static void logMemoryHook(NSString *apiName);
 
 // Function declarations
-static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
-static BOOL isInScopedAppsList(void);
-static BOOL isSpoofingEnabled(void);
+
 static NSString *getSpoofedDeviceModel(void);
 static NSDictionary *getDeviceSpecs(void);
 static float getFreeMemoryPercentage(void);
@@ -79,116 +72,6 @@ static CGSize parseResolution(NSString *resolutionString);
 
 #pragma mark - Helper Functions
 
-// Get the current bundle ID
-static NSString *getCurrentBundleID(void) {
-    @try {
-        NSBundle *mainBundle = [NSBundle mainBundle];
-        if (!mainBundle) {
-            return nil;
-        }
-        return [mainBundle bundleIdentifier];
-    } @catch (NSException *e) {
-        return nil;
-    }
-}
-
-// Load scoped apps from the plist file
-static NSDictionary *loadScopedApps(void) {
-    @try {
-        // Check if cache is valid
-        if (scopedAppsCache && scopedAppsCacheTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:scopedAppsCacheTimestamp] < kScopedAppsCacheValidDuration) {
-            return scopedAppsCache;
-        }
-        
-        // Initialize cache if needed
-        if (!scopedAppsCache) {
-            scopedAppsCache = [NSMutableDictionary dictionary];
-        } else {
-            [scopedAppsCache removeAllObjects];
-        }
-        
-        // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *validPath = nil;
-        
-        for (NSString *path in possiblePaths) {
-            if ([fileManager fileExistsAtPath:path]) {
-                validPath = path;
-                break;
-            }
-        }
-        
-        if (!validPath) {
-            // Don't log this error too frequently to avoid spam
-            static NSDate *lastErrorLog = nil;
-            if (!lastErrorLog || [[NSDate date] timeIntervalSinceDate:lastErrorLog] > 300.0) { // 5 minutes
-                PXLog(@"[DeviceSpec] Could not find scoped apps file");
-                lastErrorLog = [NSDate date];
-            }
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
-        if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Get the scoped apps dictionary
-        NSDictionary *scopedApps = plistDict[@"ScopedApps"];
-        if (!scopedApps || ![scopedApps isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Copy the scoped apps to our cache
-        [scopedAppsCache addEntriesFromDictionary:scopedApps];
-        scopedAppsCacheTimestamp = [NSDate date];
-        
-        return scopedAppsCache;
-        
-    } @catch (NSException *e) {
-        scopedAppsCacheTimestamp = [NSDate date];
-        return scopedAppsCache ?: [NSMutableDictionary dictionary];
-    }
-}
-
-// Check if the current app is in the scoped apps list
-static BOOL isInScopedAppsList(void) {
-    @try {
-        NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
-    } @catch (NSException *e) {
-        return NO;
-    }
-}
-
-// Check if device model spoofing is enabled for the current app with caching
-static BOOL isSpoofingEnabled(void) {
-    return true;
-}
 
 // Get the device model from profile
 static NSString *getSpoofedDeviceModel() {
@@ -339,48 +222,13 @@ static CGSize parseResolution(NSString *resolutionString) {
 
 #pragma mark - UIScreen Hooks
 
-// Check if current process is a WebKit/WebContent process that needs resolution spoofing
-static BOOL shouldSpoofResolutionForCurrentProcess() {
-    static BOOL cachedDecision = NO;
-    static BOOL hasCheckedProcess = NO;
-    
-    if (hasCheckedProcess) {
-        return cachedDecision;
-    }
-    
-    // Only spoof resolution for web views, not for native apps
-    NSString *processName = [[NSProcessInfo processInfo] processName];
-    BOOL isWebProcess = [processName containsString:@"WebKit"] || 
-                        [processName containsString:@"WebContent"] ||
-                        [processName containsString:@"Safari"];
-                        
-    // For Safari and web-focused apps, continue spoofing
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    BOOL isWebApp = [bundleID hasPrefix:@"com.apple.mobilesafari"] ||
-                    [bundleID hasPrefix:@"com.google.chrome"] ||
-                    [bundleID hasPrefix:@"org.mozilla.ios.Firefox"] ||
-                    [bundleID hasPrefix:@"com.brave.ios"] ||
-                    [bundleID hasPrefix:@"com.opera"];
-    
-    // Cache the decision
-    hasCheckedProcess = YES;
-    cachedDecision = isWebProcess || isWebApp;
-    
-    PXLog(@"[DeviceSpec] Resolution spoofing for process '%@' (%@): %@", 
-          processName, bundleID, cachedDecision ? @"ENABLED" : @"DISABLED");
-          
-    return cachedDecision;
-}
+
 
 %hook UIScreen
 
 // Hook for bounds (controls size of the screen in points)
 - (CGRect)bounds {
     CGRect originalBounds = %orig;
-    
-    if (!isSpoofingEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
-        return originalBounds;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -421,10 +269,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 - (CGRect)nativeBounds {
     CGRect originalNativeBounds = %orig;
     
-    if (!isSpoofingEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
-        return originalNativeBounds;
-    }
-    
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
         return originalNativeBounds;
@@ -458,10 +302,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 - (CGFloat)scale {
     CGFloat originalScale = %orig;
     
-    if (!isSpoofingEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
-        return originalScale;
-    }
-    
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
         return originalScale;
@@ -487,10 +327,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 - (UIScreenMode *)currentMode {
     UIScreenMode *originalMode = %orig;
     
-    if (!isSpoofingEnabled()) {
-        return originalMode;
-    }
-    
     // We can't create a new UIScreenMode, but we can modify its properties
     // through associated objects if needed in the future
     
@@ -505,12 +341,7 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 
 // Hook for physical memory (RAM)
 - (unsigned long long)physicalMemory {
-    unsigned long long originalMemory = %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return originalMemory;
-    }
-    
+    unsigned long long originalMemory = %orig;  
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
         return originalMemory;
@@ -552,10 +383,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 - (unsigned long long)availableMemory {
     unsigned long long originalAvailableMemory = %orig;
     
-    if (!isSpoofingEnabled()) {
-        return originalAvailableMemory;
-    }
-    
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
         return originalAvailableMemory;
@@ -588,11 +415,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 // Hook for processor count
 - (NSUInteger)processorCount {
     NSUInteger originalCount = %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return originalCount;
-    }
-    
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
         return originalCount;
@@ -618,10 +440,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 // Add hook for CPU architecture information
 - (NSString *)machineHardwareName {
     NSString *originalName = %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return originalName;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -655,10 +473,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 // Inject JavaScript to override navigator.deviceMemory
 - (void)_didFinishLoadForFrame:(WKFrameInfo *)frame {
     %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -704,10 +518,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 // Hook for WebGL vendor and renderer strings
 - (NSString *)getParameter:(unsigned)pname {
     NSString *original = %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return original;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -765,9 +575,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 - (NSString *)name {
     NSString *originalName = %orig;
     
-    if (!isSpoofingEnabled()) {
-        return originalName;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -793,9 +600,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 - (NSString *)familyName {
     NSString *originalFamilyName = %orig;
     
-    if (!isSpoofingEnabled()) {
-        return originalFamilyName;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -826,10 +630,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 // For screen density
 - (CGFloat)native_scale {
     CGFloat originalScale = %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return originalScale;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -866,9 +666,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 - (void)_documentDidFinishLoadForFrame:(WKFrameInfo *)frame {
     %orig;
     
-    if (!isSpoofingEnabled()) {
-        return;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -1007,9 +804,6 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
 - (void)_didCreateMainFrame:(WKFrameInfo *)frame {
     %orig;
     
-    if (!isSpoofingEnabled()) {
-        return;
-    }
     
     NSString *deviceModel = getSpoofedDeviceModel();
     if (!deviceModel) {
@@ -1141,9 +935,6 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
 - (void)_didStartProvisionalLoadForFrame:(WKFrameInfo *)frame {
     %orig;
     
-    if (!isSpoofingEnabled()) {
-        return;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -1178,9 +969,6 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
 - (void)_didCreateJavaScriptContext:(id)context {
     %orig;
     
-    if (!isSpoofingEnabled()) {
-        return;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -1212,9 +1000,6 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
 - (unsigned int)max_cpus {
     unsigned int original = %orig;
     
-    if (!isSpoofingEnabled()) {
-        return original;
-    }
     
     NSDictionary *specs = getDeviceSpecs();
     if (!specs) {
@@ -1237,95 +1022,6 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
 
 %end
 
-#pragma mark - Constructor
-
-%ctor {
-    @autoreleasepool {
-        @try {
-            PXLog(@"[DeviceSpec] Initializing device specifications spoofing hooks");
-            
-            NSString *currentBundleID = getCurrentBundleID();
-            
-            // Skip if we can't get bundle ID
-            if (!currentBundleID || [currentBundleID length] == 0) {
-                return;
-            }
-            
-            // Don't hook system processes and our own apps
-            if ([currentBundleID hasPrefix:@"com.apple."] || 
-                [currentBundleID isEqualToString:@"com.hydra.projectx"] || 
-                [currentBundleID isEqualToString:@"com.hydra.weaponx"]) {
-                PXLog(@"[DeviceSpec] Not hooking system process: %@", currentBundleID);
-                return;
-            }
-            
-            // Always initialize caches
-            deviceSpecsCache = [NSMutableDictionary dictionary];
-            cachedBundleDecisions = [NSMutableDictionary dictionary];
-            
-            // Register for notifications to refresh caches
-            CFNotificationCenterAddObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                NULL,
-                refreshCaches,
-                CFSTR("com.hydra.projectx.profileChanged"),
-                NULL,
-                CFNotificationSuspensionBehaviorDeliverImmediately
-            );
-            
-            CFNotificationCenterAddObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                NULL,
-                refreshCaches,
-                CFSTR("com.hydra.projectx.settings.changed"),
-                NULL,
-                CFNotificationSuspensionBehaviorDeliverImmediately
-            );
-            
-            // CRITICAL: Only install hooks if this app is actually scoped
-            if (!isInScopedAppsList()) {
-                // App is NOT scoped - no hooks, no interference, no crashes
-                PXLog(@"[DeviceSpec] App %@ is not scoped, skipping hook installation", currentBundleID);
-                return;
-            }
-            
-            PXLog(@"[DeviceSpec] App %@ is scoped, installing device specification hooks", currentBundleID);
-            
-            // Initialize memory hook function pointers for scoped apps only
-            void *libSystem = dlopen("/usr/lib/libSystem.dylib", RTLD_NOW);
-            if (libSystem) {
-                // Hook sysctlbyname for memory-related calls
-                orig_sysctlbyname = dlsym(libSystem, "sysctlbyname");
-                if (orig_sysctlbyname) {
-                    MSHookFunction(orig_sysctlbyname, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname);
-                    PXLog(@"[DeviceSpec] Successfully hooked sysctlbyname for memory spoofing");
-                }
-                
-                // Hook host_statistics64 for VM stats spoofing
-                orig_host_statistics64 = dlsym(libSystem, "host_statistics64");
-                if (orig_host_statistics64) {
-                    MSHookFunction(orig_host_statistics64, (void *)hook_host_statistics64, (void **)&orig_host_statistics64);
-                    PXLog(@"[DeviceSpec] Successfully hooked host_statistics64 for memory stats spoofing");
-                }
-                
-                orig_nx_get_local_arch_info = dlsym(libSystem, "NXGetLocalArchInfo");
-                if(orig_nx_get_local_arch_info){
-                    MSHookFunction(orig_nx_get_local_arch_info, (void *)hook_nx_get_local_arch_info, (void **)&orig_nx_get_local_arch_info);
-                    PXLog(@"[DeviceSpec] Successfully hooked nx_get_local_arch_info for memory stats spoofing");
-                }
-                dlclose(libSystem);
-            }
-            
-            // Initialize Objective-C hooks for scoped apps only
-            %init();
-            
-            PXLog(@"[DeviceSpec] Device specification hooks successfully initialized for scoped app: %@", currentBundleID);
-            
-        } @catch (NSException *e) {
-            PXLog(@"[DeviceSpec] ❌ Exception in constructor: %@", e);
-        }
-    }
-}
 
 // Helper for logging memory hook invocations only once
 static void logMemoryHook(NSString *apiName) {
@@ -1344,10 +1040,6 @@ static float getFreeMemoryPercentage(void) {
     // Default free memory percentage (typical for iOS devices under normal usage)
     float defaultFreePercentage = 0.35; // 35% free
     
-    // Check if spoofing is enabled
-    if (!isSpoofingEnabled()) {
-        return defaultFreePercentage;
-    }
     
     // Get device specs
     NSDictionary *specs = getDeviceSpecs();
@@ -1496,7 +1188,7 @@ static kern_return_t hook_host_statistics64(host_t host, host_flavor_t flavor, h
     kern_return_t result = orig_host_statistics64(host, flavor, info, count);
     
     // Check if we should modify the result
-    if (result != KERN_SUCCESS || !info || !isSpoofingEnabled()) {
+    if (result != KERN_SUCCESS || !info) {
         return result;
     }
     
@@ -1606,7 +1298,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     int result = orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
 
     // Return original result if conditions not met
-    if (result != 0 || !name || !oldp || !oldlenp || *oldlenp == 0 || !isSpoofingEnabled()) {
+    if (result != 0 || !name || !oldp || !oldlenp || *oldlenp == 0) {
         return result;
     }
     
@@ -2020,3 +1712,55 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     
     return result;
 } 
+
+#pragma mark - Constructor
+
+%ctor {
+    @autoreleasepool {
+        @try {
+            PXLog(@"[DeviceSpec] Initializing device specifications spoofing hooks");
+            if(!IsScope()) return;
+            
+            // Always initialize caches
+            deviceSpecsCache = [NSMutableDictionary dictionary];
+            cachedBundleDecisions = [NSMutableDictionary dictionary];
+            
+            
+
+            PXLog(@"[DeviceSpec] App is scoped, installing device specification hooks");
+            
+            // Initialize memory hook function pointers for scoped apps only
+            void *libSystem = dlopen("/usr/lib/libSystem.dylib", RTLD_NOW);
+            if (libSystem) {
+                // Hook sysctlbyname for memory-related calls
+                orig_sysctlbyname = dlsym(libSystem, "sysctlbyname");
+                if (orig_sysctlbyname) {
+                    MSHookFunction(orig_sysctlbyname, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname);
+                    PXLog(@"[DeviceSpec] Successfully hooked sysctlbyname for memory spoofing");
+                }
+                
+                // Hook host_statistics64 for VM stats spoofing
+                orig_host_statistics64 = dlsym(libSystem, "host_statistics64");
+                if (orig_host_statistics64) {
+                    MSHookFunction(orig_host_statistics64, (void *)hook_host_statistics64, (void **)&orig_host_statistics64);
+                    PXLog(@"[DeviceSpec] Successfully hooked host_statistics64 for memory stats spoofing");
+                }
+                
+                orig_nx_get_local_arch_info = dlsym(libSystem, "NXGetLocalArchInfo");
+                if(orig_nx_get_local_arch_info){
+                    MSHookFunction(orig_nx_get_local_arch_info, (void *)hook_nx_get_local_arch_info, (void **)&orig_nx_get_local_arch_info);
+                    PXLog(@"[DeviceSpec] Successfully hooked nx_get_local_arch_info for memory stats spoofing");
+                }
+                dlclose(libSystem);
+            }
+            
+            // Initialize Objective-C hooks for scoped apps only
+            %init;
+            
+            PXLog(@"[DeviceSpec] Device specification hooks successfully initialized for scoped app");
+            
+        } @catch (NSException *e) {
+            PXLog(@"[DeviceSpec] ❌ Exception in constructor: %@", e);
+        }
+    }
+}

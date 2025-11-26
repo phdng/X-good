@@ -4,140 +4,20 @@
 #import <netdb.h>
 #import <arpa/inet.h>
 #import <objc/runtime.h>
-#import <ellekit/ellekit.h>
+#import <substrate.h>
 #import <WebKit/WebKit.h>
 #import <SafariServices/SafariServices.h>
 #import "ProjectXLogging.h"
+#import "IdentifierManager.h"
+#include <dlfcn.h>
 
-// Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-
-// Scoped apps cache
-static NSMutableDictionary *scopedAppsCache = nil;
-static NSDate *scopedAppsCacheTimestamp = nil;
-static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
 
 // Function pointers for original C functions (DNS level)
 static struct hostent* (*original_gethostbyname)(const char *name);
 static int (*original_getaddrinfo)(const char *hostname, const char *servname, const struct addrinfo *hints, struct addrinfo **res);
 static int (*original_getnameinfo)(const struct sockaddr *sa, socklen_t salen, char *host, size_t hostlen, char *serv, size_t servlen, int flags);
 
-// Forward declarations
-static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
-static BOOL isInScopedAppsList(void);
 static BOOL shouldBlockDomain(NSString *host);
-
-#pragma mark - Scoped Apps Helper Functions (Unified)
-
-// Get the current bundle ID
-static NSString *getCurrentBundleID(void) {
-    @try {
-        NSBundle *mainBundle = [NSBundle mainBundle];
-        if (!mainBundle) {
-            return nil;
-        }
-        return [mainBundle bundleIdentifier];
-    } @catch (NSException *e) {
-        return nil;
-    }
-}
-
-// Load scoped apps from the plist file
-static NSDictionary *loadScopedApps(void) {
-    @try {
-        // Check if cache is valid
-        if (scopedAppsCache && scopedAppsCacheTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:scopedAppsCacheTimestamp] < kScopedAppsCacheValidDuration) {
-            return scopedAppsCache;
-        }
-        
-        // Initialize cache if needed
-        if (!scopedAppsCache) {
-            scopedAppsCache = [NSMutableDictionary dictionary];
-        } else {
-            [scopedAppsCache removeAllObjects];
-        }
-        
-        // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *validPath = nil;
-        
-        for (NSString *path in possiblePaths) {
-            if ([fileManager fileExistsAtPath:path]) {
-                validPath = path;
-                break;
-            }
-        }
-        
-        if (!validPath) {
-            // STEALTH: Silent operation - no frequent logging to avoid detection
-            static NSDate *lastErrorLog = nil;
-            if (!lastErrorLog || [[NSDate date] timeIntervalSinceDate:lastErrorLog] > 300.0) { // 5 minutes
-                // Silent failure - no logging to avoid detection
-                lastErrorLog = [NSDate date];
-            }
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
-        if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Get the scoped apps dictionary
-        NSDictionary *scopedApps = plistDict[@"ScopedApps"];
-        if (!scopedApps || ![scopedApps isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Copy the scoped apps to our cache
-        [scopedAppsCache addEntriesFromDictionary:scopedApps];
-        scopedAppsCacheTimestamp = [NSDate date];
-        
-        return scopedAppsCache;
-        
-    } @catch (NSException *e) {
-        scopedAppsCacheTimestamp = [NSDate date];
-        return scopedAppsCache ?: [NSMutableDictionary dictionary];
-    }
-}
-
-// Check if the current app is in the scoped apps list
-static BOOL isInScopedAppsList(void) {
-    @try {
-        NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled - STEALTH: no logging
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
-    } @catch (NSException *e) {
-        // STEALTH: Silent exception handling
-        return NO;
-    }
-}
 
 #pragma mark - Unified Domain Blocking Logic
 
@@ -161,23 +41,6 @@ static BOOL shouldBlockDomain(NSString *host) {
             return NO; // Early exit if globally disabled
         }
         
-        // Get current bundle ID for scoped app check
-        NSString *bundleID = getCurrentBundleID();
-        NSLog(@"[DomainBlocking DEBUG] Bundle ID: %@", bundleID);
-        
-        if (!bundleID) {
-            // STEALTH: No logging - avoid detection
-            return NO;
-        }
-        
-        // Only check scoped apps if globally enabled
-        BOOL isScoped = isInScopedAppsList();
-        NSLog(@"[DomainBlocking DEBUG] Is scoped app: %@", isScoped ? @"YES" : @"NO");
-        
-        if (!isScoped) {
-            // STEALTH: No logging - avoid detection
-            return NO;
-        }
         
         // Check if domain is blocked (domain names only, no IP blocking)
         BOOL shouldBlock = [settings isDomainBlocked:host];
@@ -648,11 +511,14 @@ static int hooked_getnameinfo(const struct sockaddr *sa, socklen_t salen, char *
 %ctor {
     @autoreleasepool {
         // Initialize cache
-        scopedAppsCache = [NSMutableDictionary dictionary];
         
         // TEMPORARY DEBUG
         NSLog(@"[DomainBlocking] Constructor called");
-        
+        if (!IsScope()) {
+            NSLog(@"[DomainBlocking] Not a scoped app - skipping hooks");
+            // Not a scoped app - no need to initialize hooks
+            return;
+        }
         // OPTIMIZATION: Check if domain blocking is globally enabled before expensive initialization
         DomainBlockingSettings *settings = [DomainBlockingSettings sharedSettings];
         NSLog(@"[DomainBlocking] Settings loaded, enabled: %@", settings.isEnabled ? @"YES" : @"NO");
@@ -664,36 +530,24 @@ static int hooked_getnameinfo(const struct sockaddr *sa, socklen_t salen, char *
             return;
         }
         
-        // Get bundle ID once for all checks
-        NSString *bundleID = getCurrentBundleID();
-        NSLog(@"[DomainBlocking] Current bundle ID: %@", bundleID);
-        
-        BOOL isScoped = isInScopedAppsList();
-        NSLog(@"[DomainBlocking] Is scoped app: %@", isScoped ? @"YES" : @"NO");
-        
-        if (!bundleID || !isScoped) {
-            NSLog(@"[DomainBlocking] Not a scoped app - skipping hooks");
-            // Not a scoped app - no need to initialize hooks
-            return;
-        }
-        
-        NSLog(@"[DomainBlocking] Installing domain blocking hooks for %@", bundleID);
+
+        NSLog(@"[DomainBlocking] Installing domain blocking hooks");
         // STEALTH: Silent initialization - no logging to avoid detection
         
         // Initialize DNS-level C function hooks with ElleKit
         void *gethostbyname_ptr = dlsym(RTLD_DEFAULT, "gethostbyname");
         if (gethostbyname_ptr) {
-            EKHook(gethostbyname_ptr, (void *)hooked_gethostbyname, (void **)&original_gethostbyname);
+            MSHookFunction(gethostbyname_ptr, (void *)hooked_gethostbyname, (void **)&original_gethostbyname);
         }
         
         void *getaddrinfo_ptr = dlsym(RTLD_DEFAULT, "getaddrinfo");
         if (getaddrinfo_ptr) {
-            EKHook(getaddrinfo_ptr, (void *)hooked_getaddrinfo, (void **)&original_getaddrinfo);
+            MSHookFunction(getaddrinfo_ptr, (void *)hooked_getaddrinfo, (void **)&original_getaddrinfo);
         }
         
         void *getnameinfo_ptr = dlsym(RTLD_DEFAULT, "getnameinfo");
         if (getnameinfo_ptr) {
-            EKHook(getnameinfo_ptr, (void *)hooked_getnameinfo, (void **)&original_getnameinfo);
+            MSHookFunction(getnameinfo_ptr, (void *)hooked_getnameinfo, (void **)&original_getnameinfo);
         }
         
         // Initialize all Objective-C hooks

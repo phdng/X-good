@@ -3,7 +3,7 @@
 #import <UIKit/UIKit.h>
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
-#import <ellekit/ellekit.h>
+#import <substrate.h>
 #import <netinet/in.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
@@ -12,6 +12,9 @@
 #import <arpa/inet.h>
 #import "NetworkManager.h"
 #import "ProfileManager.h"
+#import "IdentifierManager.h"
+#include <dlfcn.h>
+
 
 // Constants for connection types
 typedef NS_ENUM(NSInteger, NetworkConnectionType) {
@@ -24,21 +27,12 @@ typedef NS_ENUM(NSInteger, NetworkConnectionType) {
 // Path to security settings plist
 static NSString *const kSecuritySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
 
-// Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
 // Cache for quick lookup
 static NSInteger cachedConnectionType = -1;
 static BOOL cachedNetworkDataSpoofEnabled = NO;
 static NSDate *cacheTimestamp = nil;
 static const NSTimeInterval kCacheValidDuration = 5.0; // 5 seconds
-
-// Scoped apps cache
-static NSMutableDictionary *scopedAppsCache = nil;
-static NSDate *scopedAppsCacheTimestamp = nil;
-static const NSTimeInterval kScopedAppsCacheValidDuration = 30.0; // 30 seconds
 
 // Shared fake cellular carrier for consistent spoofing
 static NSString *const kFakeCarrierName = @"ProjectX";
@@ -84,16 +78,7 @@ static const NSTimeInterval kMinNetworkTypeChangeDuration = 120.0; // Minimum 2 
 
 #pragma mark - Helper Functions
 
-// Get the current bundle ID
-static NSString *getCurrentBundleID() {
-    NSBundle *mainBundle = [NSBundle mainBundle];
-    if (!mainBundle) {
-        return nil;
-    }
-    
-    NSString *bundleID = [mainBundle bundleIdentifier];
-    return bundleID;
-}
+
 
 // Get the current ISO country code from security settings
 static NSString *getCurrentISOCountryCode() {
@@ -178,96 +163,6 @@ static NSString * __attribute__((unused)) getCurrentLocalIPAddress() {
     return address;
 }
 
-// Load scoped apps from the plist file
-static NSDictionary *loadScopedApps() {
-    // Check if cache is valid
-    if (scopedAppsCache && scopedAppsCacheTimestamp && 
-        [[NSDate date] timeIntervalSinceDate:scopedAppsCacheTimestamp] < kScopedAppsCacheValidDuration) {
-        return scopedAppsCache;
-    }
-    
-    // Initialize cache if needed
-    if (!scopedAppsCache) {
-        scopedAppsCache = [NSMutableDictionary dictionary];
-    } else {
-        [scopedAppsCache removeAllObjects];
-    }
-    
-    // Try each possible path for the scoped apps file
-    NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *validPath = nil;
-    
-    for (NSString *path in possiblePaths) {
-        if ([fileManager fileExistsAtPath:path]) {
-            validPath = path;
-            break;
-        }
-    }
-    
-    if (!validPath) {
-        PXLog(@"[NetworkHook] Could not find scoped apps file at any of the expected locations");
-        scopedAppsCacheTimestamp = [NSDate date];
-        return scopedAppsCache;
-    }
-    
-    // Load the plist file
-    NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
-    if (!plistDict) {
-        PXLog(@"[NetworkHook] Failed to load scoped apps plist from %@", validPath);
-        scopedAppsCacheTimestamp = [NSDate date];
-        return scopedAppsCache;
-    }
-    
-    // Get the scoped apps dictionary
-    NSDictionary *scopedApps = plistDict[@"ScopedApps"];
-    if (!scopedApps) {
-        PXLog(@"[NetworkHook] No ScopedApps key found in plist %@", validPath);
-        scopedAppsCacheTimestamp = [NSDate date];
-        return scopedAppsCache;
-    }
-    
-    // Copy the scoped apps to our cache
-    [scopedAppsCache addEntriesFromDictionary:scopedApps];
-    scopedAppsCacheTimestamp = [NSDate date];
-    
-    PXLog(@"[NetworkHook] Loaded %lu scoped apps from %@", (unsigned long)scopedAppsCache.count, validPath);
-    return scopedAppsCache;
-}
-
-// Check if the current app is in the scoped apps list
-static BOOL isInScopedAppsList() {
-    NSString *bundleID = getCurrentBundleID();
-    if (!bundleID) {
-        return NO;
-    }
-    
-    NSDictionary *scopedApps = loadScopedApps();
-    if (!scopedApps || scopedApps.count == 0) {
-        return NO;
-    }
-    
-    // Check if this bundle ID is in the scoped apps dictionary
-    NSDictionary *appEntry = scopedApps[bundleID];
-    if (!appEntry) {
-        // Also try case-insensitive match
-        NSString *lowercaseBundleID = [bundleID lowercaseString];
-        for (NSString *key in scopedApps) {
-            if ([[key lowercaseString] isEqualToString:lowercaseBundleID]) {
-                appEntry = scopedApps[key];
-                break;
-            }
-        }
-        
-        if (!appEntry) {
-            return NO;
-        }
-    }
-    
-    // Check if the app is enabled
-    BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-    return isEnabled;
-}
 
 // Get the current connection type setting from the plist
 static NetworkConnectionType getNetworkConnectionType() {
@@ -318,27 +213,6 @@ static BOOL shouldUseWiFiForAutoMode() {
     return isWiFi;
 }
 
-// Helper to check if we should spoof connection type for the current app
-static BOOL shouldSpoofConnectionType() {
-    NetworkConnectionType type = getNetworkConnectionType();
-    
-    // If spoofing is disabled or set to "None", don't spoof
-    if (type == -1 || !cachedNetworkDataSpoofEnabled || type == NetworkConnectionTypeNone) {
-        return NO;
-    }
-    
-    // Check if the current app is a scoped app
-    BOOL isScoped = isInScopedAppsList();
-    
-    // If it's a scoped app, we should apply the network spoofing
-    if (isScoped) {
-        NSString *bundleID = getCurrentBundleID();
-        PXLog(@"[NetworkHook] App %@ is a scoped app, applying network spoofing", bundleID);
-        return YES;
-    }
-    
-    return NO;
-}
 
 // Helper to check if we should show as WiFi
 static BOOL shouldShowAsWiFi() {
@@ -704,9 +578,6 @@ Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SC
         return result;
     }
     @try {
-        if (!shouldSpoofConnectionType()) {
-            return result;
-        }
         if (shouldShowAsWiFi()) {
             *flags |= kSCNetworkReachabilityFlagsReachable;
             *flags &= ~kSCNetworkReachabilityFlagsIsWWAN;
@@ -847,7 +718,7 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
         return original_getifaddrs(ifap);
     }
     int result = original_getifaddrs(ifap);
-    if (result == 0 && ifap && *ifap && shouldSpoofConnectionType()) {
+    if (result == 0 && ifap && *ifap) {
         struct ifaddrs *ifa = *ifap;
         NetworkConnectionType type = getNetworkConnectionType();
         NSString *spoofedIP = getProfileLocalIPAddress();
@@ -973,12 +844,6 @@ static void isoCountryCodeChanged(CFNotificationCenterRef center, void *observer
     PXLog(@"[NetworkHook] Received ISO country code change notification, cache cleared");
 }
 
-// Notification callback for scoped apps changes
-static void scopedAppsChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    // Clear cache when notification received
-    scopedAppsCacheTimestamp = nil;
-    PXLog(@"[NetworkHook] Received scoped apps change notification, cache cleared");
-}
 
 // Notification callback for carrier details changes
 static void carrierDetailsChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
@@ -1059,20 +924,11 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
 
 %ctor {
     @autoreleasepool {
-        // Initialize the scoped apps cache
-        scopedAppsCache = [NSMutableDictionary dictionary];
         
         PXLog(@"[NetworkHook] Initializing network connection type hooks");
         
-        // Check if the current app is a scoped app
-        NSString *bundleID = getCurrentBundleID();
-        BOOL isScoped = isInScopedAppsList();
-        
-        PXLog(@"[NetworkHook] Current app: %@, is scoped: %@", 
-              bundleID ?: @"(unknown)", isScoped ? @"YES" : @"NO");
-        
         // Only initialize hooks if this is a scoped app
-        if (isScoped) {
+        if (IsScope()) {
             // Initialize CoreTelephony hooks
             %init;
             
@@ -1087,7 +943,7 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
             void *SCNetworkReachabilityGetFlagsPtr = dlsym(RTLD_DEFAULT, "SCNetworkReachabilityGetFlags");
             if (SCNetworkReachabilityGetFlagsPtr) {
                 // Use ElleKit for hooking (preferred for iOS 15+)
-                EKHook(SCNetworkReachabilityGetFlagsPtr, 
+                MSHookFunction(SCNetworkReachabilityGetFlagsPtr, 
                        (void *)hooked_SCNetworkReachabilityGetFlags, 
                        (void **)&original_SCNetworkReachabilityGetFlags);
                 PXLog(@"[NetworkHook] Successfully hooked SCNetworkReachabilityGetFlags");
@@ -1098,7 +954,7 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
             // Enable getifaddrs hook for local IP spoofing
             void *getifaddrsPtr = dlsym(RTLD_DEFAULT, "getifaddrs");
             if (getifaddrsPtr) {
-                EKHook(getifaddrsPtr, (void *)hooked_getifaddrs, (void **)&original_getifaddrs);
+                MSHookFunction(getifaddrsPtr, (void *)hooked_getifaddrs, (void **)&original_getifaddrs);
                 PXLog(@"[NetworkHook] Successfully hooked getifaddrs for local IP spoofing");
             } else {
                 PXLog(@"[NetworkHook] ERROR: Could not find getifaddrs function!");
@@ -1121,14 +977,6 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
                                            NULL,
                                            isoCountryCodeChanged,
                                            CFSTR("com.hydra.projectx.networkISOCountryCodeChanged"),
-                                           NULL,
-                                           CFNotificationSuspensionBehaviorDeliverImmediately);
-            
-            // Register for notification when scoped apps change
-            CFNotificationCenterAddObserver(darwinCenter,
-                                           NULL,
-                                           scopedAppsChanged,
-                                           CFSTR("com.hydra.projectx.scopedAppsChanged"),
                                            NULL,
                                            CFNotificationSuspensionBehaviorDeliverImmediately);
             
@@ -1173,16 +1021,16 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
                 if (initialType == NetworkConnectionTypeWiFi || 
                     (initialType == NetworkConnectionTypeAuto && shouldUseWiFiForAutoMode())) {
                     NSString *localIP = getProfileLocalIPAddress();
-                    PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ (Local IP: %@) for scoped app: %@", 
-                          connectionName, localIP, bundleID);
+                    PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ (Local IP: %@) for scoped app", 
+                          connectionName, localIP);
                 } else if (initialType == NetworkConnectionTypeCellular ||
                           (initialType == NetworkConnectionTypeAuto && !shouldUseWiFiForAutoMode())) {
                     NSString *isoCode = getCurrentISOCountryCode();
-                    PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ (ISO: %@) for scoped app: %@", 
-                          connectionName, isoCode, bundleID);
+                    PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ (ISO: %@) for scoped app", 
+                          connectionName, isoCode);
                 } else {
-                    PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ for scoped app: %@", 
-                          connectionName, bundleID);
+                    PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ for scoped app", 
+                          connectionName);
                 }
             } else {
                 PXLog(@"[NetworkHook] Network connection type spoofing disabled");
@@ -1191,7 +1039,7 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
             // Setup CNCopyCurrentNetworkInfo hook for WiFi signal strength
             void *CNCopyCurrentNetworkInfoPtr = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
             if (CNCopyCurrentNetworkInfoPtr) {
-                EKHook(CNCopyCurrentNetworkInfoPtr,
+                MSHookFunction(CNCopyCurrentNetworkInfoPtr,
                       (void *)hooked_CNCopyCurrentNetworkInfo,
                       (void **)&original_CNCopyCurrentNetworkInfo);
                 PXLog(@"[NetworkHook] Successfully hooked CNCopyCurrentNetworkInfo for WiFi signal strength spoofing");

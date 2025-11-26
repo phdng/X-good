@@ -3,7 +3,7 @@
 #import <WebKit/WebKit.h>
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
-#import <ellekit/ellekit.h>
+#import "IdentifierManager.h"
 
 // Cache for bundle decisions
 static NSMutableDictionary *cachedBundleDecisions = nil;
@@ -102,36 +102,6 @@ static void addNoiseToImageData(NSMutableData *imageData, NSString *bundleID) {
     }
 }
 
-// Helper: Check if current app is in the scoped apps list (copied from WiFiHook.x)
-static BOOL isInScopedAppsList(void) {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        NSArray *possiblePaths = @[@"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist",
-                                   @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist",
-                                   @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist"];
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *validPath = nil;
-        for (NSString *path in possiblePaths) {
-            if ([fileManager fileExistsAtPath:path]) {
-                validPath = path;
-                break;
-            }
-        }
-        if (!validPath) return NO;
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
-        NSDictionary *scopedApps = plistDict[@"ScopedApps"];
-        if (!scopedApps || ![scopedApps isKindOfClass:[NSDictionary class]]) return NO;
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) return NO;
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-    } @catch (NSException *e) {
-        return NO;
-    }
-}
 
 // Helper: Re-inject JS into all live WKWebViews
 static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
@@ -632,7 +602,7 @@ static void refreshSettings(CFNotificationCenterRef center, void *observer, CFSt
 %ctor {
     @autoreleasepool {
         PXLog(@"[CanvasFingerprint] Initializing Canvas Fingerprint Protection hooks");
-        if (!isInScopedAppsList()) {
+        if (!IsScope()) {
             PXLog(@"[CanvasFingerprint] App is not scoped, skipping hook installation");
             return;
         }

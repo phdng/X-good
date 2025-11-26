@@ -9,9 +9,10 @@
 #import <mach-o/dyld.h>
 #import <mach-o/dyld_images.h>
 #import <IOKit/IOKitLib.h>
-#import <ellekit/ellekit.h>
 #import <sys/sysctl.h>
 #import <pthread.h>
+#import "ProfileManager.h"
+#import <substrate.h>
 
 // Macro for iOS version checking
 #define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != NSOrderedAscending)
@@ -291,12 +292,12 @@ static NSString *getSpoofedSystemBootUUID() {
         }
         
         // Try to read directly from plist files
-        IdentifierManager *idManager = [NSClassFromString(@"IdentifierManager") sharedManager];
-        if (!idManager) {
-            return [[NSUUID UUID] UUIDString];
-        }
+        // IdentifierManager *idManager = [NSClassFromString(@"IdentifierManager") sharedManager];
+        // if (!idManager) {
+        //     return [[NSUUID UUID] UUIDString];
+        // }
         
-        NSString *identityDir = [idManager valueForKey:@"profileIdentityPath"];
+        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
         
         if (identityDir) {
             // First try the combined device_ids.plist
@@ -384,12 +385,9 @@ static NSString *getSpoofedDyldCacheUUID() {
         }
         
         // Try to read directly from plist files
-        IdentifierManager *idManager = [NSClassFromString(@"IdentifierManager") sharedManager];
-        if (!idManager) {
-            return [[NSUUID UUID] UUIDString];
-        }
+ 
         
-        NSString *identityDir = [idManager valueForKey:@"profileIdentityPath"];
+        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
         
         if (identityDir) {
             // First try the combined device_ids.plist
@@ -1035,15 +1033,9 @@ static void setupAdditionalSystemUUIDHooks() {
         if (libc) {
             void *gethostuuid_sym = dlsym(libc, "gethostuuid");
             if (gethostuuid_sym) {
-                int result = EKHook(gethostuuid_sym, 
+                MSHookFunction(gethostuuid_sym, 
                                   (void *)replaced_gethostuuid, 
                                   (void **)&orig_gethostuuid);
-                
-                if (result == 0) {
-                    PXLog(@"[WeaponX] ✅ Successfully hooked gethostuuid");
-                } else {
-                    PXLog(@"[WeaponX] ⚠️ Failed to hook gethostuuid: %d", result);
-                }
             } else {
                 PXLog(@"[WeaponX] ⚠️ Could not find gethostuuid symbol");
             }
@@ -1051,15 +1043,15 @@ static void setupAdditionalSystemUUIDHooks() {
             // Hook sysctlbyname
             void *sysctlbyname_sym = dlsym(libc, "sysctlbyname");
             if (sysctlbyname_sym) {
-                int result = EKHook(sysctlbyname_sym, 
+                MSHookFunction(sysctlbyname_sym, 
                                   (void *)replaced_sysctlbyname, 
                                   (void **)&orig_sysctlbyname);
                 
-                if (result == 0) {
-                    PXLog(@"[WeaponX] ✅ Successfully hooked sysctlbyname");
-                } else {
-                    PXLog(@"[WeaponX] ⚠️ Failed to hook sysctlbyname: %d", result);
-                }
+                // if (result == 0) {
+                //     PXLog(@"[WeaponX] ✅ Successfully hooked sysctlbyname");
+                // } else {
+                //     PXLog(@"[WeaponX] ⚠️ Failed to hook sysctlbyname: %d", result);
+                // }
             } else {
                 PXLog(@"[WeaponX] ⚠️ Could not find sysctlbyname symbol");
             }
@@ -1074,15 +1066,10 @@ static void setupAdditionalSystemUUIDHooks() {
         if (coreFoundation) {
             void *cfuuidcreate_sym = dlsym(coreFoundation, "CFUUIDCreate");
             if (cfuuidcreate_sym) {
-                int result = EKHook(cfuuidcreate_sym, 
+                MSHookFunction(cfuuidcreate_sym, 
                                   (void *)replaced_CFUUIDCreate, 
                                   (void **)&orig_CFUUIDCreate);
                 
-                if (result == 0) {
-                    PXLog(@"[WeaponX] ✅ Successfully hooked CFUUIDCreate");
-                } else {
-                    PXLog(@"[WeaponX] ⚠️ Failed to hook CFUUIDCreate: %d", result);
-                }
             } else {
                 PXLog(@"[WeaponX] ⚠️ Could not find CFUUIDCreate symbol");
             }
@@ -1189,26 +1176,9 @@ static void setupAdditionalSystemUUIDHooks() {
                         orig_dyld_get_shared_cache_uuid = dlsym(handle, "_dyld_get_shared_cache_uuid");
                         
                         if (orig_dyld_get_shared_cache_uuid) {
-                            // Use EKHook for hook installation with retry logic
-                            int retryCount = 0;
-                            int maxRetries = 3;
-                            int result = -1;
-                            
-                            while (result != 0 && retryCount < maxRetries) {
-                                result = EKHook(orig_dyld_get_shared_cache_uuid, 
-                                            (void *)replaced_dyld_get_shared_cache_uuid, 
-                                            (void **)&orig_dyld_get_shared_cache_uuid);
-                                
-                                if (result == 0) {
-                                    PXLog(@"[WeaponX] ✅ Successfully hooked _dyld_get_shared_cache_uuid");
-                                } else {
-                                    PXLog(@"[WeaponX] ⚠️ Failed to hook _dyld_get_shared_cache_uuid (attempt %d): %d", 
-                                        retryCount + 1, result);
-                                    retryCount++;
-                                    // Small delay before retry
-                                    [NSThread sleepForTimeInterval:0.1];
-                                }
-                            }
+                            MSHookFunction(orig_dyld_get_shared_cache_uuid, 
+                                        (void *)replaced_dyld_get_shared_cache_uuid, 
+                                        (void **)&orig_dyld_get_shared_cache_uuid);      
                         } else {
                             PXLog(@"[WeaponX] ⚠️ Could not find _dyld_get_shared_cache_uuid symbol");
                         }
@@ -1222,26 +1192,10 @@ static void setupAdditionalSystemUUIDHooks() {
                         orig_dyld_get_all_image_infos = dlsym(handle, "_dyld_get_all_image_infos");
                         
                         if (orig_dyld_get_all_image_infos) {
-                            // Use EKHook for hook installation with retry logic
-                            int retryCount = 0;
-                            int maxRetries = 3;
-                            int result = -1;
-                            
-                            while (result != 0 && retryCount < maxRetries) {
-                                result = EKHook(orig_dyld_get_all_image_infos, 
+                                MSHookFunction(orig_dyld_get_all_image_infos, 
                                             (void *)replaced_dyld_get_all_image_infos, 
                                             (void **)&orig_dyld_get_all_image_infos);
-                                
-                                if (result == 0) {
-                                    PXLog(@"[WeaponX] ✅ Successfully hooked _dyld_get_all_image_infos");
-                                } else {
-                                    PXLog(@"[WeaponX] ⚠️ Failed to hook _dyld_get_all_image_infos (attempt %d): %d", 
-                                        retryCount + 1, result);
-                                    retryCount++;
-                                    // Small delay before retry
-                                    [NSThread sleepForTimeInterval:0.1];
-                                }
-                            }
+                            
                         } else {
                             PXLog(@"[WeaponX] ⚠️ Could not find _dyld_get_all_image_infos symbol");
                         }

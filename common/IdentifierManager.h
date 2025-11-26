@@ -3,6 +3,7 @@
 #import "ProjectX.h"
 
 // Declare this in a category to avoid duplicate interface
+#define IsScope() [[IdentifierManager sharedManager] isScope]
 
 @interface IdentifierManager (AppManagement)
 
@@ -73,5 +74,5 @@
 - (BOOL)setCustomMEID:(NSString *)value;
 - (NSString *)generateIMEI;
 - (NSString *)generateMEID;
-
+- (BOOL) isScope;
 @end

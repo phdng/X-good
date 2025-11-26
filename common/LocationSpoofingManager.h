@@ -48,7 +48,6 @@ typedef NS_ENUM(NSInteger, TransportationMode) {
 - (CLLocation *)modifySpoofedLocation:(CLLocation *)originalLocation;
 - (double)getSpoofedLatitude;
 - (double)getSpoofedLongitude;
-- (BOOL)shouldSpoofApp:(NSString *)bundleID;
 
 // Advanced spoofing methods
 - (void)setTransportationMode:(TransportationMode)mode;

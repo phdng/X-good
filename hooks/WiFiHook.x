@@ -7,22 +7,13 @@
 #import "ProjectXLogging.h"
 #import "WiFiManager.h"
 #import "MethodSwizzler.h"
-#import <ellekit/ellekit.h>
 #import <Network/Network.h>
 #import <SystemConfiguration/SystemConfiguration.h>
 #import <ifaddrs.h>
 #import <net/if.h>
 #import "ProfileManager.h"
-
-// Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-
-// Scoped apps cache
-static NSMutableDictionary *scopedAppsCache = nil;
-static NSDate *scopedAppsCacheTimestamp = nil;
-static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
+#import "IdentifierManager.h"
+#import <substrate.h>
 
 // Forward declarations for private API methods
 @interface NWPath (WeaponXPrivate)
@@ -80,48 +71,9 @@ static NSDate *cacheTimestamp = nil;
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes in seconds
 
-// Forward declarations
-static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
-static BOOL isInScopedAppsList(void);
-
 #pragma mark - Profile Detection Helpers
 
-// Helper function to check if we should spoof for this bundle ID (with caching)
-static BOOL shouldSpoofForBundle(NSString *bundleID) {
-    if (!bundleID) return NO;
-    
-    // Check cache first
-    if (!cachedBundleDecisions) {
-        cachedBundleDecisions = [NSMutableDictionary dictionary];
-    } else {
-        NSNumber *cachedDecision = cachedBundleDecisions[bundleID];
-        NSDate *decisionTimestamp = cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]];
-        
-        if (cachedDecision && decisionTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:decisionTimestamp] < kCacheValidityDuration) {
-            return [cachedDecision boolValue];
-        }
-    }
-    
-    // Skip spoofing for system apps
-    if ([bundleID hasPrefix:@"com.apple."] && 
-        ![bundleID isEqualToString:@"com.apple.mobilesafari"] &&
-        ![bundleID isEqualToString:@"com.apple.webapp"]) {
-        cachedBundleDecisions[bundleID] = @NO;
-        cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        return NO;
-    }
-    
-    // Check if the current app is a scoped app
-    BOOL isScoped = isInScopedAppsList();
-    
-    // Cache the decision
-    cachedBundleDecisions[bundleID] = @(isScoped);
-    cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-    
-    return isScoped;
-}
+
 
 
 // Get current WiFi info from appropriate profile
@@ -243,12 +195,8 @@ static CFDictionaryRef replaced_CNCopyCurrentNetworkInfo(CFStringRef interfaceNa
     
     @try {
         // Get the bundle ID for scope checking
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         // Check if we should spoof for this bundle
-        if (!shouldSpoofForBundle(bundleID)) {
-            return originalDict;
-        }
         
         // Try to use cached info first
         if (cachedWifiInfo && cachedWifiInfo[@"ssid"] && cachedWifiInfo[@"bssid"]) {
@@ -294,14 +242,8 @@ static id replaced_dictionaryWithScanResult(id self, SEL _cmd, id arg1) {
     }
     
     @try {
-        // Get bundle ID for scope checking
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+        // Get bundle ID for scope checking        
         // Check if we should spoof
-        if (!shouldSpoofForBundle(bundleID)) {
-            return originalResult;
-        }
-        
         // Ensure we have a valid dictionary to work with
         if (!originalResult || ![originalResult isKindOfClass:[NSDictionary class]]) {
             return originalResult;
@@ -361,9 +303,6 @@ static id replaced_dictionaryWithScanResult(id self, SEL _cmd, id arg1) {
 - (NSString *)weaponx_SSID {
     // Check if we should spoof
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!shouldSpoofForBundle(bundleID)) {
-        return [self weaponx_SSID]; // Call original
-    }
     
     // Try to use cached info first
     if (cachedWifiInfo && cachedWifiInfo[@"ssid"]) {
@@ -389,10 +328,7 @@ static id replaced_dictionaryWithScanResult(id self, SEL _cmd, id arg1) {
 - (NSString *)weaponx_BSSID {
     // Check if we should spoof
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!shouldSpoofForBundle(bundleID)) {
-        return [self weaponx_BSSID]; // Call original
-    }
-    
+
     // Try to use cached info first
     if (cachedWifiInfo && cachedWifiInfo[@"bssid"]) {
         return cachedWifiInfo[@"bssid"];
@@ -417,10 +353,6 @@ static id replaced_dictionaryWithScanResult(id self, SEL _cmd, id arg1) {
 // Additional NEHotspotNetwork property hook for signal strength
 - (NSNumber *)weaponx_signalStrength {
     // Check if we should spoof
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!shouldSpoofForBundle(bundleID)) {
-        return [self weaponx_signalStrength]; // Call original
-    }
     
     // Return a realistic signal strength (0.7-0.9 range for good strength)
     double strength = 0.7 + ((double)arc4random_uniform(20) / 100.0);
@@ -430,10 +362,6 @@ static id replaced_dictionaryWithScanResult(id self, SEL _cmd, id arg1) {
 // Additional NEHotspotNetwork property hook for secure flag
 - (BOOL)weaponx_secure {
     // Check if we should spoof
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!shouldSpoofForBundle(bundleID)) {
-        return [self weaponx_secure]; // Call original
-    }
     
     // Most networks are secure, so default to YES (true)
     return YES;
@@ -459,12 +387,7 @@ static WiFiNetworkRef replaced_WiFiDeviceClientCopyCurrentNetwork(WiFiDeviceClie
 
 // Hook implementation for WiFiNetworkGetSSID
 static CFStringRef replaced_WiFiNetworkGetSSID(WiFiNetworkRef network) {
-    // Check if we should spoof
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!shouldSpoofForBundle(bundleID)) {
-        return orig_WiFiNetworkGetSSID(network);
-    }
-    
+
     // Try to use cached info first
     if (cachedWifiInfo && cachedWifiInfo[@"ssid"]) {
         return (__bridge CFStringRef)cachedWifiInfo[@"ssid"];
@@ -488,11 +411,6 @@ static CFStringRef replaced_WiFiNetworkGetSSID(WiFiNetworkRef network) {
 
 // Hook implementation for WiFiNetworkGetBSSID
 static CFStringRef replaced_WiFiNetworkGetBSSID(WiFiNetworkRef network) {
-    // Check if we should spoof
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!shouldSpoofForBundle(bundleID)) {
-        return orig_WiFiNetworkGetBSSID(network);
-    }
     
     // Try to use cached info first
     if (cachedWifiInfo && cachedWifiInfo[@"bssid"]) {
@@ -521,23 +439,23 @@ static void initializeHooks(void) {
     // Install CNCopyCurrentNetworkInfo hook using ellekit
     void *symbol = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
     if (symbol) {
-        int result = EKHook(symbol, 
+        MSHookFunction(symbol, 
                            (void *)replaced_CNCopyCurrentNetworkInfo, 
                            (void **)&orig_CNCopyCurrentNetworkInfo);
         
-        if (result != 0) {
-            // Try to find the symbol in the framework
-            void *captiveNetworkLib = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
-            if (captiveNetworkLib) {
-                symbol = dlsym(captiveNetworkLib, "CNCopyCurrentNetworkInfo");
-                if (symbol) {
-                    EKHook(symbol, 
-                          (void *)replaced_CNCopyCurrentNetworkInfo, 
-                          (void **)&orig_CNCopyCurrentNetworkInfo);
-                }
-                dlclose(captiveNetworkLib);
-            }
-        }
+        // if (result != 0) {
+        //     // Try to find the symbol in the framework
+        //     void *captiveNetworkLib = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
+        //     if (captiveNetworkLib) {
+        //         symbol = dlsym(captiveNetworkLib, "CNCopyCurrentNetworkInfo");
+        //         if (symbol) {
+        //             MSHookFunction(symbol, 
+        //                   (void *)replaced_CNCopyCurrentNetworkInfo, 
+        //                   (void **)&orig_CNCopyCurrentNetworkInfo);
+        //         }
+        //         dlclose(captiveNetworkLib);
+        //     }
+        // }
     }
     
     // Install NEHotspotHelper hook using method swizzling
@@ -577,7 +495,7 @@ static void initializeHooks(void) {
         // Hook WiFiManagerClientCreate
         symbol = dlsym(mobileWiFiLib, "WiFiManagerClientCreate");
         if (symbol) {
-            EKHook(symbol, 
+            MSHookFunction(symbol, 
                   (void *)replaced_WiFiManagerClientCreate, 
                   (void **)&orig_WiFiManagerClientCreate);
         }
@@ -585,7 +503,7 @@ static void initializeHooks(void) {
         // Hook WiFiDeviceClientCopyCurrentNetwork
         symbol = dlsym(mobileWiFiLib, "WiFiDeviceClientCopyCurrentNetwork");
         if (symbol) {
-            EKHook(symbol, 
+            MSHookFunction(symbol, 
                   (void *)replaced_WiFiDeviceClientCopyCurrentNetwork, 
                   (void **)&orig_WiFiDeviceClientCopyCurrentNetwork);
         }
@@ -593,7 +511,7 @@ static void initializeHooks(void) {
         // Hook WiFiNetworkGetSSID
         symbol = dlsym(mobileWiFiLib, "WiFiNetworkGetSSID");
         if (symbol) {
-            EKHook(symbol, 
+            MSHookFunction(symbol, 
                   (void *)replaced_WiFiNetworkGetSSID, 
                   (void **)&orig_WiFiNetworkGetSSID);
         }
@@ -601,7 +519,7 @@ static void initializeHooks(void) {
         // Hook WiFiNetworkGetBSSID
         symbol = dlsym(mobileWiFiLib, "WiFiNetworkGetBSSID");
         if (symbol) {
-            EKHook(symbol, 
+            MSHookFunction(symbol, 
                   (void *)replaced_WiFiNetworkGetBSSID, 
                   (void **)&orig_WiFiNetworkGetBSSID);
         }
@@ -612,19 +530,6 @@ static void initializeHooks(void) {
 
 #pragma mark - Notification Handlers
 
-static void settingsChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    NSString *notificationName = (__bridge NSString *)name;
-    PXLog(@"[WeaponX] Received settings notification: %@", notificationName);
-    
-    // Clear cached info to force refresh
-    if (cachedWifiInfo) {
-        [cachedWifiInfo removeAllObjects];
-    }
-    
-    // Also reset profile ID cache to ensure we get the latest
-    cachedProfileId = nil;
-    cacheTimestamp = nil;
-}
 
 #pragma mark - NWPathMonitor Hooks (Network Framework)
 
@@ -637,12 +542,6 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
 }
 
 - (NSString *)_getSSID {
-    // Check if we should spoof
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!shouldSpoofForBundle(bundleID)) {
-        return %orig;
-    }
-    
     // Return spoofed SSID if available
     NSDictionary *wifiInfo = getProfileWiFiInfo();
     if (wifiInfo && wifiInfo[@"ssid"]) {
@@ -654,11 +553,6 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
 }
 
 - (id)_getBSSID {
-    // Check if we should spoof
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!shouldSpoofForBundle(bundleID)) {
-        return %orig;
-    }
     
     // Return spoofed BSSID if available
     NSDictionary *wifiInfo = getProfileWiFiInfo();
@@ -722,38 +616,14 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
     @autoreleasepool {
         @try {
             PXLog(@"[WiFiHook] Initializing WiFi hooks");
-            
-            // Get the bundle ID for scope checking
-            NSString *bundleID = getCurrentBundleID();
-            
-            // Skip if we can't get bundle ID
-            if (!bundleID || [bundleID length] == 0) {
-                return;
-            }
-            
-            // Skip if this is a system process (except allowed ones)
-            if ([bundleID hasPrefix:@"com.apple."] && 
-                ![bundleID isEqualToString:@"com.apple.mobilesafari"] &&
-                ![bundleID isEqualToString:@"com.apple.webapp"]) {
-                PXLog(@"[WiFiHook] Not hooking system process: %@", bundleID);
-                return;
-            }
-            
-            // Skip our own apps
-            if ([bundleID isEqualToString:@"com.hydra.projectx"] || 
-                [bundleID isEqualToString:@"com.hydra.weaponx"]) {
-                PXLog(@"[WiFiHook] Not hooking own app: %@", bundleID);
-                return;
-            }
-            
             // CRITICAL: Only install hooks if this app is actually scoped
-            if (!isInScopedAppsList()) {
+            if (!IsScope()) {
                 // App is NOT scoped - no hooks, no interference, no crashes
-                PXLog(@"[WiFiHook] App %@ is not scoped, skipping hook installation", bundleID);
+                PXLog(@"[WiFiHook] App is not scoped, skipping hook installation");
                 return;
             }
             
-            PXLog(@"[WiFiHook] App %@ is scoped, setting up WiFi hooks", bundleID);
+            PXLog(@"[WiFiHook] App is scoped, setting up WiFi hooks");
             
             // Initialize cache dictionaries
             cachedBundleDecisions = [NSMutableDictionary dictionary];
@@ -764,37 +634,7 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
             // Initialize Objective-C hooks for scoped apps only
             %init;
             
-            // Register for settings change notifications
-            CFNotificationCenterAddObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                NULL,
-                settingsChanged,
-                CFSTR("com.hydra.projectx.settings.changed"),
-                NULL,
-                CFNotificationSuspensionBehaviorDeliverImmediately
-            );
-            
-            // Also register for WiFi-specific toggle notifications
-            CFNotificationCenterAddObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                NULL,
-                settingsChanged,
-                CFSTR("com.hydra.projectx.toggleWifiSpoof"),
-                NULL,
-                CFNotificationSuspensionBehaviorDeliverImmediately
-            );
-            
-            // Register for profile change notifications
-            CFNotificationCenterAddObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                NULL,
-                settingsChanged,
-                CFSTR("com.hydra.projectx.profileChanged"),
-                NULL,
-                CFNotificationSuspensionBehaviorDeliverImmediately
-            );
-            
-            PXLog(@"[WiFiHook] WiFi hooks successfully initialized for scoped app: %@", bundleID);
+            PXLog(@"[WiFiHook] WiFi hooks successfully initialized for scoped app");
             
         } @catch (NSException *e) {
             PXLog(@"[WiFiHook] ❌ Exception in constructor: %@", e);
@@ -802,110 +642,3 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
     }
 }
 
-#pragma mark - Scoped Apps Helper Functions
-
-// Get the current bundle ID
-static NSString *getCurrentBundleID(void) {
-    @try {
-        NSBundle *mainBundle = [NSBundle mainBundle];
-        if (!mainBundle) {
-            return nil;
-        }
-        return [mainBundle bundleIdentifier];
-    } @catch (NSException *e) {
-        return nil;
-    }
-}
-
-// Load scoped apps from the plist file
-static NSDictionary *loadScopedApps(void) {
-    @try {
-        // Check if cache is valid
-        if (scopedAppsCache && scopedAppsCacheTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:scopedAppsCacheTimestamp] < kScopedAppsCacheValidDuration) {
-            return scopedAppsCache;
-        }
-        
-        // Initialize cache if needed
-        if (!scopedAppsCache) {
-            scopedAppsCache = [NSMutableDictionary dictionary];
-        } else {
-            [scopedAppsCache removeAllObjects];
-        }
-        
-        // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *validPath = nil;
-        
-        for (NSString *path in possiblePaths) {
-            if ([fileManager fileExistsAtPath:path]) {
-                validPath = path;
-                break;
-            }
-        }
-        
-        if (!validPath) {
-            // Don't log this error too frequently to avoid spam
-            static NSDate *lastErrorLog = nil;
-            if (!lastErrorLog || [[NSDate date] timeIntervalSinceDate:lastErrorLog] > 300.0) { // 5 minutes
-                PXLog(@"[WiFiHook] Could not find scoped apps file");
-                lastErrorLog = [NSDate date];
-            }
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
-        if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Get the scoped apps dictionary
-        NSDictionary *scopedApps = plistDict[@"ScopedApps"];
-        if (!scopedApps || ![scopedApps isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Copy the scoped apps to our cache
-        [scopedAppsCache addEntriesFromDictionary:scopedApps];
-        scopedAppsCacheTimestamp = [NSDate date];
-        
-        return scopedAppsCache;
-        
-    } @catch (NSException *e) {
-        scopedAppsCacheTimestamp = [NSDate date];
-        return scopedAppsCache ?: [NSMutableDictionary dictionary];
-    }
-}
-
-// Check if the current app is in the scoped apps list
-static BOOL isInScopedAppsList(void) {
-    @try {
-        NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
-    } @catch (NSException *e) {
-        return NO;
-    }
-} 

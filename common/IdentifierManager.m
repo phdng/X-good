@@ -39,7 +39,6 @@
 @property (nonatomic, strong) NSMutableDictionary *settings;
 @property (nonatomic, strong) NSMutableDictionary *scopedApps;
 @property (nonatomic, strong) NSError *error;
-@property (nonatomic, strong) NSMutableDictionary *spoofCache;
 @end
 
 @implementation IdentifierManager{
@@ -219,8 +218,8 @@
     if (self = [super init]) {
         _settings = [NSMutableDictionary dictionary];
         _scopedApps = [NSMutableDictionary dictionary];
-        _spoofCache = [NSMutableDictionary dictionary];
     }
+    // [self loadScopedApps];
     // 读取配置文件
     NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) {
@@ -1796,7 +1795,31 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         PXLog(@"[WeaponX] Added extension pattern: %@ for app: %@", extensionPattern, bundleID);
     }
 }
-
+- (BOOL)isScope{
+    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    // NSLog(@"%s app",bundleID);
+    // if([self isExtensionEnabled:bundleID]){
+    //     NSLog(@"%s app is selected",bundleID);
+    // }
+    // NSLog(@"%s app is not selected",bundleID);
+    if (!bundleID) return NO;
+    
+    // 是自己直接返回 不是则判断是否选中
+    if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
+        return NO;
+    }
+    
+    // Check each scoped app's extension pattern
+    for (NSString *scopedBundleID in self.scopedApps) {
+        NSDictionary *appInfo = self.scopedApps[scopedBundleID];
+        if (scopedBundleID && [self isBundleIDMatch:bundleID withPattern:scopedBundleID]) {
+            // PXLog(@"[WeaponX] Bundle ID %@ matches extension pattern %@ from app %@", bundleID, extensionPattern, scopedBundleID);
+            return [appInfo[@"enabled"] boolValue];
+        }
+    }
+    
+    return NO;
+}
 - (BOOL)isBundleIDMatch:(NSString *)targetBundleID withPattern:(NSString *)patternBundleID {
     if (!targetBundleID || !patternBundleID) return NO;
     
@@ -1825,41 +1848,41 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     return matches;
 }
 
-- (BOOL)shouldSpoofForBundle:(NSString *)bundleID {
-    if (!bundleID) return NO;
+// - (BOOL)shouldSpoofForBundle:(NSString *)bundleID {
+//     if (!bundleID) return NO;
     
-    // Check cache first
-    NSNumber *cachedDecision = self.spoofCache[bundleID];
-    if (cachedDecision) {
-        return [cachedDecision boolValue];
-    }
+//     // Check cache first
+//     NSNumber *cachedDecision = self.spoofCache[bundleID];
+//     if (cachedDecision) {
+//         return [cachedDecision boolValue];
+//     }
     
-    // Check if the app is directly in scope
-    BOOL isInScope = self.scopedApps[bundleID] != nil;
+//     // Check if the app is directly in scope
+//     BOOL isInScope = self.scopedApps[bundleID] != nil;
     
-    // If not directly in scope, check if it's an extension of a scoped app
-    if (!isInScope) {
-        isInScope = [self isExtensionEnabled:bundleID];
+//     // If not directly in scope, check if it's an extension of a scoped app
+//     if (!isInScope) {
+//         isInScope = [self isExtensionEnabled:bundleID];
         
-        // If it's an extension, log this for debugging
-        if (isInScope) {
-            PXLog(@"[WeaponX] Bundle ID %@ is enabled as an extension", bundleID);
-        }
-    } else {
-        // If directly in scope, check if it's enabled
-        isInScope = [self.scopedApps[bundleID][@"enabled"] boolValue];
+//         // If it's an extension, log this for debugging
+//         if (isInScope) {
+//             PXLog(@"[WeaponX] Bundle ID %@ is enabled as an extension", bundleID);
+//         }
+//     } else {
+//         // If directly in scope, check if it's enabled
+//         isInScope = [self.scopedApps[bundleID][@"enabled"] boolValue];
         
-        if (isInScope) {
-            PXLog(@"[WeaponX] Bundle ID %@ is directly enabled in scope", bundleID);
-        }
-    }
+//         if (isInScope) {
+//             PXLog(@"[WeaponX] Bundle ID %@ is directly enabled in scope", bundleID);
+//         }
+//     }
     
-    // Cache the decision with a timestamp
-    self.spoofCache[bundleID] = @(isInScope);
-    self.spoofCache[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
+//     // Cache the decision with a timestamp
+//     self.spoofCache[bundleID] = @(isInScope);
+//     self.spoofCache[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
     
-    return isInScope;
-}
+//     return isInScope;
+// }
 
 - (void)saveScopedApps {
     // Get the proper preferences path
@@ -1905,8 +1928,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 - (BOOL)isExtensionEnabled:(NSString *)bundleID {
     if (!bundleID) return NO;
     
-    // Never consider the WeaponX app itself or system apps
-    if ([bundleID isEqualToString:@"com.hydra.projectx"] || [bundleID hasPrefix:@"com.apple."]) {
+    // 是自己直接返回 不是则判断是否选中
+    if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
         return NO;
     }
     
@@ -1914,7 +1937,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     for (NSString *scopedBundleID in self.scopedApps) {
         NSDictionary *appInfo = self.scopedApps[scopedBundleID];
         NSString *extensionPattern = appInfo[@"extensionPattern"];
-        
+        NSLog(@"%@ match %@",bundleID,scopedBundleID);
         if (extensionPattern && [self isBundleIDMatch:bundleID withPattern:extensionPattern]) {
             PXLog(@"[WeaponX] Bundle ID %@ matches extension pattern %@ from app %@", bundleID, extensionPattern, scopedBundleID);
             return [appInfo[@"enabled"] boolValue];

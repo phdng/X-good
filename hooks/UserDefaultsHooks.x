@@ -4,7 +4,6 @@
 #import "ProjectXLogging.h"
 #import "IdentifierManager.h"
 #import "UserDefaultsUUIDManager.h"
-#import <ellekit/ellekit.h>
 #import "ProfileManager.h"
 
 // Function declarations
@@ -12,59 +11,6 @@ static NSString *getSpoofedUserDefaultsUUID();
 static BOOL isUUIDKey(NSString *key);
 static id processDictionaryValues(id object);
 
-// Global variables to track state
-static NSMutableDictionary *cachedBundleDecisions = nil;
-static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes 
-
-// Callback function for notifications that clear the cache
-static void clearCacheCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    // Clear cached decisions
-    if (cachedBundleDecisions) {
-        [cachedBundleDecisions removeAllObjects];
-    }
-}
-
-// Helper function to check if we should spoof for this bundle ID (with caching)
-static BOOL shouldSpoofForBundle(NSString *bundleID) {
-    if (!bundleID) return NO;
-    
-    // Skip for system apps and the tweak itself
-    if ([bundleID hasPrefix:@"com.apple."] || [bundleID isEqualToString:@"com.hydra.projectx"]) {
-        return NO;
-    }
-    
-    // Check cache first
-    if (!cachedBundleDecisions) {
-        cachedBundleDecisions = [NSMutableDictionary dictionary];
-    } else {
-        NSNumber *cachedDecision = cachedBundleDecisions[bundleID];
-        NSDate *decisionTimestamp = cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]];
-        
-        if (cachedDecision && decisionTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:decisionTimestamp] < kCacheValidityDuration) {
-            return [cachedDecision boolValue];
-        }
-    }
-    
-    // Get IdentifierManager to check if we should spoof
-    if (!NSClassFromString(@"IdentifierManager")) {
-        cachedBundleDecisions[bundleID] = @NO;
-        cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        return NO;
-    }
-    
-    IdentifierManager *manager = [NSClassFromString(@"IdentifierManager") sharedManager];
-    
-    // Check if this app is enabled for spoofing and UserDefaults UUID features are enabled
-    BOOL shouldSpoof = [manager isApplicationEnabled:bundleID] && 
-                       [manager isIdentifierEnabled:@"UserDefaultsUUID"];
-    
-    // Cache the decision
-    cachedBundleDecisions[bundleID] = @(shouldSpoof);
-    cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-    
-    return shouldSpoof;
-}
 
 // Add function to get spoofed UserDefaults UUID from manager
 static NSString *getSpoofedUserDefaultsUUID() {
@@ -210,10 +156,8 @@ static BOOL isUUIDKey(NSString *key) {
 
 // Base method for getting objects
 - (id)objectForKey:(NSString *)defaultName {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID) && isUUIDKey(defaultName)) {
+    @try {        
+        if (isUUIDKey(defaultName)) {
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
             PXLog(@"[WeaponX] 🔍 Spoofing UserDefaults UUID for key '%@' with: %@", defaultName, spoofedUUID);
             return spoofedUUID;
@@ -221,9 +165,9 @@ static BOOL isUUIDKey(NSString *key) {
         
         // Process object and look for UUIDs inside it
         id originalValue = %orig;
-        if (shouldSpoofForBundle(bundleID) && (
+        if (
             [originalValue isKindOfClass:[NSDictionary class]] || 
-            [originalValue isKindOfClass:[NSArray class]])) {
+            [originalValue isKindOfClass:[NSArray class]]) {
             return processDictionaryValues(originalValue);
         }
     } @catch (NSException *exception) {
@@ -236,10 +180,8 @@ static BOOL isUUIDKey(NSString *key) {
 
 // String-specific method
 - (NSString *)stringForKey:(NSString *)defaultName {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID) && isUUIDKey(defaultName)) {
+    @try {        
+        if (isUUIDKey(defaultName)) {
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
             PXLog(@"[WeaponX] 🔍 Spoofing UserDefaults string UUID for key '%@' with: %@", defaultName, spoofedUUID);
             return spoofedUUID;
@@ -255,11 +197,9 @@ static BOOL isUUIDKey(NSString *key) {
 - (NSDictionary<NSString *, id> *)dictionaryForKey:(NSString *)defaultName {
     NSDictionary *originalDict = %orig;
     
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
         // Don't modify if not spoofing or if the dictionary is empty
-        if (!shouldSpoofForBundle(bundleID) || !originalDict || originalDict.count == 0) {
+        if (!originalDict || originalDict.count == 0) {
             return originalDict;
         }
         
@@ -276,11 +216,9 @@ static BOOL isUUIDKey(NSString *key) {
 - (NSArray *)arrayForKey:(NSString *)defaultName {
     NSArray *originalArray = %orig;
     
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
         // Don't modify if not spoofing or if the array is empty
-        if (!shouldSpoofForBundle(bundleID) || !originalArray || originalArray.count == 0) {
+        if (!originalArray || originalArray.count == 0) {
             return originalArray;
         }
         
@@ -293,11 +231,9 @@ static BOOL isUUIDKey(NSString *key) {
 }
 
 - (NSData *)dataForKey:(NSString *)defaultName {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
         // Only handle data that might represent a UUID
-        if (shouldSpoofForBundle(bundleID) && isUUIDKey(defaultName)) {
+        if (isUUIDKey(defaultName)) {
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
             NSData *spoofedData = [spoofedUUID dataUsingEncoding:NSUTF8StringEncoding];
             PXLog(@"[WeaponX] 🔍 Spoofing UserDefaults data UUID for key '%@'", defaultName);
@@ -307,7 +243,7 @@ static BOOL isUUIDKey(NSString *key) {
         NSData *originalData = %orig;
         
         // Check if the data might be a UUID (16 bytes)
-        if (shouldSpoofForBundle(bundleID) && originalData && originalData.length == 16) {
+        if (originalData && originalData.length == 16) {
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
             
             // Convert UUID string to 16-byte binary format
@@ -373,23 +309,20 @@ static BOOL isUUIDKey(NSString *key) {
 
 // Base setter method
 - (void)setObject:(id)value forKey:(NSString *)defaultName {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID)) {
-            // If setting a UUID value, replace with our spoofed UUID
-            if (isUUIDKey(defaultName) && [value isKindOfClass:[NSString class]]) {
-                NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
-                PXLog(@"[WeaponX] 🔍 Intercepting and spoofing UUID being saved to UserDefaults for key '%@'", defaultName);
-                return %orig(spoofedUUID, defaultName);
-            }
-            
-            // If setting a dictionary or array, process it to replace UUIDs
-            if ([value isKindOfClass:[NSDictionary class]] || [value isKindOfClass:[NSArray class]]) {
-                id processedValue = processDictionaryValues(value);
-                return %orig(processedValue, defaultName);
-            }
+    @try {        
+        // If setting a UUID value, replace with our spoofed UUID
+        if (isUUIDKey(defaultName) && [value isKindOfClass:[NSString class]]) {
+            NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            PXLog(@"[WeaponX] 🔍 Intercepting and spoofing UUID being saved to UserDefaults for key '%@'", defaultName);
+            return %orig(spoofedUUID, defaultName);
         }
+        
+        // If setting a dictionary or array, process it to replace UUIDs
+        if ([value isKindOfClass:[NSDictionary class]] || [value isKindOfClass:[NSArray class]]) {
+            id processedValue = processDictionaryValues(value);
+            return %orig(processedValue, defaultName);
+        }
+    
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ⚠️ Exception in setObject:forKey: hook: %@", exception);
     }
@@ -399,10 +332,8 @@ static BOOL isUUIDKey(NSString *key) {
 
 // String-specific setter
 - (void)setString:(NSString *)value forKey:(NSString *)defaultName {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID) && isUUIDKey(defaultName)) {
+    @try {        
+        if (isUUIDKey(defaultName)) {
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
             PXLog(@"[WeaponX] 🔍 Intercepting and spoofing UUID string being saved to UserDefaults for key '%@'", defaultName);
             return %orig(spoofedUUID, defaultName);
@@ -416,10 +347,8 @@ static BOOL isUUIDKey(NSString *key) {
 
 // Dictionary-specific setter
 - (void)setDictionary:(NSDictionary<NSString *,id> *)value forKey:(NSString *)defaultName {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID) && value) {
+    @try {        
+        if (value) {
             // Process the dictionary to replace any UUIDs
             NSDictionary *processedDict = processDictionaryValues(value);
             return %orig(processedDict, defaultName);
@@ -434,9 +363,8 @@ static BOOL isUUIDKey(NSString *key) {
 // Data-specific setter
 - (void)setData:(NSData *)value forKey:(NSString *)defaultName {
     @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID) && isUUIDKey(defaultName) && value) {
+        if (isUUIDKey(defaultName) && value) {
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
             NSData *spoofedData = [spoofedUUID dataUsingEncoding:NSUTF8StringEncoding];
             PXLog(@"[WeaponX] 🔍 Intercepting and spoofing data UUID being saved to UserDefaults for key '%@'", defaultName);
@@ -444,7 +372,7 @@ static BOOL isUUIDKey(NSString *key) {
         }
         
         // If the data looks like a UUID (16 bytes), replace it
-        if (shouldSpoofForBundle(bundleID) && value && value.length == 16) {
+        if (value && value.length == 16) {
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
             
             // Convert UUID string to 16-byte binary format
@@ -477,44 +405,7 @@ static BOOL isUUIDKey(NSString *key) {
 %ctor {
     @autoreleasepool {
         // Skip for system processes
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID || [bundleID hasPrefix:@"com.apple."]) {
-            return;
-        }
-        
-        // Initialize cache
-        cachedBundleDecisions = [NSMutableDictionary dictionary];
-        
-        // Register for settings change notifications
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            clearCacheCallback,
-            CFSTR("com.hydra.projectx.settings.changed"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
-        
-        // Register for profile change notifications
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            clearCacheCallback,
-            CFSTR("com.hydra.projectx.profileChanged"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
-        
-        // Additional notification for profile switching
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            clearCacheCallback,
-            CFSTR("com.hydra.projectx.profileSwitched"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
-        
+        if(!IsScope()) return;      
         PXLog(@"[WeaponX] 🔍 UserDefaults hooks initialized");
     }
 } 

@@ -6,10 +6,6 @@ static NSString *ROOT_PREFIX = @"/var/jb"; // For rootless jailbreak
 static NSString *PLIST_NAME = @"com.weaponx.gpsspoofing.plist";
 static NSString *GLOBAL_SCOPE_PLIST = @"com.hydra.projectx.global_scope.plist";
 
-// File-scope variables for caching
-NSMutableDictionary *appSpoofingCache = nil;
-NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refreshAppSpoofingCache methods 
-                                     // to fix "set but not used" compiler warning
 
 @interface LocationSpoofingManager ()
 @property (nonatomic, assign) BOOL spoofingEnabled;
@@ -110,8 +106,6 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
                 }
             }
             
-            // Load scoped apps exactly once
-            [self loadScopedApps];
             
         } @catch (NSException *exception) {
             // Reset to default values if initialization fails
@@ -361,113 +355,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
     }
 }
 
-- (void)loadScopedApps {
-    @try {
-        // Add a cooldown timer to prevent excessive reloading
-        static NSTimeInterval lastLoadTime = 0;
-        NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
-        
-        // Only allow reloading once every 30 seconds
-        if (currentTime - lastLoadTime < 30.0 && self.cachedScopedApps.count > 0) {
-            PXLog(@"[WeaponX] LocationSpoofingManager: Skipping reload of scoped apps (cooldown active)");
-            return;
-        }
-        
-        lastLoadTime = currentTime;
-        
-        // Try rootless path first
-        NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
-        NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        PXLog(@"[WeaponX] LocationSpoofingManager: Trying to load scoped apps from: %@", scopedAppsFile);
-        
-        // Fallback to standard path if rootless path doesn't exist
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-            PXLog(@"[WeaponX] LocationSpoofingManager: First path not found, trying Dopamine 2 path");
-            // Try Dopamine 2 path
-            prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-            
-            // Fallback to older paths if needed
-            if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-                PXLog(@"[WeaponX] LocationSpoofingManager: Dopamine 2 path not found, trying legacy path");
-                prefsPath = @"/var/mobile/Library/Preferences";
-                scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-            }
-        }
-        
-        PXLog(@"[WeaponX] LocationSpoofingManager: Loading scoped apps from: %@", scopedAppsFile);
-        PXLog(@"[WeaponX] LocationSpoofingManager: File exists: %@", [fileManager fileExistsAtPath:scopedAppsFile] ? @"YES" : @"NO");
-        
-        // Load scoped apps from the global scope file
-        NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFile];
-        PXLog(@"[WeaponX] LocationSpoofingManager: Loaded dictionary: %@", scopedAppsDict ? @"YES" : @"NO");
-        
-        NSDictionary *savedApps = scopedAppsDict[@"ScopedApps"];
-        PXLog(@"[WeaponX] LocationSpoofingManager: Scoped apps entry found in dictionary: %@", savedApps ? @"YES" : @"NO");
-        
-        if (savedApps) {
-            PXLog(@"[WeaponX] LocationSpoofingManager: Number of scoped apps found: %lu", (unsigned long)savedApps.count);
-            if (savedApps.count > 0) {
-                PXLog(@"[WeaponX] LocationSpoofingManager: App list includes: %@", [savedApps allKeys]);
-            }
-            
-            // Retain old apps if loading fails
-            NSMutableDictionary *oldApps = [NSMutableDictionary dictionaryWithDictionary:self.cachedScopedApps];
-            
-            // Make sure we properly update the cached scoped apps dictionary
-            if (!self.cachedScopedApps) {
-                self.cachedScopedApps = [NSMutableDictionary dictionaryWithDictionary:savedApps];
-            } else {
-                [self.cachedScopedApps removeAllObjects];
-                [self.cachedScopedApps addEntriesFromDictionary:savedApps];
-            }
-            
-            // Validate we successfully loaded apps
-            if (self.cachedScopedApps.count == 0 && oldApps.count > 0) {
-                // Loading failed, restore old apps
-                self.cachedScopedApps = oldApps;
-                PXLog(@"[WeaponX] LocationSpoofingManager: Failed to load scoped apps, restored previous list with %lu items", 
-                      (unsigned long)oldApps.count);
-            } else {
-                PXLog(@"[WeaponX] LocationSpoofingManager: Loaded %lu scoped apps from %@", 
-                      (unsigned long)savedApps.count, scopedAppsFile);
-            }
-        } else {
-            // Keep the existing apps if loading failed
-            if (self.cachedScopedApps.count == 0) {
-                self.cachedScopedApps = [NSMutableDictionary dictionary];
-                
-                // Add common location apps as a fallback
-                NSArray *commonLocationApps = @[
-                    @"com.apple.Maps",
-                    @"com.google.Maps",
-                    @"com.waze.iphone",
-                    @"com.ubercab.UberClient",
-                    @"com.ubercab.UberPartner",
-                    @"com.zimride.instant",
-                    @"com.yelp.yelpiphone",
-                    @"com.seatgeek.SeatGeek"
-                ];
-                
-                for (NSString *app in commonLocationApps) {
-                    self.cachedScopedApps[app] = @{@"enabled": @YES};
-                }
-                
-                PXLog(@"[WeaponX] LocationSpoofingManager: ⚠️ Failed to load scoped apps, using fallback list with common apps");
-            } else {
-                PXLog(@"[WeaponX] LocationSpoofingManager: ⚠️ Failed to load new scoped apps, keeping existing list with %lu items",
-                      (unsigned long)self.cachedScopedApps.count);
-            }
-        }
-    } @catch (NSException *exception) {
-        PXLog(@"[WeaponX] LocationSpoofingManager: Exception loading scoped apps: %@", exception);
-        // Maintain existing dictionary on error
-        if (!self.cachedScopedApps) {
-            self.cachedScopedApps = [NSMutableDictionary dictionary];
-        }
-    }
-}
+
 
 #pragma mark - GPS Data Modification
 
@@ -573,165 +461,9 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
 
 #pragma mark - App Scoping
 
-- (BOOL)shouldSpoofApp:(NSString *)bundleID {
-    if (!bundleID) {
-        return NO;
-    }
-    
-    // Early check - if not enabled, no need to check scoped apps
-    if (![self isSpoofingEnabled]) {
-        return NO;
-    }
-    
-    @try {
-        // Use an in-memory cache with time expiration to avoid constant plist checks
-        // Use file scope variables for sharing
-        extern NSMutableDictionary *appSpoofingCache;
-        extern NSDate *lastCacheRefreshTime;
-        
-        // Initialize cache if needed
-        static dispatch_once_t onceToken;
-        dispatch_once(&onceToken, ^{
-            if (appSpoofingCache == nil) {
-                appSpoofingCache = [NSMutableDictionary dictionary];
-                lastCacheRefreshTime = [NSDate date];
-            }
-        });
-        
-        // Check if we have a valid cached result
-        NSDate *currentDate = [NSDate date];
-        NSNumber *cachedResult = appSpoofingCache[bundleID];
-        
-        // Cache is valid for longer time (2 minutes) to avoid excessive file reads
-        if (cachedResult && lastCacheRefreshTime && [currentDate timeIntervalSinceDate:lastCacheRefreshTime] < 120.0) {
-            return [cachedResult boolValue];
-        }
-        
-        // Direct check against the cached dictionary
-        if (self.cachedScopedApps[bundleID]) {
-            BOOL isEnabled = [self.cachedScopedApps[bundleID][@"enabled"] boolValue];
-            // Update cache
-            appSpoofingCache[bundleID] = @(isEnabled);
-            return isEnabled;
-        }
-        
-        // Try case-insensitive comparison
-        NSString *lowercaseBundleID = [bundleID lowercaseString];
-        for (NSString *key in self.cachedScopedApps) {
-            if ([[key lowercaseString] isEqualToString:lowercaseBundleID]) {
-                BOOL isEnabled = [self.cachedScopedApps[key][@"enabled"] boolValue];
-                // Add to case-sensitive cache for future lookups
-                appSpoofingCache[bundleID] = @(isEnabled);
-                return isEnabled;
-            }
-        }
-        
-        // As a fallback for location apps, check common location-based apps
-        NSArray *commonLocationApps = @[
-            @"com.apple.Maps",
-            @"com.google.Maps",
-            @"com.waze.iphone",
-            @"com.ubercab.UberClient",
-            @"com.ubercab.UberPartner",
-            @"com.zimride.instant",
-            @"com.yelp.yelpiphone",
-            @"com.seatgeek.SeatGeek"
-        ];
-        
-        if ([commonLocationApps containsObject:bundleID]) {
-            // Add to cache for future lookups
-            appSpoofingCache[bundleID] = @YES;
-            return YES;
-        }
-        
-        // Log the failure only occasionally to avoid log spam
-        static NSTimeInterval lastLogTime = 0;
-        NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
-        if (currentTime - lastLogTime > 60.0) {
-            PXLog(@"[WeaponX] App %@ not found in scoped apps, spoofing disabled for this app", bundleID);
-            lastLogTime = currentTime;
-        }
-        
-        // Not found after all attempts - cache negative result
-        appSpoofingCache[bundleID] = @NO;
-        return NO;
-    } @catch (NSException *exception) {
-        // Only log occasionally to reduce overhead
-        static NSTimeInterval lastLogTime = 0;
-        NSTimeInterval currentTime = [[NSDate date] timeIntervalSince1970];
-        if (currentTime - lastLogTime > 60.0) {
-            PXLog(@"[WeaponX] Exception in shouldSpoofApp: %@", exception);
-            lastLogTime = currentTime;
-        }
-        return NO;
-    }
-}
 
-// Helper method to refresh the app spoofing cache
-- (void)refreshAppSpoofingCache {
-    static BOOL isRefreshing = NO;
-    
-    // Prevent concurrent refreshes
-    @synchronized(self) {
-        if (isRefreshing) return;
-        isRefreshing = YES;
-    }
-    
-    @try {
-        // Load scoped apps from disk
-        [self loadScopedApps];
-        
-        // Create or update the static cache - use extern variables for access from shouldSpoofApp
-        extern NSMutableDictionary *appSpoofingCache;
-        extern NSDate *lastCacheRefreshTime;
-        
-        if (!appSpoofingCache) {
-            appSpoofingCache = [NSMutableDictionary dictionary];
-        } else {
-            [appSpoofingCache removeAllObjects];
-        }
-        
-        // Rebuild the cache
-        for (NSString *bundleID in self.cachedScopedApps) {
-            BOOL isEnabled = [self.cachedScopedApps[bundleID][@"enabled"] boolValue];
-            appSpoofingCache[bundleID] = @(isEnabled);
-        }
-        
-        // Add common location apps as enabled by default
-        NSArray *commonLocationApps = @[
-            @"com.apple.Maps",
-            @"com.google.Maps",
-            @"com.waze.iphone",
-            @"com.ubercab.UberClient",
-            @"com.ubercab.UberPartner",
-            @"com.zimride.instant",
-            @"com.yelp.yelpiphone",
-            @"com.seatgeek.SeatGeek"
-        ];
-        
-        for (NSString *app in commonLocationApps) {
-            if (!appSpoofingCache[app]) {
-                appSpoofingCache[app] = @YES;
-            }
-        }
-        
-        // Update refresh timestamp and make it accessible to shouldSpoofApp
-        lastCacheRefreshTime = [NSDate date];
-        
-        PXLog(@"[WeaponX] App spoofing cache refreshed with %lu apps at %@", 
-              (unsigned long)appSpoofingCache.count, 
-              lastCacheRefreshTime ? [NSDateFormatter localizedStringFromDate:lastCacheRefreshTime 
-                                                                    dateStyle:NSDateFormatterShortStyle 
-                                                                    timeStyle:NSDateFormatterMediumStyle] : @"unknown time");
-    } @catch (NSException *exception) {
-        PXLog(@"[WeaponX] Error refreshing app spoofing cache: %@", exception);
-    } @finally {
-        // Always reset the refreshing flag
-        @synchronized(self) {
-            isRefreshing = NO;
-        }
-    }
-}
+
+
 
 /**
  * Directly reads pinned location from plist file with caching.

@@ -9,9 +9,9 @@
 #import <mach/mach_time.h>
 #import <mach/mach_host.h>
 #import <substrate.h>
-#import <ellekit/ellekit.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
+#import "IdentifierManager.h"
 
 // Define the boot time structure for sysctl calls
 struct timeval_boot {
@@ -30,185 +30,20 @@ static NSString *cachedProfilePath = nil;
 static NSDate *cacheTimestamp = nil;
 static const NSTimeInterval kCacheValidityDuration = 30.0; // 30 seconds cache
 
-// Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-
-// Scoped apps cache
-static NSMutableDictionary *scopedAppsCache = nil;
-static NSDate *scopedAppsCacheTimestamp = nil;
-static const NSTimeInterval kScopedAppsCacheValidDuration = 30.0; // 30 seconds
-
 // Global flag to track if hooks are installed
 static BOOL hooksInstalled = NO;
 
 // Forward declarations
-static BOOL shouldSpoofBootTimeForApp(void);
 static NSString *getCurrentProfilePath(void);
 static void updateCachedBootTimeValues(void);
 static void logBootTimeAccess(const char *method, NSString *bundleID);
-static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
-static BOOL isInScopedAppsList(void);
 static void installSystemCallHooks(void);
 static BOOL isBootTimeOrUptimeEnabled(void);
 
 #pragma mark - Helper Functions
 
-// Get the current bundle ID
-static NSString *getCurrentBundleID(void) {
-    @try {
-        NSBundle *mainBundle = [NSBundle mainBundle];
-        if (!mainBundle) {
-            return nil;
-        }
-        return [mainBundle bundleIdentifier];
-    } @catch (NSException *e) {
-        return nil;
-    }
-}
 
-// Load scoped apps from the plist file
-static NSDictionary *loadScopedApps(void) {
-    @try {
-        // Check if cache is valid
-        if (scopedAppsCache && scopedAppsCacheTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:scopedAppsCacheTimestamp] < kScopedAppsCacheValidDuration) {
-            return scopedAppsCache;
-        }
-        
-        // Initialize cache if needed
-        if (!scopedAppsCache) {
-            scopedAppsCache = [NSMutableDictionary dictionary];
-        } else {
-            [scopedAppsCache removeAllObjects];
-        }
-        
-        // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *validPath = nil;
-        
-        for (NSString *path in possiblePaths) {
-            if ([fileManager fileExistsAtPath:path]) {
-                validPath = path;
-                break;
-            }
-        }
-        
-        if (!validPath) {
-            // Don't log this error too frequently to avoid spam
-            static NSDate *lastErrorLog = nil;
-            if (!lastErrorLog || [[NSDate date] timeIntervalSinceDate:lastErrorLog] > 300.0) { // 5 minutes
-                PXLog(@"[BootTimeHooks] Could not find scoped apps file");
-                lastErrorLog = [NSDate date];
-            }
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
-        if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Get the scoped apps dictionary
-        NSDictionary *scopedApps = plistDict[@"ScopedApps"];
-        if (!scopedApps || ![scopedApps isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Copy the scoped apps to our cache
-        [scopedAppsCache addEntriesFromDictionary:scopedApps];
-        scopedAppsCacheTimestamp = [NSDate date];
-        
-        return scopedAppsCache;
-        
-    } @catch (NSException *e) {
-        scopedAppsCacheTimestamp = [NSDate date];
-        return scopedAppsCache ?: [NSMutableDictionary dictionary];
-    }
-}
 
-// Check if the current app is in the scoped apps list
-static BOOL isInScopedAppsList(void) {
-    @try {
-        NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
-    } @catch (NSException *e) {
-        return NO;
-    }
-}
-
-// Check if boot time spoofing should be applied for the current app
-static BOOL shouldSpoofBootTimeForApp(void) {
-    static NSMutableDictionary *bundleDecisionCache = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        bundleDecisionCache = [NSMutableDictionary dictionary];
-    });
-    
-    @try {
-        NSString *bundleID = getCurrentBundleID();
-        if (!bundleID) return NO;
-        
-        // Check cache first
-        NSString *cacheKey = bundleID;
-        NSString *timestampKey = [bundleID stringByAppendingString:@"_timestamp"];
-        NSNumber *cachedDecision = bundleDecisionCache[cacheKey];
-        NSDate *decisionTimestamp = bundleDecisionCache[timestampKey];
-        
-        if (cachedDecision && decisionTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:decisionTimestamp] < 300.0) { // 5 minute cache
-            return [cachedDecision boolValue];
-        }
-        
-        // Always exclude system processes
-        if ([bundleID hasPrefix:@"com.apple."] || 
-            [bundleID isEqualToString:@"com.hydra.projectx"] ||
-            [bundleID hasPrefix:@"com.saurik."] ||
-            [bundleID hasPrefix:@"org.coolstar."] ||
-            [bundleID hasPrefix:@"com.ex.substitute"]) {
-            bundleDecisionCache[cacheKey] = @NO;
-            bundleDecisionCache[timestampKey] = [NSDate date];
-            return NO;
-        }
-        
-        // Check if the current app is a scoped app
-        BOOL isScoped = isInScopedAppsList();
-        
-        // Cache the decision
-        bundleDecisionCache[cacheKey] = @(isScoped);
-        bundleDecisionCache[timestampKey] = [NSDate date];
-        
-        return isScoped;
-        
-    } @catch (NSException *e) {
-        return NO;
-    }
-}
 
 // Get the current profile path for spoofed values
 static NSString *getCurrentProfilePath(void) {
@@ -339,20 +174,14 @@ int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *new
     @try {
         // Check if this is a KERN_BOOTTIME query
         if (namelen >= 2 && name && name[0] == CTL_KERN && name[1] == KERN_BOOTTIME) {
-            if (shouldSpoofBootTimeForApp() && isBootTimeOrUptimeEnabled()) {
-                NSString *bundleID = getCurrentBundleID();
-                if (bundleID) {
-                    logBootTimeAccess("sysctl(KERN_BOOTTIME)", bundleID);
-                }
-                updateCachedBootTimeValues();
-                if (cachedBootTime && oldp && oldlenp && *oldlenp >= sizeof(struct timeval)) {
-                    struct timeval boottime;
-                    boottime.tv_sec = (time_t)[cachedBootTime timeIntervalSince1970];
-                    boottime.tv_usec = 0;
-                    memcpy(oldp, &boottime, sizeof(boottime));
-                    *oldlenp = sizeof(boottime);
-                    return 0; // Success
-                }
+            updateCachedBootTimeValues();
+            if (cachedBootTime && oldp && oldlenp && *oldlenp >= sizeof(struct timeval)) {
+                struct timeval boottime;
+                boottime.tv_sec = (time_t)[cachedBootTime timeIntervalSince1970];
+                boottime.tv_usec = 0;
+                memcpy(oldp, &boottime, sizeof(boottime));
+                *oldlenp = sizeof(boottime);
+                return 0; // Success
             }
         }
     } @catch (NSException *e) {
@@ -369,20 +198,14 @@ int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *new
 int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     @try {
         if (name && strcmp(name, "kern.boottime") == 0) {
-            if (shouldSpoofBootTimeForApp() && isBootTimeOrUptimeEnabled()) {
-                NSString *bundleID = getCurrentBundleID();
-                if (bundleID) {
-                    logBootTimeAccess("sysctlbyname(kern.boottime)", bundleID);
-                }
-                updateCachedBootTimeValues();
-                if (cachedBootTime && oldp && oldlenp && *oldlenp >= sizeof(struct timeval)) {
-                    struct timeval boottime;
-                    boottime.tv_sec = (time_t)[cachedBootTime timeIntervalSince1970];
-                    boottime.tv_usec = 0;
-                    memcpy(oldp, &boottime, sizeof(boottime));
-                    *oldlenp = sizeof(boottime);
-                    return 0; // Success
-                }
+            updateCachedBootTimeValues();
+            if (cachedBootTime && oldp && oldlenp && *oldlenp >= sizeof(struct timeval)) {
+                struct timeval boottime;
+                boottime.tv_sec = (time_t)[cachedBootTime timeIntervalSince1970];
+                boottime.tv_usec = 0;
+                memcpy(oldp, &boottime, sizeof(boottime));
+                *oldlenp = sizeof(boottime);
+                return 0; // Success
             }
         }
     } @catch (NSException *e) {
@@ -398,12 +221,11 @@ int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp,
 // Hook for -[NSProcessInfo systemUptime]
 static NSTimeInterval (*orig_systemUptime)(NSProcessInfo *, SEL);
 static NSTimeInterval hook_systemUptime(NSProcessInfo *self, SEL _cmd) {
-    if (shouldSpoofBootTimeForApp() && isBootTimeOrUptimeEnabled()) {
-        updateCachedBootTimeValues();
-        if (cachedUptime > 0) {
-            return cachedUptime;
-        }
+    updateCachedBootTimeValues();
+    if (cachedUptime > 0) {
+        return cachedUptime;
     }
+    
     return orig_systemUptime(self, _cmd);
 }
 
@@ -417,38 +239,23 @@ static void installSystemCallHooks(void) {
         BOOL hookingSuccess = NO;
         
         // Try ElleKit first (preferred for rootless jailbreaks)
-        if (EKIsElleKitEnv() || dlsym(RTLD_DEFAULT, "EKHook")) {
-            // Hook sysctl
-            void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
-            if (sysctlPtr && EKHook(sysctlPtr, (void *)hook_sysctl, (void **)&orig_sysctl) == 0) {
-                hookingSuccess = YES;
-            }
-            
-            // Hook sysctlbyname
-            void *sysctlbynamePtr = dlsym(RTLD_DEFAULT, "sysctlbyname");
-            if (sysctlbynamePtr && EKHook(sysctlbynamePtr, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname) == 0) {
-                hookingSuccess = YES;
-            }
-            
-        } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
-            // Fallback to Substrate
-            void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
-            if (sysctlPtr) {
-                MSHookFunction(sysctlPtr, (void *)hook_sysctl, (void **)&orig_sysctl);
-                hookingSuccess = YES;
-            }
-            
-            void *sysctlbynamePtr = dlsym(RTLD_DEFAULT, "sysctlbyname");
-            if (sysctlbynamePtr) {
-                MSHookFunction(sysctlbynamePtr, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname);
-                hookingSuccess = YES;
-            }
+
+        // Fallback to Substrate
+        void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
+        if (sysctlPtr) {
+            MSHookFunction(sysctlPtr, (void *)hook_sysctl, (void **)&orig_sysctl);
+            hookingSuccess = YES;
         }
+        
+        void *sysctlbynamePtr = dlsym(RTLD_DEFAULT, "sysctlbyname");
+        if (sysctlbynamePtr) {
+            MSHookFunction(sysctlbynamePtr, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname);
+            hookingSuccess = YES;
+        }
+    
         
         if (hookingSuccess) {
             hooksInstalled = YES;
-            NSString *bundleID = getCurrentBundleID();
-            PXLog(@"[BootTimeHooks] ✅ System call hooks installed for scoped app: %@", bundleID);
             // Add systemUptime hook for NSProcessInfo
             Class procInfoClass = objc_getClass("NSProcessInfo");
             if (procInfoClass) {
@@ -469,27 +276,13 @@ static void installSystemCallHooks(void) {
 %ctor {
     @autoreleasepool {
         @try {
-            NSString *bundleID = getCurrentBundleID();
-            
-            // Skip if we can't get bundle ID
-            if (!bundleID || [bundleID length] == 0) {
-                return;
-            }
-            
-            // Skip system processes completely
-            if ([bundleID hasPrefix:@"com.apple."] && 
-                ![bundleID isEqualToString:@"com.apple.mobilesafari"] &&
-                ![bundleID isEqualToString:@"com.apple.webapp"]) {
-                return;
-            }
-            
-            // CRITICAL: Only install hooks if this app is actually scoped
-            if (!isInScopedAppsList()) {
+
+            if (!IsScope() || !isBootTimeOrUptimeEnabled()) {
                 // App is NOT scoped - no hooks, no interference, no crashes
                 return;
             }
             
-            PXLog(@"[BootTimeHooks] 🎯 Installing minimal system call hooks for scoped app: %@", bundleID);
+            PXLog(@"[BootTimeHooks]  Installing minimal system call hooks for scoped app");
             
             // Install the minimal system call hooks that App Store apps actually use immediately
             installSystemCallHooks();

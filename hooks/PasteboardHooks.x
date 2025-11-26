@@ -3,208 +3,13 @@
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
 #import "PasteboardUUIDManager.h"
-#import <ellekit/ellekit.h>
 #import "ProfileManager.h"
-// Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-
-// Scoped apps cache
-static NSMutableDictionary *scopedAppsCache = nil;
-static NSDate *scopedAppsCacheTimestamp = nil;
-static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
-
+#import "IdentifierManager.h"
 // Global variables to track state
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes 
 static NSMutableDictionary *customChangeCountMap = nil; // Store custom change counts per app
 static NSMutableDictionary *lastKnownPasteboardData = nil; // Cache pasteboard content hash
-
-// Forward declarations
-static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
-static BOOL isInScopedAppsList(void);
-
-// Callback function for notifications that clear the cache
-static void clearCacheCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    // Clear cached decisions
-    if (cachedBundleDecisions) {
-        [cachedBundleDecisions removeAllObjects];
-    }
-    
-    // Also clear change count map
-    if (customChangeCountMap) {
-        [customChangeCountMap removeAllObjects];
-    }
-    
-    // Clear cached pasteboard data
-    if (lastKnownPasteboardData) {
-        [lastKnownPasteboardData removeAllObjects];
-    }
-}
-
-#pragma mark - Scoped Apps Helper Functions
-
-// Get the current bundle ID
-static NSString *getCurrentBundleID(void) {
-    @try {
-        NSBundle *mainBundle = [NSBundle mainBundle];
-        if (!mainBundle) {
-            return nil;
-        }
-        return [mainBundle bundleIdentifier];
-    } @catch (NSException *e) {
-        return nil;
-    }
-}
-
-// Load scoped apps from the plist file
-static NSDictionary *loadScopedApps(void) {
-    @try {
-        // Check if cache is valid
-        if (scopedAppsCache && scopedAppsCacheTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:scopedAppsCacheTimestamp] < kScopedAppsCacheValidDuration) {
-            return scopedAppsCache;
-        }
-        
-        // Initialize cache if needed
-        if (!scopedAppsCache) {
-            scopedAppsCache = [NSMutableDictionary dictionary];
-        } else {
-            [scopedAppsCache removeAllObjects];
-        }
-        
-        // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *validPath = nil;
-        
-        for (NSString *path in possiblePaths) {
-            if ([fileManager fileExistsAtPath:path]) {
-                validPath = path;
-                break;
-            }
-        }
-        
-        if (!validPath) {
-            // Don't log this error too frequently to avoid spam
-            static NSDate *lastErrorLog = nil;
-            if (!lastErrorLog || [[NSDate date] timeIntervalSinceDate:lastErrorLog] > 300.0) { // 5 minutes
-                PXLog(@"[PasteboardHooks] Could not find scoped apps file");
-                lastErrorLog = [NSDate date];
-            }
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
-        if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Get the scoped apps dictionary
-        NSDictionary *scopedApps = plistDict[@"ScopedApps"];
-        if (!scopedApps || ![scopedApps isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Copy the scoped apps to our cache
-        [scopedAppsCache addEntriesFromDictionary:scopedApps];
-        scopedAppsCacheTimestamp = [NSDate date];
-        
-        return scopedAppsCache;
-        
-    } @catch (NSException *e) {
-        scopedAppsCacheTimestamp = [NSDate date];
-        return scopedAppsCache ?: [NSMutableDictionary dictionary];
-    }
-}
-
-// Check if the current app is in the scoped apps list
-static BOOL isInScopedAppsList(void) {
-    @try {
-        NSString *bundleID = getCurrentBundleID();
-        if (!bundleID || [bundleID length] == 0) {
-            return NO;
-        }
-        
-        NSDictionary *scopedApps = loadScopedApps();
-        if (!scopedApps || scopedApps.count == 0) {
-            return NO;
-        }
-        
-        // Check if this bundle ID is in the scoped apps dictionary
-        id appEntry = scopedApps[bundleID];
-        if (!appEntry || ![appEntry isKindOfClass:[NSDictionary class]]) {
-            return NO;
-        }
-        
-        // Check if the app is enabled
-        BOOL isEnabled = [appEntry[@"enabled"] boolValue];
-        return isEnabled;
-        
-    } @catch (NSException *e) {
-        return NO;
-    }
-}
-
-// Helper function to check if we should spoof for this bundle ID (with caching)
-static BOOL shouldSpoofForBundle(NSString *bundleID) {
-    if (!bundleID) return NO;
-    
-    // Skip system apps, the tweak itself, and system processes - more comprehensive filtering
-    if ([bundleID hasPrefix:@"com.apple."] || 
-        [bundleID isEqualToString:@"com.hydra.projectx"] ||
-        [bundleID containsString:@"springboard"] ||
-        [bundleID containsString:@"backboardd"] ||
-        [bundleID containsString:@"mediaserverd"] ||
-        [bundleID containsString:@"searchd"] ||
-        [bundleID containsString:@"assertiond"] ||
-        [bundleID containsString:@"useractivityd"] ||
-        [bundleID containsString:@"apsd"] ||
-        [bundleID containsString:@"identityservicesd"] ||
-        [bundleID containsString:@"coreduetd"] ||
-        [bundleID containsString:@"sharingd"] ||
-        [bundleID containsString:@"mobiletimerd"] ||
-        ([bundleID containsString:@"system"] && [bundleID containsString:@"daemon"])) {
-        return NO;
-    }
-    
-    // Get the executable path to check if it's a system binary
-    NSString *executablePath = [[NSBundle mainBundle] executablePath];
-    if (executablePath && 
-        ([executablePath hasPrefix:@"/usr/"] || 
-         [executablePath hasPrefix:@"/bin/"] || 
-         [executablePath hasPrefix:@"/sbin/"])) {
-        return NO;
-    }
-    
-    // Check cache first
-    if (!cachedBundleDecisions) {
-        cachedBundleDecisions = [NSMutableDictionary dictionary];
-    } else {
-        NSNumber *cachedDecision = cachedBundleDecisions[bundleID];
-        NSDate *decisionTimestamp = cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]];
-        
-        if (cachedDecision && decisionTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:decisionTimestamp] < kCacheValidityDuration) {
-            return [cachedDecision boolValue];
-        }
-    }
-    
-    // Check if the current app is a scoped app
-    BOOL isScoped = isInScopedAppsList();
-    
-    // Cache the decision
-    cachedBundleDecisions[bundleID] = @(isScoped);
-    cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-    
-    return isScoped;
-}
 
 // Add function to get spoofed Pasteboard UUID from manager
 static NSString *getSpoofedPasteboardUUID() {
@@ -347,16 +152,13 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
 
 // Hook the main pasteboard UUID method
 - (NSUUID *)uniquePasteboardUUID {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID)) {
-            // Get spoofed Pasteboard UUID
-            NSString *uuidString = getSpoofedPasteboardUUID();
-            NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:uuidString];
-            PXLog(@"[WeaponX] 🔄 Spoofing Pasteboard UUID with: %@", uuidString);
-            return uuid;
-        }
+    @try {    
+        // Get spoofed Pasteboard UUID
+        NSString *uuidString = getSpoofedPasteboardUUID();
+        NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:uuidString];
+        PXLog(@"[WeaponX] 🔄 Spoofing Pasteboard UUID with: %@", uuidString);
+        return uuid;
+    
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ⚠️ Exception in uniquePasteboardUUID hook: %@", exception);
     }
@@ -373,7 +175,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         // Only spoof on custom-named pasteboards, not the general one
-        if (shouldSpoofForBundle(bundleID) && originalName && ![originalName isEqualToString:@"com.apple.UIKit.pboard.general"]) {
+        if (originalName && ![originalName isEqualToString:@"com.apple.UIKit.pboard.general"]) {
             // Get current pasteboard UUID
             NSString *uuidString = getSpoofedPasteboardUUID();
             
@@ -411,13 +213,11 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     UIPasteboard *original = %orig;
     
     @try {
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         // We don't need to do anything here, as uniquePasteboardUUID is hooked above
         // This override just ensures we're tracking all possible entry points
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        PXLog(@"[WeaponX] 📋 Accessed general pasteboard from %@", bundleID);
         
-        if (shouldSpoofForBundle(bundleID)) {
-            PXLog(@"[WeaponX] 📋 Accessed general pasteboard from %@", bundleID);
-        }
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ⚠️ Exception in generalPasteboard hook: %@", exception);
     }
@@ -430,7 +230,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID) && pasteboardName) {
+        if (pasteboardName) {
             // Get current pasteboard UUID
             NSString *uuidString = getSpoofedPasteboardUUID();
             
@@ -469,7 +269,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID) && original) {
+        if (original) {
             // We intercept the uniquePasteboardUUID method above
             // So this automatically gets our spoofed value 
             PXLog(@"[WeaponX] 📋 Created pasteboard with unique name from %@", bundleID);
@@ -486,7 +286,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID) && url) {
+        if (url) {
             // Create a modified URL with our UUID to ensure stable but unique URLs
             NSString *uuidString = getSpoofedPasteboardUUID();
             NSString *shortUUID = [uuidString componentsSeparatedByString:@"-"].firstObject;
@@ -527,22 +327,19 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        // Get our custom change count
+        NSInteger spoofedCount = getCustomChangeCount(bundleID, originalCount);
         
-        if (shouldSpoofForBundle(bundleID)) {
-            // Get our custom change count
-            NSInteger spoofedCount = getCustomChangeCount(bundleID, originalCount);
-            
-            // Check if content actually changed, and if so, increment our count
-            if (hasPasteboardContentChanged(bundleID, self)) {
-                incrementCustomChangeCount(bundleID);
-                spoofedCount = getCustomChangeCount(bundleID, originalCount);
-            }
-            
-            PXLog(@"[WeaponX] 🔄 Spoofing pasteboard changeCount: %ld (original: %ld)", 
-                 (long)spoofedCount, (long)originalCount);
-            return spoofedCount;
+        // Check if content actually changed, and if so, increment our count
+        if (hasPasteboardContentChanged(bundleID, self)) {
+            incrementCustomChangeCount(bundleID);
+            spoofedCount = getCustomChangeCount(bundleID, originalCount);
         }
-    } @catch (NSException *exception) {
+        
+        PXLog(@"[WeaponX] 🔄 Spoofing pasteboard changeCount: %ld (original: %ld)", 
+                (long)spoofedCount, (long)originalCount);
+        return spoofedCount;
+} @catch (NSException *exception) {
         PXLog(@"[WeaponX] ⚠️ Exception in changeCount hook: %@", exception);
     }
     
@@ -553,15 +350,12 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
 - (void)setPersistent:(BOOL)persistent {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID)) {
-            // Always allow pasteboard to be persistent to avoid crashes
-            // but log the attempt to track fingerprinting
-            PXLog(@"[WeaponX] 📋 App %@ trying to set pasteboard persistence: %@", 
-                 bundleID, persistent ? @"YES" : @"NO");
-            %orig(YES);
-            return;
-        }
+        // Always allow pasteboard to be persistent to avoid crashes
+        // but log the attempt to track fingerprinting
+        PXLog(@"[WeaponX] 📋 App %@ trying to set pasteboard persistence: %@", 
+                bundleID, persistent ? @"YES" : @"NO");
+        %orig(YES);
+        return;
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ⚠️ Exception in setPersistent: hook: %@", exception);
     }
@@ -575,12 +369,9 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID)) {
-            // Always report persistent to avoid issues
-            PXLog(@"[WeaponX] 📋 App %@ checking pasteboard persistence", bundleID);
-            return YES;
-        }
+        // Always report persistent to avoid issues
+        PXLog(@"[WeaponX] 📋 App %@ checking pasteboard persistence", bundleID);
+        return YES;
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ⚠️ Exception in isPersistent hook: %@", exception);
     }
@@ -595,7 +386,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID) && originalProviders) {
+        if (originalProviders) {
             PXLog(@"[WeaponX] 📋 App %@ accessing pasteboard item providers (%lu items)", 
                  bundleID, (unsigned long)originalProviders.count);
             
@@ -616,7 +407,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID) && originalItemSet) {
+        if (originalItemSet) {
             PXLog(@"[WeaponX] 📋 App %@ accessing pasteboard items with preferred types: %@", 
                  bundleID, types);
             
@@ -636,7 +427,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID) && pasteboardTypes) {
+        if (pasteboardTypes) {
             // Log suspicious fingerprinting types
             if ([pasteboardTypes containsObject:@"com.apple.uikit.pboard-uuid"] ||
                 [pasteboardTypes containsObject:@"com.apple.uikit.pboard-devices"]) {
@@ -660,7 +451,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID) && pasteboardType) {
+        if (pasteboardType) {
             // Check for device-specific or identity types
             if ([pasteboardType isEqualToString:@"com.apple.uikit.pboard-uuid"] ||
                 [pasteboardType isEqualToString:@"com.apple.uikit.pboard-devices"] ||
@@ -713,12 +504,9 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
 - (void)setData:(NSData *)data forPasteboardType:(NSString *)pasteboardType {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID)) {
-            // Increment our custom change count whenever content changes
-            incrementCustomChangeCount(bundleID);
-            PXLog(@"[WeaponX] 📋 App %@ setting pasteboard data for type: %@", bundleID, pasteboardType);
-        }
+        // Increment our custom change count whenever content changes
+        incrementCustomChangeCount(bundleID);
+        PXLog(@"[WeaponX] 📋 App %@ setting pasteboard data for type: %@", bundleID, pasteboardType);
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ⚠️ Exception in setData:forPasteboardType: hook: %@", exception);
     }
@@ -730,13 +518,10 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
 - (void)setItems:(NSArray *)items {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID)) {
-            // Increment our custom change count whenever content changes
-            incrementCustomChangeCount(bundleID);
-            PXLog(@"[WeaponX] 📋 App %@ setting pasteboard items (%lu items)", 
-                 bundleID, (unsigned long)items.count);
-        }
+        // Increment our custom change count whenever content changes
+        incrementCustomChangeCount(bundleID);
+        PXLog(@"[WeaponX] 📋 App %@ setting pasteboard items (%lu items)", 
+                bundleID, (unsigned long)items.count);
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ⚠️ Exception in setItems: hook: %@", exception);
     }
@@ -761,10 +546,8 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
             [name containsString:@"Pasteboard"]) {
             
             NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-            if (shouldSpoofForBundle(bundleID)) {
-                // Let these through but log them for tracking fingerprinting
-                PXLog(@"[WeaponX] 📋 Pasteboard notification: %@ in app %@", name, bundleID);
-            }
+            // Let these through but log them for tracking fingerprinting
+            PXLog(@"[WeaponX] 📋 Pasteboard notification: %@ in app %@", name, bundleID);
         }
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ⚠️ Exception in postNotification: hook for notifications: %@", exception);
@@ -781,34 +564,10 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @autoreleasepool {
         // Skip for system processes
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID || [bundleID hasPrefix:@"com.apple."]) {
+        if (!IsScope()) {
             return;
         }
         
-        // Initialize caches
-        cachedBundleDecisions = [NSMutableDictionary dictionary];
-        customChangeCountMap = [NSMutableDictionary dictionary];
-        lastKnownPasteboardData = [NSMutableDictionary dictionary];
-        
-        // Register for settings change notifications
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            clearCacheCallback,
-            CFSTR("com.hydra.projectx.settings.changed"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
-        
-        // Register for profile change notifications
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            clearCacheCallback,
-            CFSTR("com.hydra.projectx.profileChanged"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
         
         PXLog(@"[WeaponX] 📋 Initialized PasteboardHooks for %@", bundleID);
     }

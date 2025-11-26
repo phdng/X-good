@@ -11,7 +11,6 @@
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <substrate.h>
-#import <ellekit/ellekit.h>
 
 // Original function pointers
 static int (*orig_uname)(struct utsname *);
@@ -28,10 +27,6 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID);
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes
 
-// Check if device model spoofing is enabled for the current app with caching
-static BOOL isDeviceModelSpoofingEnabled() {
-    return true;
-}
 
 // Cache for device model values
 static NSMutableDictionary *modelCache = nil;
@@ -221,34 +216,29 @@ static int hook_uname(struct utsname *buf) {
     }
     
     // Check if we need to spoof
-    if (isDeviceModelSpoofingEnabled()) {
-        NSString *spoofedModel = getSpoofedDeviceModel();
-        
-        if (spoofedModel.length > 0) {
-            // Convert spoofed model to a C string and copy it to the utsname struct
-            const char *model = [spoofedModel UTF8String];
-            if (model) {
-                size_t modelLen = strlen(model);
-                size_t bufferLen = sizeof(buf->machine);
-                
-                // Ensure we don't overflow the buffer
-                if (modelLen < bufferLen) {
-                    memset(buf->machine, 0, bufferLen);
-                    strcpy(buf->machine, model);
-                    PXLog(@"[model] Spoofed uname machine from %s to: %s for app: %@", 
-                          originalMachine, buf->machine, bundleID);
-                } else {
-                    PXLog(@"[model] WARNING: Spoofed model too long for uname buffer");
-                }
+    NSString *spoofedModel = getSpoofedDeviceModel();
+    
+    if (spoofedModel.length > 0) {
+        // Convert spoofed model to a C string and copy it to the utsname struct
+        const char *model = [spoofedModel UTF8String];
+        if (model) {
+            size_t modelLen = strlen(model);
+            size_t bufferLen = sizeof(buf->machine);
+            
+            // Ensure we don't overflow the buffer
+            if (modelLen < bufferLen) {
+                memset(buf->machine, 0, bufferLen);
+                strcpy(buf->machine, model);
+                PXLog(@"[model] Spoofed uname machine from %s to: %s for app: %@", 
+                        originalMachine, buf->machine, bundleID);
+            } else {
+                PXLog(@"[model] WARNING: Spoofed model too long for uname buffer");
             }
-        } else {
-            PXLog(@"[model] WARNING: getSpoofedDeviceModel returned empty string for app: %@", bundleID);
         }
     } else {
-        // Just log that we saw a model check but didn't spoof it
-        logDeviceModelAccess("uname", bundleID);
+        PXLog(@"[model] WARNING: getSpoofedDeviceModel returned empty string for app: %@", bundleID);
     }
-    
+
     return ret;
 }
 
@@ -269,47 +259,43 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
         // Get the original value first to show before/after in logs
         int origResult = orig_sysctlbyname(name, originalValue, &originalLen, NULL, 0);
         
-        if (isDeviceModelSpoofingEnabled()) {
-            NSString *spoofedValue = nil;
-            
-            if (isHWMachine) {
-                // For hw.machine, use the device model
-                spoofedValue = getSpoofedDeviceModel();
-            } else if (isHWModel) {
-                // For hw.model, use the hw.model value
-                spoofedValue = getSpoofedHWModel();
-            }
-            
-            if (spoofedValue.length > 0 && oldp && oldlenp && *oldlenp > 0) {
-                const char *valueToUse = [spoofedValue UTF8String];
-                if (valueToUse) {
-                    size_t valueLen = strlen(valueToUse);
+        NSString *spoofedValue = nil;
+        
+        if (isHWMachine) {
+            // For hw.machine, use the device model
+            spoofedValue = getSpoofedDeviceModel();
+        } else if (isHWModel) {
+            // For hw.model, use the hw.model value
+            spoofedValue = getSpoofedHWModel();
+        }
+        
+        if (spoofedValue.length > 0 && oldp && oldlenp && *oldlenp > 0) {
+            const char *valueToUse = [spoofedValue UTF8String];
+            if (valueToUse) {
+                size_t valueLen = strlen(valueToUse);
+                
+                // Ensure we don't overflow the buffer
+                if (valueLen < *oldlenp) {
+                    *oldlenp = valueLen + 1; // +1 for null terminator
+                    memset(oldp, 0, *oldlenp);
+                    strcpy(oldp, valueToUse);
                     
-                    // Ensure we don't overflow the buffer
-                    if (valueLen < *oldlenp) {
-                        *oldlenp = valueLen + 1; // +1 for null terminator
-                        memset(oldp, 0, *oldlenp);
-                        strcpy(oldp, valueToUse);
-                        
-                        if (origResult == 0) {
-                            PXLog(@"[model] Spoofed sysctlbyname %s from: %s to: %s for app: %@", 
-                                  name, originalValue, valueToUse, bundleID);
-                        } else {
-                            PXLog(@"[model] Spoofed sysctlbyname %s to: %s for app: %@", 
-                                  name, valueToUse, bundleID);
-                        }
-                        return 0;
+                    if (origResult == 0) {
+                        PXLog(@"[model] Spoofed sysctlbyname %s from: %s to: %s for app: %@", 
+                                name, originalValue, valueToUse, bundleID);
                     } else {
-                        PXLog(@"[model] WARNING: Spoofed value too long for sysctlbyname buffer");
+                        PXLog(@"[model] Spoofed sysctlbyname %s to: %s for app: %@", 
+                                name, valueToUse, bundleID);
                     }
+                    return 0;
+                } else {
+                    PXLog(@"[model] WARNING: Spoofed value too long for sysctlbyname buffer");
                 }
-            } else {
-                PXLog(@"[model] WARNING: Cannot spoof sysctlbyname, missing required params or spoofed value");
             }
         } else {
-            // Just log that we saw a model check
-            PXLog(@"[model] App %@ checked sysctlbyname %s: %s", bundleID, name, originalValue);
+            PXLog(@"[model] WARNING: Cannot spoof sysctlbyname, missing required params or spoofed value");
         }
+    
     }
     
     // For all other cases, pass through to the original function
@@ -341,107 +327,93 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
             (CFStringCompare(key, CFSTR("hw.model"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) ||
             (CFStringCompare(key, CFSTR("HWModel"), kCFCompareCaseInsensitive) == kCFCompareEqualTo);
         
-        if (isDeviceModelSpoofingEnabled()) {
-            // Handle device model spoofing
-            if (isModelKey) {
-                // Convert the original result to a string for logging
-                NSString *originalModel = nil;
-                if (result && CFGetTypeID(result) == CFStringGetTypeID()) {
-                    originalModel = (__bridge NSString *)result;
-                }
-                
-                NSString *spoofedModel = getSpoofedDeviceModel();
-                
-                if (spoofedModel.length > 0) {
-                    // If we already have a result, release it since we're replacing it
-                    if (result) {
-                        CFRelease(result);
-                    }
-                    
-                    // Create a new CFString with our spoofed model
-                    result = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedModel UTF8String], kCFStringEncodingUTF8);
-                    PXLog(@"[model] Spoofed IOKit property '%@' from: %@ to: %@ for app: %@", 
-                         (__bridge NSString *)key, originalModel ?: @"<nil>", spoofedModel, bundleID);
-                } else {
-                    PXLog(@"[model] WARNING: getSpoofedDeviceModel returned empty for IOKit property: %@", 
-                         (__bridge NSString *)key);
-                }
-            }
-            // Handle board-id spoofing
-            else if (isBoardIDKey) {
-                // Convert the original result to a string for logging
-                NSString *originalBoardID = nil;
-                if (result && CFGetTypeID(result) == CFStringGetTypeID()) {
-                    originalBoardID = (__bridge NSString *)result;
-                } else if (result && CFGetTypeID(result) == CFDataGetTypeID()) {
-                    // Some properties might be returned as data
-                    CFDataRef dataRef = (CFDataRef)result;
-                    NSData *data = (__bridge NSData *)dataRef;
-                    originalBoardID = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-                }
-                
-                NSString *spoofedBoardID = getSpoofedBoardID();
-                
-                if (spoofedBoardID.length > 0) {
-                    // If we already have a result, release it since we're replacing it
-                    if (result) {
-                        CFRelease(result);
-                    }
-                    
-                    // Create a new CFString with our spoofed board ID
-                    result = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedBoardID UTF8String], kCFStringEncodingUTF8);
-                    PXLog(@"[model] Spoofed IOKit board-id property '%@' from: %@ to: %@ for app: %@", 
-                         (__bridge NSString *)key, originalBoardID ?: @"<nil>", spoofedBoardID, bundleID);
-                } else {
-                    PXLog(@"[model] WARNING: getSpoofedBoardID returned empty for IOKit property: %@", 
-                         (__bridge NSString *)key);
-                }
-            }
-            // Handle hw.model spoofing
-            else if (isHWModelKey) {
-                // Convert the original result to a string for logging
-                NSString *originalHWModel = nil;
-                if (result && CFGetTypeID(result) == CFStringGetTypeID()) {
-                    originalHWModel = (__bridge NSString *)result;
-                } else if (result && CFGetTypeID(result) == CFDataGetTypeID()) {
-                    // Some properties might be returned as data
-                    CFDataRef dataRef = (CFDataRef)result;
-                    NSData *data = (__bridge NSData *)dataRef;
-                    originalHWModel = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-                }
-                
-                NSString *spoofedHWModel = getSpoofedHWModel();
-                
-                if (spoofedHWModel.length > 0) {
-                    // If we already have a result, release it since we're replacing it
-                    if (result) {
-                        CFRelease(result);
-                    }
-                    
-                    // Create a new CFString with our spoofed hw.model
-                    result = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedHWModel UTF8String], kCFStringEncodingUTF8);
-                    PXLog(@"[model] Spoofed IOKit hw-model property '%@' from: %@ to: %@ for app: %@", 
-                         (__bridge NSString *)key, originalHWModel ?: @"<nil>", spoofedHWModel, bundleID);
-                } else {
-                    PXLog(@"[model] WARNING: getSpoofedHWModel returned empty for IOKit property: %@", 
-                         (__bridge NSString *)key);
-                }
-            }
-        } else if (isModelKey || isBoardIDKey || isHWModelKey) {
-            // Just log that we saw a property check but didn't spoof it
-            NSString *originalValue = nil;
+   
+        // Handle device model spoofing
+        if (isModelKey) {
+            // Convert the original result to a string for logging
+            NSString *originalModel = nil;
             if (result && CFGetTypeID(result) == CFStringGetTypeID()) {
-                originalValue = (__bridge NSString *)result;
+                originalModel = (__bridge NSString *)result;
+            }
+            
+            NSString *spoofedModel = getSpoofedDeviceModel();
+            
+            if (spoofedModel.length > 0) {
+                // If we already have a result, release it since we're replacing it
+                if (result) {
+                    CFRelease(result);
+                }
+                
+                // Create a new CFString with our spoofed model
+                result = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedModel UTF8String], kCFStringEncodingUTF8);
+                PXLog(@"[model] Spoofed IOKit property '%@' from: %@ to: %@ for app: %@", 
+                        (__bridge NSString *)key, originalModel ?: @"<nil>", spoofedModel, bundleID);
+            } else {
+                PXLog(@"[model] WARNING: getSpoofedDeviceModel returned empty for IOKit property: %@", 
+                        (__bridge NSString *)key);
+            }
+        }
+        // Handle board-id spoofing
+        else if (isBoardIDKey) {
+            // Convert the original result to a string for logging
+            NSString *originalBoardID = nil;
+            if (result && CFGetTypeID(result) == CFStringGetTypeID()) {
+                originalBoardID = (__bridge NSString *)result;
             } else if (result && CFGetTypeID(result) == CFDataGetTypeID()) {
                 // Some properties might be returned as data
                 CFDataRef dataRef = (CFDataRef)result;
                 NSData *data = (__bridge NSData *)dataRef;
-                originalValue = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+                originalBoardID = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
             }
             
-            PXLog(@"[model] App %@ checked IOKit property '%@' value: %@", 
-                  bundleID, (__bridge NSString *)key, originalValue ?: @"<nil>");
+            NSString *spoofedBoardID = getSpoofedBoardID();
+            
+            if (spoofedBoardID.length > 0) {
+                // If we already have a result, release it since we're replacing it
+                if (result) {
+                    CFRelease(result);
+                }
+                
+                // Create a new CFString with our spoofed board ID
+                result = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedBoardID UTF8String], kCFStringEncodingUTF8);
+                PXLog(@"[model] Spoofed IOKit board-id property '%@' from: %@ to: %@ for app: %@", 
+                        (__bridge NSString *)key, originalBoardID ?: @"<nil>", spoofedBoardID, bundleID);
+            } else {
+                PXLog(@"[model] WARNING: getSpoofedBoardID returned empty for IOKit property: %@", 
+                        (__bridge NSString *)key);
+            }
         }
+        // Handle hw.model spoofing
+        else if (isHWModelKey) {
+            // Convert the original result to a string for logging
+            NSString *originalHWModel = nil;
+            if (result && CFGetTypeID(result) == CFStringGetTypeID()) {
+                originalHWModel = (__bridge NSString *)result;
+            } else if (result && CFGetTypeID(result) == CFDataGetTypeID()) {
+                // Some properties might be returned as data
+                CFDataRef dataRef = (CFDataRef)result;
+                NSData *data = (__bridge NSData *)dataRef;
+                originalHWModel = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+            }
+            
+            NSString *spoofedHWModel = getSpoofedHWModel();
+            
+            if (spoofedHWModel.length > 0) {
+                // If we already have a result, release it since we're replacing it
+                if (result) {
+                    CFRelease(result);
+                }
+                
+                // Create a new CFString with our spoofed hw.model
+                result = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedHWModel UTF8String], kCFStringEncodingUTF8);
+                PXLog(@"[model] Spoofed IOKit hw-model property '%@' from: %@ to: %@ for app: %@", 
+                        (__bridge NSString *)key, originalHWModel ?: @"<nil>", spoofedHWModel, bundleID);
+            } else {
+                PXLog(@"[model] WARNING: getSpoofedHWModel returned empty for IOKit property: %@", 
+                        (__bridge NSString *)key);
+            }
+        }
+     
     }
     
     return result;
@@ -491,52 +463,50 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
     // Get the original value first for logging
     NSString *originalValue = %orig;
     
-    // Check if device model spoofing is enabled
-    if (isDeviceModelSpoofingEnabled()) {
-        // Handle device model properties
-        if (isModelProperty) {
-            // Log regardless of whether spoofing is enabled
-            PXLog(@"[model] MGCopyAnswer(%@) called by app: %@ - original value: %@", 
-                propertyString, currentBundleID, originalValue ?: @"<nil>");
-            
-            NSString *spoofedModel = getSpoofedDeviceModel();
-            
-            if (spoofedModel.length > 0) {
-                PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                    propertyString, originalValue ?: @"<nil>", spoofedModel, currentBundleID);
-                return [spoofedModel copy];
-            } else {
-                PXLog(@"[model] WARNING: getSpoofedDeviceModel returned empty for MGCopyAnswer property: %@", 
-                    propertyString);
-            }
-        }
-        // Handle board ID properties
-        else if (isBoardIDProperty) {
-            PXLog(@"[model] MGCopyAnswer BoardID(%@) called by app: %@ - original value: %@", 
-                propertyString, currentBundleID, originalValue ?: @"<nil>");
-            
-            NSString *spoofedBoardID = getSpoofedBoardID();
-            
-            if (spoofedBoardID.length > 0) {
-                PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                    propertyString, originalValue ?: @"<nil>", spoofedBoardID, currentBundleID);
-                return [spoofedBoardID copy];
-            }
-        }
-        // Handle hw.model properties
-        else if (isHWModelProperty) {
-            PXLog(@"[model] MGCopyAnswer HWModel(%@) called by app: %@ - original value: %@", 
-                propertyString, currentBundleID, originalValue ?: @"<nil>");
-            
-            NSString *spoofedHWModel = getSpoofedHWModel();
-            
-            if (spoofedHWModel.length > 0) {
-                PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                    propertyString, originalValue ?: @"<nil>", spoofedHWModel, currentBundleID);
-                return [spoofedHWModel copy];
-            }
+    // Handle device model properties
+    if (isModelProperty) {
+        // Log regardless of whether spoofing is enabled
+        PXLog(@"[model] MGCopyAnswer(%@) called by app: %@ - original value: %@", 
+            propertyString, currentBundleID, originalValue ?: @"<nil>");
+        
+        NSString *spoofedModel = getSpoofedDeviceModel();
+        
+        if (spoofedModel.length > 0) {
+            PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
+                propertyString, originalValue ?: @"<nil>", spoofedModel, currentBundleID);
+            return [spoofedModel copy];
+        } else {
+            PXLog(@"[model] WARNING: getSpoofedDeviceModel returned empty for MGCopyAnswer property: %@", 
+                propertyString);
         }
     }
+    // Handle board ID properties
+    else if (isBoardIDProperty) {
+        PXLog(@"[model] MGCopyAnswer BoardID(%@) called by app: %@ - original value: %@", 
+            propertyString, currentBundleID, originalValue ?: @"<nil>");
+        
+        NSString *spoofedBoardID = getSpoofedBoardID();
+        
+        if (spoofedBoardID.length > 0) {
+            PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
+                propertyString, originalValue ?: @"<nil>", spoofedBoardID, currentBundleID);
+            return [spoofedBoardID copy];
+        }
+    }
+    // Handle hw.model properties
+    else if (isHWModelProperty) {
+        PXLog(@"[model] MGCopyAnswer HWModel(%@) called by app: %@ - original value: %@", 
+            propertyString, currentBundleID, originalValue ?: @"<nil>");
+        
+        NSString *spoofedHWModel = getSpoofedHWModel();
+        
+        if (spoofedHWModel.length > 0) {
+            PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
+                propertyString, originalValue ?: @"<nil>", spoofedHWModel, currentBundleID);
+            return [spoofedHWModel copy];
+        }
+    }
+
     
     // For all other properties, pass through to the original implementation
     return originalValue;
@@ -557,14 +527,13 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
     PXLog(@"[model] App %@ checked UIDevice model: %@", bundleID, originalModel);
     
     // Only spoof if enabled for this app
-    if (isDeviceModelSpoofingEnabled()) {
-        NSString *spoofedModel = getSpoofedDeviceModel();
-        if (spoofedModel.length > 0) {
-            PXLog(@"[model] Spoofing UIDevice model from %@ to %@ for app: %@", 
-                  originalModel, spoofedModel, bundleID);
-            return spoofedModel;
-        }
+    NSString *spoofedModel = getSpoofedDeviceModel();
+    if (spoofedModel.length > 0) {
+        PXLog(@"[model] Spoofing UIDevice model from %@ to %@ for app: %@", 
+                originalModel, spoofedModel, bundleID);
+        return spoofedModel;
     }
+    
     
     return originalModel;
 }
@@ -572,23 +541,17 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
 - (NSString *)name {
     // Just log access but don't spoof - this is device name, not model
     NSString *originalName = %orig;
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    PXLog(@"[model] App checked UIDevice name: %@",  originalName);
     
-    if (bundleID && isDeviceModelSpoofingEnabled()) {
-        PXLog(@"[model] App %@ checked UIDevice name: %@", bundleID, originalName);
-    }
     
     return originalName;
 }
 
 - (NSString *)systemName {
     // Just log access but don't spoof - this is iOS, not device model
-    NSString *originalName = %orig;
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    NSString *originalName = %orig;    
+    PXLog(@"[model] App checked UIDevice systemName: %@", originalName);
     
-    if (bundleID && isDeviceModelSpoofingEnabled()) {
-        PXLog(@"[model] App %@ checked UIDevice systemName: %@", bundleID, originalName);
-    }
     
     return originalName;
 }
@@ -603,16 +566,14 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
     
     // Always log access to help with debugging
     PXLog(@"[model] App %@ checked UIDevice localizedModel: %@", bundleID, originalModel);
-    
-    // Only spoof if enabled for this app
-    if (isDeviceModelSpoofingEnabled()) {
-        NSString *spoofedModel = getSpoofedDeviceModel();
-        if (spoofedModel.length > 0) {
-            PXLog(@"[model] Spoofing UIDevice localizedModel from %@ to %@ for app: %@", 
-                  originalModel, spoofedModel, bundleID);
-            return spoofedModel;
-        }
+     
+    NSString *spoofedModel = getSpoofedDeviceModel();
+    if (spoofedModel.length > 0) {
+        PXLog(@"[model] Spoofing UIDevice localizedModel from %@ to %@ for app: %@", 
+                originalModel, spoofedModel, bundleID);
+        return spoofedModel;
     }
+
     
     return originalModel;
 }
@@ -625,7 +586,7 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
 + (NSDictionary *)dictionaryWithContentsOfURL:(NSURL *)url {
     NSDictionary *result = %orig;
     
-    if (isDeviceModelSpoofingEnabled() && url) {
+    if (url) {
         NSString *urlStr = [url absoluteString];
         if ([urlStr containsString:@"device"] || [urlStr containsString:@"model"]) {
             NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
@@ -675,7 +636,7 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
     
     // Check if this is a hardware model query and if we need to spoof it
     if (ret == 0 && isModelQuery) {
-        if (isDeviceModelSpoofingEnabled() && oldp && oldlenp && *oldlenp > 0) {
+        if (oldp && oldlenp && *oldlenp > 0) {
             NSString *spoofedValue = nil;
             
             // Get the appropriate spoofed value based on the query type
@@ -745,27 +706,7 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
         
         // CRITICAL SAFETY CHECK: Only initialize hooks if we can get a valid bundle ID
         // This prevents hooks from running during early boot process or in system services
-        NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!currentBundleID) {
-            PXLog(@"[model] No bundle ID available, not initializing device model hooks");
-            return;
-        }
-        
-        // Don't hook system processes
-        if ([currentBundleID hasPrefix:@"com.apple."] || 
-            [currentBundleID isEqualToString:@"com.hydra.projectx"] || 
-            [currentBundleID isEqualToString:@"com.hydra.weaponx"]) {
-            PXLog(@"[model] Not hooking system process: %@", currentBundleID);
-            return;
-        }
-        
-        // Check if this app is even enabled for spoofing before initializing hooks
-        IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-        if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
-            PXLog(@"[model] App %@ is not enabled for spoofing, not initializing hooks", currentBundleID);
-            return;
-        }
-        
+        if(!IsScope()) return;
 
         
         // Test if we can retrieve a spoofed model before proceeding
