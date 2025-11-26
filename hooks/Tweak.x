@@ -24,7 +24,6 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreMotion/CoreMotion.h> // Import CoreMotion framework for sensor spoofing
 #import "LocationSpoofingManager.h" // Import location spoofing manager
-#import "JailbreakDetectionBypass.h" // Import jailbreak detection bypass manager
 
 // Forward declarations for classes we need to hook
 @interface SBScreenshotManager : NSObject
@@ -58,54 +57,20 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             // Allow the original call to execute
             int result = sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
             
-            // Check if we should modify the result
-            IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-            NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-            
-            if ([manager isApplicationEnabled:currentBundleID]) {
-                // We'd modify the device identifier here if needed
-                // For demonstration, just logging the interception
-                if (oldp && oldlenp && *oldlenp > 0) {
-                    PXLog(@"sysctlbyname returned value for %s", name);
-                }
+            // We'd modify the device identifier here if needed
+            // For demonstration, just logging the interception
+            if (oldp && oldlenp && *oldlenp > 0) {
+                PXLog(@"sysctlbyname returned value for %s", name);
             }
+            
             
             return result;
         }
         
         // Jailbreak detection via sysctlbyname
         if (strcmp(name, "kern.bootargs") == 0) {
-            // Two-stage verification for improved reliability:
-            // 1. Check JailbreakDetectionBypass singleton first (most reliable)
-            BOOL jailbreakDetectionEnabled = [[JailbreakDetectionBypass sharedInstance] isEnabledRealtime];
-            
-            // 2. Fallback to NSUserDefaults if singleton doesn't work for some reason
-            if (!jailbreakDetectionEnabled) {
-                NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-                jailbreakDetectionEnabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
-            }
-            
-            if (!jailbreakDetectionEnabled) {
-                // Jailbreak detection bypass is disabled, pass through to original
-                PXLog(@"Jailbreak detection bypass is disabled, passing through original sysctlbyname kern.bootargs");
-                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-            }
-            
-            // Check if the current app is in the scoped apps list
-            NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-            if (!currentBundleID) {
-                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-            }
-            
-            IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-            if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
-                // App is not in scoped list, pass through to original
-                PXLog(@"App %@ not in scoped list, passing through original sysctlbyname kern.bootargs", currentBundleID);
-                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-            }
-            
             // App is in scoped list and jailbreak detection bypass is enabled
-            PXLog(@"Blocking jailbreak detection via sysctlbyname kern.bootargs for app: %@", currentBundleID);
+            PXLog(@"Blocking jailbreak detection via sysctlbyname kern.bootargs for app");
             // Return an error to indicate the call failed or the variable wasn't found
             if (oldlenp) *oldlenp = 0;
             return -1;
@@ -499,75 +464,6 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
 %end // End of Identifiers group
 
-// Define hook group for screenshot modifications
-%group ScreenshotModifier
-
-// Extension for UIImage to add profile indicator and remove navigation bar
-%hookf(UIImage *, UIImagePNGRepresentation, UIImage *image) {
-    UIImage *modifiedImage = image;
-    
-    // First, remove navigation bar from the screenshot
-    modifiedImage = [modifiedImage weaponx_removeNavigationBar];
-    
-    // Then, add profile indicator
-    modifiedImage = [modifiedImage weaponx_addProfileIndicator];
-    
-    // Finally, convert to PNG
-    return %orig(modifiedImage);
-}
-
-// Hook into screenshot saving
-%hook SBScreenshotManager
-
-- (void)saveScreenshotsWithCompletion:(id)completion {
-    PXLog(@"[WeaponX] Intercepted screenshot capture");
-    %orig;
-}
-
-- (void)saveScreenshots {
-    PXLog(@"[WeaponX] Intercepted screenshot capture (no completion)");
-    %orig;
-}
-
-%end
-
-%hook UIImage
-
-
-// Extension method to remove navigation bar
-%new
-- (UIImage *)weaponx_removeNavigationBar {
-    // Check if there's a navigation bar to remove (usually at the top of the screen)
-    // We'll assume a standard navigation bar height of ~44 points from the top
-    CGFloat navBarHeight = 44.0;
-    
-    // Begin a new graphics context with the image size
-    UIGraphicsBeginImageContextWithOptions(self.size, NO, self.scale);
-    
-    // Draw the original image but crop out the navigation bar area
-    [self drawInRect:CGRectMake(0, 0, self.size.width, self.size.height)
-            blendMode:kCGBlendModeNormal
-                alpha:1.0];
-    
-    // Get a reference to the graphics context
-    CGContextRef context = UIGraphicsGetCurrentContext();
-    
-    // Create a solid color rectangle to cover the navigation bar area
-    CGContextSetFillColorWithColor(context, [UIColor clearColor].CGColor);
-    CGContextFillRect(context, CGRectMake(0, 0, self.size.width, navBarHeight));
-    
-    // Get the modified image
-    UIImage *newImage = UIGraphicsGetImageFromCurrentImageContext();
-    
-    // End the graphics context
-    UIGraphicsEndImageContext();
-    
-    return newImage ?: self;
-}
-
-%end
-
-%end // End ScreenshotModifier group
 
 // Define hook group for location spoofing
 %group LocationSpoofing
@@ -1737,34 +1633,8 @@ static char* hook_GSSystemGetSerialNo(void) {
     if(!IsScope()) return;
     
     PXLog(@"ProjectX tweak initializing...");
-    
-    // CRITICAL FIX: Safely initialize jailbreak detection bypass with proper safety measures
-    // This must happen before any jailbreak-detection hooks are needed
-    NSString *currentProcess = [NSProcessInfo processInfo].processName;
-    
-    // Never initialize in critical boot-time processes
-    if ([currentProcess isEqualToString:@"launchd"] || 
-        [currentProcess isEqualToString:@"backboardd"] ||
-        [currentProcess isEqualToString:@"SpringBoard"]) {
-        PXLog(@"[JailbreakBypass] Not initializing in critical system process: %@", currentProcess);
-    } else {
-        // For regular apps, initialize normally but with a small delay to avoid boot loops
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.5 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            // Check user preference before initializing
-            NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-            BOOL jailbreakDetectionEnabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
-            
-            // Set the bypass enabled state based on user preference
-            [[JailbreakDetectionBypass sharedInstance] setEnabled:jailbreakDetectionEnabled];
-            
-            // Then initialize the bypass hooks
-            [[JailbreakDetectionBypass sharedInstance] setupBypass];
-            
-            PXLog(@"[JailbreakBypass] Initialized with state: %@", jailbreakDetectionEnabled ? @"ENABLED" : @"DISABLED");
-        });
-    }
-    
-    
+
+
     // Detect iOS version
     NSOperatingSystemVersion osVersion = [[NSProcessInfo processInfo] operatingSystemVersion];
     PXLog(@"Detected iOS version: %ld.%ld.%ld", 
@@ -1792,41 +1662,6 @@ static char* hook_GSSystemGetSerialNo(void) {
     // Initialize our hook group
     %init(Identifiers);
     
-    // Initialize screenshot modification hooks if we're in SpringBoard
-    NSString *processName = [NSProcessInfo processInfo].processName;
-    if ([processName isEqualToString:@"SpringBoard"]) {
-        PXLog(@"Initializing screenshot hooks in SpringBoard");
-        %init(ScreenshotModifier);
-        
-        // Initialize profile indicator immediately
-        dispatch_async(dispatch_get_main_queue(), ^{
-            // Check if profile indicator is enabled in settings
-            NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-            [securitySettings synchronize]; // Force synchronization to get latest state
-            
-            BOOL profileIndicatorEnabled = [securitySettings boolForKey:@"profileIndicatorEnabled"];
-            PXLog(@"ProfileIndicator: Checking if indicator should be shown at startup: %@", profileIndicatorEnabled ? @"YES" : @"NO");
-            
-            // Initialize the indicator view regardless of current state
-            PXLog(@"ProfileIndicator: Initializing profile indicator view at SpringBoard startup");
-            ProfileIndicatorView *indicator = [ProfileIndicatorView sharedInstance];
-            
-            // Show indicator if enabled in settings
-            if (profileIndicatorEnabled) {
-                PXLog(@"ProfileIndicator: Enabled in settings, showing indicator");
-                [indicator show];
-                PXLog(@"ProfileIndicator: Show method called during SpringBoard startup");
-            } else {
-                PXLog(@"ProfileIndicator: Disabled in settings, indicator initialized but not shown");
-                // Make sure it's hidden
-                [indicator hide];
-            }
-            
-            // Note: Darwin notification observers are registered within ProfileIndicatorView itself,
-            // so we don't need to register them here. This ensures clean separation of concerns.
-            PXLog(@"ProfileIndicator: Initialization complete, waiting for real-time updates");
-        });
-    }
     
     // Hook IOKit for serial number spoofing
     void *IOKitHandle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);

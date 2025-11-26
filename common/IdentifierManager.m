@@ -1848,41 +1848,6 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     return matches;
 }
 
-// - (BOOL)shouldSpoofForBundle:(NSString *)bundleID {
-//     if (!bundleID) return NO;
-    
-//     // Check cache first
-//     NSNumber *cachedDecision = self.spoofCache[bundleID];
-//     if (cachedDecision) {
-//         return [cachedDecision boolValue];
-//     }
-    
-//     // Check if the app is directly in scope
-//     BOOL isInScope = self.scopedApps[bundleID] != nil;
-    
-//     // If not directly in scope, check if it's an extension of a scoped app
-//     if (!isInScope) {
-//         isInScope = [self isExtensionEnabled:bundleID];
-        
-//         // If it's an extension, log this for debugging
-//         if (isInScope) {
-//             PXLog(@"[WeaponX] Bundle ID %@ is enabled as an extension", bundleID);
-//         }
-//     } else {
-//         // If directly in scope, check if it's enabled
-//         isInScope = [self.scopedApps[bundleID][@"enabled"] boolValue];
-        
-//         if (isInScope) {
-//             PXLog(@"[WeaponX] Bundle ID %@ is directly enabled in scope", bundleID);
-//         }
-//     }
-    
-//     // Cache the decision with a timestamp
-//     self.spoofCache[bundleID] = @(isInScope);
-//     self.spoofCache[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-    
-//     return isInScope;
-// }
 
 - (void)saveScopedApps {
     // Get the proper preferences path

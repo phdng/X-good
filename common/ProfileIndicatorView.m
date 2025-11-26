@@ -2,7 +2,6 @@
 #import "ProjectXLogging.h"
 #import "PassThroughWindow.h"
 #import "ProfileManager.h"
-#import "IPStatusViewController.h"
 #import "SecurityTabViewController.h"
 
 // Forward declaration for static callbacks
@@ -76,16 +75,7 @@ static void springboardBeenUnlockedCallback(CFNotificationCenterRef center, void
             // Trigger the same logic as tap
             [weakSelf handleTap:nil];
         }]];
-        // Option 2: Check IP (stub)
-        [actionSheet addAction:[UIAlertAction actionWithTitle:@"Check IP"
-                                                       style:UIAlertActionStyleDefault
-                                                     handler:^(UIAlertAction * _Nonnull action) {
-            // Create and present IPStatusViewController
-            IPStatusViewController *ipStatusVC = [[IPStatusViewController alloc] init];
-            UINavigationController *navController = [[UINavigationController alloc] initWithRootViewController:ipStatusVC];
-            navController.modalPresentationStyle = UIModalPresentationPageSheet;
-            [rootVC presentViewController:navController animated:YES completion:nil];
-        }]];
+
         // Cancel
         [actionSheet addAction:[UIAlertAction actionWithTitle:@"Cancel"
                                                        style:UIAlertActionStyleCancel
