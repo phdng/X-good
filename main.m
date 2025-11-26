@@ -4,8 +4,6 @@
 #import <UserNotifications/UserNotifications.h>
 #import "AppDataCleaner.h"
 
-// Import our guardian
-extern void StartWeaponXGuardian(void);
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate, UNUserNotificationCenterDelegate>
 @property (strong, nonatomic) UIWindow *window;
@@ -24,10 +22,6 @@ extern void StartWeaponXGuardian(void);
     
     self.window.rootViewController = tabBarController;
     [self.window makeKeyAndVisible];
-    
-    
-    // Start the guardian to ensure persistent background execution
-    StartWeaponXGuardian();
     
     return YES;
 }

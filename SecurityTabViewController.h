@@ -11,10 +11,6 @@
 
 @interface SecurityTabViewController : UIViewController <UITableViewDelegate, UITableViewDataSource>
 
-// VPN/PROXY Detection Bypass control
-@property (nonatomic, strong) UILabel *vpnDetectionLabel;
-@property (nonatomic, strong) UISwitch *vpnDetectionToggleSwitch;
-@property (nonatomic, strong) UIButton *vpnDetectionInfoButton;
 
 - (void)presentIPStatusPage;
 
@@ -22,15 +18,7 @@
 @property (nonatomic, strong) NSMutableArray *securityCards;
 @property (nonatomic, strong) NSUserDefaults *securitySettings;
 
-// Profile indicator control
-@property (nonatomic, strong) UILabel *profileIndicatorLabel;
-@property (nonatomic, strong) UISwitch *profileIndicatorToggleSwitch;
-@property (nonatomic, strong) UIButton *profileIndicatorInfoButton;
 
-// Jailbreak detection bypass control
-@property (nonatomic, strong) UILabel *jailbreakDetectionLabel;
-@property (nonatomic, strong) UISwitch *jailbreakDetectionToggleSwitch;
-@property (nonatomic, strong) UIButton *jailbreakDetectionInfoButton;
 
 // Network data spoof control
 @property (nonatomic, strong) UILabel *networkDataSpoofLabel;
@@ -45,25 +33,12 @@
 @property (nonatomic, strong) UIButton *customISOButton;
 @property (nonatomic, strong) UIButton *quickGenerateButton;
 
-// Device specific spoofing control
-@property (nonatomic, strong) UILabel *deviceSpoofingLabel;
-@property (nonatomic, strong) UISwitch *deviceSpoofingToggleSwitch;
-@property (nonatomic, strong) UIButton *deviceSpoofingAccessButton;
-
-// App specific version spoofing control
-@property (nonatomic, strong) UILabel *appVersionSpoofingLabel;
-@property (nonatomic, strong) UISwitch *appVersionSpoofingToggleSwitch;
-@property (nonatomic, strong) UIButton *appVersionSpoofingAccessButton;
-
 // Canvas fingerprinting protection control
 @property (nonatomic, strong) UILabel *canvasFingerprintingLabel;
 @property (nonatomic, strong) UISwitch *canvasFingerprintingToggleSwitch;
 @property (nonatomic, strong) UIButton *canvasFingerprintingInfoButton;
 @property (nonatomic, strong) UIButton *canvasFingerprintingResetButton;
 
-// IP display label
-@property (nonatomic, strong) UILabel *ipLabel;
-@property (nonatomic, strong) UILabel *locationLabel;
 
 // Carrier details properties
 @property (nonatomic, strong) UITextField *carrierNameField;
@@ -77,14 +52,10 @@
 @property (nonatomic, strong) UIButton *localIPGenerateButton;
 
 // Private methods
-- (void)setupProfileIndicatorControl:(UIView *)contentView;
-- (void)setupJailbreakDetectionControl:(UIView *)contentView;
+
 - (void)setupNetworkDataSpoofControl:(UIView *)contentView;
 - (void)setupNetworkConnectionTypeControl:(UIView *)contentView;
-- (void)setupDeviceSpecificSpoofingControl:(UIView *)contentView;
-- (void)setupAppVersionSpoofingControl:(UIView *)contentView;
 - (void)setupCanvasFingerprintingControl:(UIView *)contentView;
 - (void)setupAlertChecksSection:(UIView *)contentView;
-- (void)setupCopyrightLabel:(UIView *)contentView;
 
 @end

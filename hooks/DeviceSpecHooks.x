@@ -33,11 +33,6 @@ static kern_return_t (*orig_host_statistics64)(host_t host, host_flavor_t flavor
 static NXArchInfo* (* orig_nx_get_local_arch_info)();
 
 
-// Scoped apps cache
-static NSMutableDictionary *scopedAppsCache = nil;
-static NSDate *scopedAppsCacheTimestamp = nil;
-static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
-
 // Caches for device specs
 static NSMutableDictionary *deviceSpecsCache;
 static NSDate *cacheTimestamp;
@@ -67,7 +62,6 @@ static kern_return_t hook_host_statistics64(host_t host, host_flavor_t flavor, h
 static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 static NXArchInfo* hook_nx_get_local_arch_info();
 
-static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo);
 static CGSize parseResolution(NSString *resolutionString);
 
 #pragma mark - Helper Functions
@@ -779,21 +773,7 @@ static CGSize parseResolution(NSString *resolutionString) {
 
 #pragma mark - Notification Handlers
 
-// Handler for notification to refresh caches
-static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    NSString *notificationName = (__bridge NSString *)name;
-    PXLog(@"[DeviceSpec] Received notification: %@, refreshing caches", notificationName);
-    
-    @synchronized(deviceSpecsCache) {
-        [deviceSpecsCache removeAllObjects];
-        cachedDeviceModel = nil;
-        cacheTimestamp = nil;
-    }
-    
-    @synchronized(cachedBundleDecisions) {
-        [cachedBundleDecisions removeAllObjects];
-    }
-}
+
 
 #pragma mark - Canvas Fingerprinting Protection
 

@@ -226,7 +226,7 @@
     // Create kill button with soft minimalistic style
     UIButton *killButton = [UIButton buttonWithType:UIButtonTypeSystem];
     UIButtonConfiguration *killConfig = [UIButtonConfiguration plainButtonConfiguration];
-    killConfig.title = @"Kill Enabled Apps";
+    killConfig.title = @"一键新机";
     killConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
     killConfig.background.backgroundColor = [UIColor.systemRedColor colorWithAlphaComponent:0.15];
     killConfig.baseForegroundColor = [UIColor systemRedColor];
@@ -240,7 +240,7 @@
     // Create respring button with soft minimalistic style
     UIButton *applyButton = [UIButton buttonWithType:UIButtonTypeSystem];
     UIButtonConfiguration *applyConfig = [UIButtonConfiguration plainButtonConfiguration];
-    applyConfig.title = @"Respring";
+    applyConfig.title = @"注销";
     applyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
     applyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
     applyConfig.baseForegroundColor = [UIColor systemBlueColor];
