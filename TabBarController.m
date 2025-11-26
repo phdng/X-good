@@ -77,7 +77,7 @@
     
     // Configure tab bar items (excluding account)
     identityNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Home" image:[UIImage systemImageNamed:@"house.fill"] tag:1];
-    securityNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Security" image:[UIImage systemImageNamed:@"shield.checkerboard"] tag:2];
+    securityNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"设置" image:[UIImage systemImageNamed:@"shield.checkerboard"] tag:2];
     
     // Set view controllers (excluding account)
     self.viewControllers = @[identityNav, securityNav];

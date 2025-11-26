@@ -125,7 +125,7 @@
 
 - (void)refreshPinnedCoordinates {
     // Set the main title directly
-    self.title = @"Security";
+    self.title = @"设置";
     
     // Remove any existing barButtonItems to prevent duplication
     self.navigationItem.rightBarButtonItems = nil;

@@ -36,7 +36,6 @@ static BOOL hooksInstalled = NO;
 // Forward declarations
 static NSString *getCurrentProfilePath(void);
 static void updateCachedBootTimeValues(void);
-static void logBootTimeAccess(const char *method, NSString *bundleID);
 static void installSystemCallHooks(void);
 static BOOL isBootTimeOrUptimeEnabled(void);
 
@@ -107,27 +106,6 @@ static void updateCachedBootTimeValues(void) {
         
     } @catch (NSException *e) {
         // Silent failure to avoid crashes
-    }
-}
-
-// Log boot time access attempts for debugging
-static void logBootTimeAccess(const char *method, NSString *bundleID) {
-    @try {
-        static NSMutableSet *loggedMethods = nil;
-        static dispatch_once_t onceToken;
-        dispatch_once(&onceToken, ^{
-            loggedMethods = [NSMutableSet set];
-        });
-        
-        if (!method || !bundleID) return;
-        
-        NSString *methodKey = [NSString stringWithFormat:@"%s:%@", method, bundleID];
-        if (![loggedMethods containsObject:methodKey]) {
-            [loggedMethods addObject:methodKey];
-            PXLog(@"[BootTimeHooks] 🕵️ App %@ accessed boot time via %s", bundleID, method);
-        }
-    } @catch (NSException *e) {
-        // Silent failure
     }
 }
 

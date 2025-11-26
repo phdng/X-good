@@ -7,7 +7,6 @@
 #import "IdentifierManager.h"
 // Global variables to track state
 static NSMutableDictionary *cachedBundleDecisions = nil;
-static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes 
 static NSMutableDictionary *customChangeCountMap = nil; // Store custom change counts per app
 static NSMutableDictionary *lastKnownPasteboardData = nil; // Cache pasteboard content hash
 
@@ -171,9 +170,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
 - (NSString *)name {
     NSString *originalName = %orig;
     
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
         // Only spoof on custom-named pasteboards, not the general one
         if (originalName && ![originalName isEqualToString:@"com.apple.UIKit.pboard.general"]) {
             // Get current pasteboard UUID
@@ -227,9 +224,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
 
 // Hook the named pasteboard creation method
 + (UIPasteboard *)pasteboardWithName:(NSString *)pasteboardName create:(BOOL)create {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
         if (pasteboardName) {
             // Get current pasteboard UUID
             NSString *uuidString = getSpoofedPasteboardUUID();
@@ -283,9 +278,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
 
 // Hook URL-based pasteboard creation (iOS 10+)
 + (UIPasteboard *)pasteboardWithURL:(NSURL *)url create:(BOOL)create {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
         if (url) {
             // Create a modified URL with our UUID to ensure stable but unique URLs
             NSString *uuidString = getSpoofedPasteboardUUID();

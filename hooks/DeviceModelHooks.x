@@ -18,14 +18,11 @@ static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, v
 static CFTypeRef (*orig_IORegistryEntryCreateCFProperty)(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options);
 static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
 
-// Forward declare helper functions
-static void logDeviceModelAccess(const char* method, NSString* bundleID);
 
 #pragma mark - Helper Functions
 
 // Cache to reduce frequency of expensive checks
 static NSMutableDictionary *cachedBundleDecisions = nil;
-static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes
 
 
 // Cache for device model values
@@ -675,30 +672,6 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
     return ret;
 }
 
-// Helper method to log device model access
-static void logDeviceModelAccess(const char* method, NSString* bundleID) {
-    static NSMutableSet *loggedApps = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        loggedApps = [NSMutableSet set];
-    });
-    
-    // Create a unique key for this method+bundleID combination
-    NSString *accessKey = [NSString stringWithFormat:@"%s-%@", method, bundleID];
-    
-    // Only log once per method+bundleID combination to avoid log spam
-    @synchronized(loggedApps) {
-        if (![loggedApps containsObject:accessKey]) {
-            // IMPORTANT: Don't call uname() directly here as it could cause infinite recursion
-            // Instead, log a simple message about the access
-            NSString *spoofedModel = getSpoofedDeviceModel();
-            PXLog(@"[model] App %@ accessed device model via %s - Spoofed: %@", 
-                  bundleID, method, spoofedModel ?: @"Not set");
-            
-            [loggedApps addObject:accessKey];
-        }
-    }
-}
 
 %ctor {
     @autoreleasepool {

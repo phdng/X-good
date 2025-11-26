@@ -16,7 +16,6 @@
 #import <dirent.h>     // For DIR type
 #import <sys/mount.h>  // For statfs
 #import "ProfileManager.h" // For accessing current profile
-#import "ProfileIndicatorView.h" // For profile indicator
 #import <substrate.h>
 #import <sys/utsname.h>
 #import <Security/Security.h>
@@ -38,48 +37,6 @@
 
 // Cache for values
 static NSMutableDictionary *valueCache;
-
-// Function pointer declarations for additional system functions
-static int (*sysctlbyname_orig)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
-
-// Implementation for sysctl hook - commonly used to get device identifiers and detect jailbreak
-static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
-    // Log and potentially modify certain sysctl calls
-    if (name) {
-        // Identifiers that might be accessed via sysctl
-        if (strcmp(name, "hw.machine") == 0 || 
-            strcmp(name, "hw.model") == 0 || 
-            strcmp(name, "kern.hostname") == 0 ||
-            strcmp(name, "hw.product") == 0) {
-            
-            PXLog(@"Intercepted sysctlbyname call for: %s", name);
-            
-            // Allow the original call to execute
-            int result = sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-            
-            // We'd modify the device identifier here if needed
-            // For demonstration, just logging the interception
-            if (oldp && oldlenp && *oldlenp > 0) {
-                PXLog(@"sysctlbyname returned value for %s", name);
-            }
-            
-            
-            return result;
-        }
-        
-        // Jailbreak detection via sysctlbyname
-        if (strcmp(name, "kern.bootargs") == 0) {
-            // App is in scoped list and jailbreak detection bypass is enabled
-            PXLog(@"Blocking jailbreak detection via sysctlbyname kern.bootargs for app");
-            // Return an error to indicate the call failed or the variable wasn't found
-            if (oldlenp) *oldlenp = 0;
-            return -1;
-        }
-    }
-    
-    // For all other cases, pass through to the original function
-    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-}
 
 // Define hook group for main identifier spoofing
 %group Identifiers
@@ -1412,109 +1369,6 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
 %end  // End of SensorSpoofing group
 
-
-
-
-// Function pointer declarations for rebinding
-static int (*getifaddrs_orig)(struct ifaddrs **ifap);
-static int (*gethostname_orig)(char *name, size_t namelen);
-
-// Hook implementation for getifaddrs
-static int getifaddrs_hook(struct ifaddrs **ifap) {
-    int result = getifaddrs_orig(ifap);
-    if (result == 0 && ifap && *ifap) {
-        // Check if jailbreak detection bypass is enabled
-        NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-        BOOL jailbreakDetectionEnabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
-        
-        if (!jailbreakDetectionEnabled) {
-            return result; // Skip if bypass is disabled
-        }
-        
-        // Check if the current app is in the scoped apps list
-        NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!currentBundleID) {
-            return result;
-        }
-        
-        IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-        if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
-            return result; // Skip if app is not in scoped list
-        }
-        
-        // Loop through network interfaces and modify MAC addresses
-        struct ifaddrs *ifa = *ifap;
-        while (ifa) {
-            if (ifa->ifa_addr && ifa->ifa_addr->sa_family == AF_LINK) {
-                // Here you'd modify the link-level address (MAC)
-                // For safety, we'll just log it here
-                PXLog(@"Protected MAC address for interface: %s for app: %@", ifa->ifa_name, currentBundleID);
-            }
-            ifa = ifa->ifa_next;
-        }
-    }
-    return result;
-}
-
-// Hook implementation for gethostname
-static int gethostname_hook(char *name, size_t namelen) {
-    // Call original first
-    int result = gethostname_orig(name, namelen);
-    
-    // Check if jailbreak detection bypass is enabled
-    NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-    BOOL jailbreakDetectionEnabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
-    
-    if (!jailbreakDetectionEnabled) {
-        return result; // Skip if bypass is disabled
-    }
-    
-    // Check if the current app is in the scoped apps list
-    NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!currentBundleID) {
-        return result;
-    }
-    
-    IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-    if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
-        return result; // Skip if app is not in scoped list
-    }
-    
-    // If successful and we have a spoofed hostname
-    if (result == 0 && name && namelen > 0) {
-        const char *spoofedName = "SpoofedDevice";
-        strncpy(name, spoofedName, namelen - 1);
-        name[namelen - 1] = '\0'; // Ensure null termination
-        PXLog(@"Spoofed hostname: %s for app: %@", name, currentBundleID);
-    }
-    
-    return result;
-}
-
-// Anti-detection callback function (must be a regular function, not a block)
-static void antiDetectionCallback(void) {
-    // Check if jailbreak detection bypass is enabled
-    NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-    BOOL jailbreakDetectionEnabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
-    
-    if (!jailbreakDetectionEnabled) {
-        return; // Skip if bypass is disabled
-    }
-    
-    // Check if the current app is in the scoped apps list
-    NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!currentBundleID) {
-        return;
-    }
-    
-    IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-    if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
-        return; // Skip if app is not in scoped list
-    }
-    
-    PXLog(@"Running anti-detection callback for %@", currentBundleID);
-    // Add additional anti-detection logic here
-}
 
 // Hook IOKit's IORegistryEntryCreateCFProperty for serial number
 static CFTypeRef (*orig_IORegistryEntryCreateCFProperty)(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options);

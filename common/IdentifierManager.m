@@ -797,7 +797,6 @@
 }
 // 页面展示用的 里面带格式化
 - (NSString *)currentValueForIdentifier:(NSString *)type {
-    NSLog([@"[debug]" stringByAppendingString:type]);
     // Special hardcoded serial number for Filza and ADManager
     // if ([type isEqualToString:@"SerialNumber"]) {
     //     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];

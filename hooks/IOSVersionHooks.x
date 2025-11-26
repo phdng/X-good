@@ -10,15 +10,7 @@
 #import <mach/mach_time.h>
 #import "IdentifierManager.h"
 #import <substrate.h>
-// Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
-// Scoped apps cache
-static NSMutableDictionary *scopedAppsCache = nil;
-static NSDate *scopedAppsCacheTimestamp = nil;
-static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
 
 // Add a macro for logging with a recognizable prefix
 // Set DEBUG_LOG to 0 to reduce logging in production
@@ -32,8 +24,6 @@ static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
 #endif
 
 // Forward declarations
-static NSString *getCurrentBundleID(void);
-static NSDictionary *loadScopedApps(void);
 static void modifyUserAgentString(NSString **userAgentString, NSString *originalVersion, NSString *spoofedVersion);
 static BOOL isSystemVersionFile(NSString *path);
 static NSDictionary *spoofSystemVersionPlist(NSDictionary *originalPlist);
@@ -53,7 +43,6 @@ static id (*original_NSString_stringWithContentsOfFile)(Class self, SEL _cmd, NS
 
 // Global variables
 static NSMutableDictionary *cachedBundleDecisions = nil;
-static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes
 static NSMutableDictionary *versionCache = nil;
 static NSTimeInterval lastVersionLoad = 0;
 
@@ -70,113 +59,6 @@ static CFDictionaryRef cachedDictResult = NULL;
 // SystemVersion.plist path constants
 #define SYSTEM_VERSION_PATH @"/System/Library/CoreServices/SystemVersion.plist"
 #define ROOTLESS_SYSTEM_VERSION_PATH @"/var/jb/System/Library/CoreServices/SystemVersion.plist"
-
-#pragma mark - Helper Functions
-
-// Get the current bundle ID
-static NSString *getCurrentBundleID(void) {
-    @try {
-        NSBundle *mainBundle = [NSBundle mainBundle];
-        if (!mainBundle) {
-            return nil;
-        }
-        return [mainBundle bundleIdentifier];
-    } @catch (NSException *e) {
-        return nil;
-    }
-}
-
-// Load scoped apps from the plist file
-static NSDictionary *loadScopedApps(void) {
-    @try {
-        // Check if cache is valid
-        if (scopedAppsCache && scopedAppsCacheTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:scopedAppsCacheTimestamp] < kScopedAppsCacheValidDuration) {
-            return scopedAppsCache;
-        }
-        
-        // Initialize cache if needed
-        if (!scopedAppsCache) {
-            scopedAppsCache = [NSMutableDictionary dictionary];
-        } else {
-            [scopedAppsCache removeAllObjects];
-        }
-        
-        // Try each possible path for the scoped apps file
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *validPath = nil;
-        
-        for (NSString *path in possiblePaths) {
-            if ([fileManager fileExistsAtPath:path]) {
-                validPath = path;
-                break;
-            }
-        }
-        
-        if (!validPath) {
-            // Don't log this error too frequently to avoid spam
-            static NSDate *lastErrorLog = nil;
-            if (!lastErrorLog || [[NSDate date] timeIntervalSinceDate:lastErrorLog] > 300.0) { // 5 minutes
-                PXLog(@"[IOSVersionHooks] Could not find scoped apps file");
-                lastErrorLog = [NSDate date];
-            }
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Load the plist file safely
-        NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:validPath];
-        if (!plistDict || ![plistDict isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Get the scoped apps dictionary
-        NSDictionary *scopedApps = plistDict[@"ScopedApps"];
-        if (!scopedApps || ![scopedApps isKindOfClass:[NSDictionary class]]) {
-            scopedAppsCacheTimestamp = [NSDate date];
-            return scopedAppsCache;
-        }
-        
-        // Copy the scoped apps to our cache
-        [scopedAppsCache addEntriesFromDictionary:scopedApps];
-        scopedAppsCacheTimestamp = [NSDate date];
-        
-        return scopedAppsCache;
-        
-    } @catch (NSException *e) {
-        scopedAppsCacheTimestamp = [NSDate date];
-        return scopedAppsCache ?: [NSMutableDictionary dictionary];
-    }
-}
-
-
-
-// Critical system processes to exclude from spoofing
-static NSSet *criticalSystemBundleIDs() {
-    static NSSet *criticalBundleIDs = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        criticalBundleIDs = [NSSet setWithArray:@[
-            @"com.apple.springboard",
-            @"com.apple.backboardd",
-            @"com.apple.Preferences",
-            @"com.apple.UIKit",
-            @"com.apple.iokit",
-            @"com.apple.mediaserverd",
-            @"com.apple.dock",
-            @"com.apple.security",
-            @"com.apple.powerd",
-            @"com.apple.tccd",
-            @"com.apple.launchd",
-            @"com.apple.trustd",
-            @"com.apple.CoreTelephony"
-        ]];
-    });
-    return criticalBundleIDs;
-}
-
 
 
 // Get the current iOS version information from the profile

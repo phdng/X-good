@@ -300,10 +300,7 @@ static id replaced_dictionaryWithScanResult(id self, SEL _cmd, id arg1) {
 // Swizzle replacements for NEHotspotNetwork
 @implementation NEHotspotNetwork (WeaponXHooks)
 
-- (NSString *)weaponx_SSID {
-    // Check if we should spoof
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
+- (NSString *)weaponx_SSID {    
     // Try to use cached info first
     if (cachedWifiInfo && cachedWifiInfo[@"ssid"]) {
         return cachedWifiInfo[@"ssid"];
@@ -326,8 +323,6 @@ static id replaced_dictionaryWithScanResult(id self, SEL _cmd, id arg1) {
 }
 
 - (NSString *)weaponx_BSSID {
-    // Check if we should spoof
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
 
     // Try to use cached info first
     if (cachedWifiInfo && cachedWifiInfo[@"bssid"]) {

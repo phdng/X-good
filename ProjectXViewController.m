@@ -952,7 +952,7 @@
     // Add Generate All button with minimalistic style
     UIButton *generateAllButton = [UIButton buttonWithType:UIButtonTypeSystem];
     UIButtonConfiguration *generateAllConfig = [UIButtonConfiguration plainButtonConfiguration];
-    generateAllConfig.title = @"Generate All";
+    generateAllConfig.title = @"刷新所有参数";
     generateAllConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
     generateAllConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
     generateAllConfig.baseForegroundColor = [UIColor systemBlueColor];
@@ -974,13 +974,13 @@
     [self.mainStackView addArrangedSubview:headerStack];
     
     // Add basic identifier sections
-    [self addIdentifierSection:@"IDFA" title:@"Advertising Identifier"];
-    [self addIdentifierSection:@"IDFV" title:@"Vendor Identifier"];
-    [self addIdentifierSection:@"DeviceName" title:@"Device Name"];
-    [self addIdentifierSection:@"IOSVersion" title:@"iOS Version & Build"];
-    [self addIdentifierSection:@"WiFi" title:@"WiFi Information"];
-    [self addIdentifierSection:@"StorageSystem" title:@"Storage Information"];
-    [self addIdentifierSection:@"Battery" title:@"Battery Information"];
+    [self addIdentifierSection:@"IDFA" title:@"IDFA"];
+    [self addIdentifierSection:@"IDFV" title:@"IDFV"];
+    [self addIdentifierSection:@"DeviceName" title:@"设备名"];
+    [self addIdentifierSection:@"IOSVersion" title:@"版本号"];
+    [self addIdentifierSection:@"WiFi" title:@"WiFi信息"];
+    [self addIdentifierSection:@"StorageSystem" title:@"存储信息"];
+    [self addIdentifierSection:@"Battery" title:@"电池信息"];
     
     // Add basic UUID sections - moved System Uptime and Boot Time from advanced to basic
     [self addIdentifierSection:@"SystemUptime" title:@"System Uptime"];
@@ -1087,8 +1087,6 @@
     // Initialize profiles array
     self.profiles = [[ProfileManager sharedManager].profiles mutableCopy];
     
-    // Setup profile indicator
-    [self setupProfileIndicator];
 }
 
 #pragma mark - Settings Management
@@ -1605,7 +1603,7 @@
     UIButton *generateButton = [UIButton buttonWithType:UIButtonTypeSystem];
     UIButtonConfiguration *generateConfig = [UIButtonConfiguration plainButtonConfiguration];
     generateConfig.image = [UIImage systemImageNamed:@"arrow.clockwise"];
-    generateConfig.title = @"Generate";
+    generateConfig.title = @"刷新参数";
     generateConfig.imagePlacement = NSDirectionalRectEdgeLeading;
     generateConfig.imagePadding = 4;
     generateConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
@@ -2053,7 +2051,7 @@
         dispatch_async(dispatch_get_main_queue(), ^{
             // Re-enable button
             sender.enabled = YES;
-            [sender setTitle:@"Generate" forState:UIControlStateNormal];
+            [sender setTitle:@"刷新参数" forState:UIControlStateNormal];
             [sender setTintColor:originalColor];
             
             if ([self.manager lastError]) {
@@ -2129,7 +2127,7 @@
         UIButton *generateButton = nil;
         for (UIView *control in controlsStack.arrangedSubviews) {
             if ([control isKindOfClass:[UIButton class]] && 
-                [[(UIButton *)control currentTitle] isEqualToString:@"Generate"]) {
+                [[(UIButton *)control currentTitle] isEqualToString:@"刷新参数"]) {
                 generateButton = (UIButton *)control;
                 break;
             }
@@ -2883,8 +2881,8 @@
             if ([control isKindOfClass:[UIButton class]]) {
                 UIButton *button = (UIButton *)control;
                 NSString *buttonTitle = [button titleForState:UIControlStateNormal];
-                if ([buttonTitle isEqualToString:@"Generate"] || 
-                    [button.configuration.title isEqualToString:@"Generate"]) {
+                if ([buttonTitle isEqualToString:@"刷新参数"] || 
+                    [button.configuration.title isEqualToString:@"刷新参数"]) {
                     generateButton = button;
                     break;
                 }
@@ -3146,8 +3144,6 @@
                 // Auto-switch to the newly created profile
                 [[ProfileManager sharedManager] switchToProfile:newProfile completion:^(BOOL switchSuccess, NSError * _Nullable switchError) {
                     dispatch_async(dispatch_get_main_queue(), ^{
-                        // First update the profile indicator
-                        [self updateProfileIndicator];
                         
                         // Then force regenerate all identifiers
                         [self.manager regenerateAllEnabledIdentifiers];
@@ -3256,9 +3252,6 @@
     // Update profiles array since the profile was already created by ProfileCreationViewController
     self.profiles = [[ProfileManager sharedManager].profiles mutableCopy];
     
-    // Update the profile indicator to reflect the newly created profile
-    [self updateProfileIndicator];
-    
     // NOTE: We no longer need to send additional notifications here
     // The profile update is already handled by ProfileManager.createProfile
     // These extra notifications were causing duplicate indicators to appear
@@ -3268,7 +3261,6 @@
 
 - (void)profileManagerViewController:(UIViewController *)viewController didUpdateProfiles:(NSArray<Profile *> *)profiles {
     self.profiles = [profiles mutableCopy];
-    [self updateProfileIndicator];
 }
 
 - (void)profileManagerViewController:(UIViewController *)viewController didSelectProfile:(Profile *)profile {
@@ -3278,8 +3270,6 @@
     // Update UI if needed based on the newly selected profile
     // For example, refresh any profile-dependent UI elements
     
-    // Update the profile indicator
-    [self updateProfileIndicator];
     
     // Explicitly notify floating profile indicator to refresh
     [[NSNotificationCenter defaultCenter] postNotificationName:@"ProfileManagerCurrentProfileChanged" 
@@ -3325,59 +3315,6 @@
     self.profiles = [[ProfileManager sharedManager].profiles mutableCopy];
 }
 
-#pragma mark - Profile Indicator
-
-- (void)setupProfileIndicator {
-    // Remove existing indicator if any
-    if (self.profileIndicatorView) {
-        [self.profileIndicatorView removeFromSuperview];
-    }
-    
-    // Create profile indicator view with no styling
-    self.profileIndicatorView = [[UIView alloc] init];
-    self.profileIndicatorView.translatesAutoresizingMaskIntoConstraints = NO;
-    self.profileIndicatorView.backgroundColor = [UIColor clearColor]; // Make completely transparent
-    [self.view addSubview:self.profileIndicatorView];
-    
-    // Position at the left edge of the screen - move further left with negative constant
-    [NSLayoutConstraint activateConstraints:@[
-        [self.profileIndicatorView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:-8],
-        [self.profileIndicatorView.centerYAnchor constraintEqualToAnchor:self.view.centerYAnchor],
-        [self.profileIndicatorView.widthAnchor constraintEqualToConstant:30],
-        [self.profileIndicatorView.heightAnchor constraintEqualToConstant:260]
-    ]];
-    
-    // Update the profile indicator content
-    [self updateProfileIndicator];
-}
-
-- (void)updateProfileIndicator {
-    // Clear existing content
-    for (UIView *subview in self.profileIndicatorView.subviews) {
-        [subview removeFromSuperview];
-    }
-    
-    // Read from central profile info using ProfileManager
-    ProfileManager *profileManager = [ProfileManager sharedManager];
-    NSString *centralProfileInfoPath = [profileManager centralProfileInfoPath];
-    NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:centralProfileInfoPath];
-    NSString *profileId = profileInfo[@"ProfileId"];
-    
-    if (!profileId) {
-        NSLog(@"[WeaponX] ProjectX: ❌ Failed to read profile ID from current_profile_info.plist");
-        return;
-    }
-    
-    NSLog(@"[WeaponX] ProjectX: Using profile ID %@ from central store", profileId);
-    
-    // Update UI with profile info
-    NSString *profileName = profileInfo[@"ProfileName"] ?: [NSString stringWithFormat:@"Profile %@", profileId];
-    NSString *iconName = profileInfo[@"IconName"] ?: @"default_profile";
-    
-    
-    // Also refresh the identifier values in the UI
-    [self refreshIdentifierValuesInUI];
-}
 
 
 - (void)copyIdentifierValue:(UIButton *)sender {
@@ -3671,8 +3608,6 @@
                         
                         [self hideLoadingIndicator];
                         
-                        // Update the profile indicator
-                        [self updateProfileIndicator];
                         
                         if (switchSuccess) {
                             // Show success message with the profile ID and mention that the profile is now active
@@ -4760,9 +4695,6 @@
 - (void)handleProfileChanged:(NSNotification *)notification {
     // This method is called when the profile changes
     NSLog(@"[WeaponX] Profile changed notification received");
-    
-    // Update the profile indicator to show the new profile
-    [self updateProfileIndicator];
     
     // Refresh all identifier values in the UI
     [self refreshIdentifierValuesInUI];
