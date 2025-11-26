@@ -1,4 +1,4 @@
-#import "ProfileManagerViewController.h"
+#import "ProfileTabViewController.h"
 #import "ProfileManager.h"
 
 // Custom ProfileTableViewCell class
@@ -21,7 +21,7 @@
 
 @end
 
-@interface ProfileManagerViewController () <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate, UIDocumentInteractionControllerDelegate>
+@interface ProfileTabViewController () <UITableViewDelegate, UITableViewDataSource, UITextFieldDelegate, UIDocumentInteractionControllerDelegate>
 
 @property (nonatomic, strong) UIBarButtonItem *editButton;
 @property (nonatomic, strong) UIBarButtonItem *doneButton;
@@ -39,7 +39,7 @@
 
 @end
 
-@implementation ProfileManagerViewController
+@implementation ProfileTabViewController
 
 - (instancetype)initWithProfiles:(NSMutableArray<Profile *> *)profiles {
     self = [super init];
@@ -515,12 +515,7 @@
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:self.tableView];
     
-    // Add close/dismiss button
-    UIBarButtonItem *closeButton = [[UIBarButtonItem alloc] initWithBarButtonSystemItem:UIBarButtonSystemItemClose 
-                                                                               target:self 
-                                                                               action:@selector(dismissProfileManager)];
-    self.navigationItem.leftBarButtonItem = closeButton;
-    
+
     // Setup constraints
     [NSLayoutConstraint activateConstraints:@[
         [self.tableView.topAnchor constraintEqualToAnchor:self.view.topAnchor],
@@ -533,9 +528,6 @@
     [self.tableView reloadData];
 }
 
-- (void)dismissProfileManager {
-    [self dismissViewControllerAnimated:YES completion:nil];
-}
 
 - (void)toggleEditMode {
     BOOL isEditing = self.tableView.isEditing;
@@ -1483,8 +1475,8 @@
                 [self updateProfileCount];
                 
                 // Notify delegate
-                if ([self.delegate respondsToSelector:@selector(profileManagerViewController:didUpdateProfiles:)]) {
-                    [self.delegate profileManagerViewController:self didUpdateProfiles:self.profiles];
+                if ([self.delegate respondsToSelector:@selector(ProfileTabViewController:didUpdateProfiles:)]) {
+                    [self.delegate ProfileTabViewController:self didUpdateProfiles:self.profiles];
                 }
             } else {
                 NSLog(@"[WeaponX] Failed to delete profile folder: %@, Error: %@", profilePath, error);
@@ -1560,8 +1552,8 @@
                                                                           preferredStyle:UIAlertControllerStyleAlert];
                 [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
                     // Notify delegate that a profile was selected
-                    if ([self.delegate respondsToSelector:@selector(profileManagerViewController:didSelectProfile:)]) {
-                        [self.delegate profileManagerViewController:self didSelectProfile:profile];
+                    if ([self.delegate respondsToSelector:@selector(ProfileTabViewController:didSelectProfile:)]) {
+                        [self.delegate ProfileTabViewController:self didSelectProfile:profile];
                     }
                     
                     // Dismiss the profile manager
@@ -1720,11 +1712,11 @@
                 [self loadProfilesFromDisk];
                 
                 // Notify delegate
-                if ([self.delegate respondsToSelector:@selector(profileManagerViewController:didUpdateProfiles:)]) {
+                if ([self.delegate respondsToSelector:@selector(ProfileTabViewController:didUpdateProfiles:)]) {
                     if (self.isSearchActive) {
-                        [self.delegate profileManagerViewController:self didUpdateProfiles:self.filteredProfiles];
+                        [self.delegate ProfileTabViewController:self didUpdateProfiles:self.filteredProfiles];
                     } else {
-                        [self.delegate profileManagerViewController:self didUpdateProfiles:self.profiles];
+                        [self.delegate ProfileTabViewController:self didUpdateProfiles:self.profiles];
                     }
                 }
             });
@@ -1811,8 +1803,8 @@
                 [self updateProfileCount];
                 
                 // Notify delegate
-                if ([self.delegate respondsToSelector:@selector(profileManagerViewController:didUpdateProfiles:)]) {
-                    [self.delegate profileManagerViewController:self didUpdateProfiles:self.profiles];
+                if ([self.delegate respondsToSelector:@selector(ProfileTabViewController:didUpdateProfiles:)]) {
+                    [self.delegate ProfileTabViewController:self didUpdateProfiles:self.profiles];
                 }
                 
                 // Show success alert

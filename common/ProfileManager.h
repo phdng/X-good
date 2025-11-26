@@ -41,7 +41,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSDictionary *)loadCentralProfileInfo;
 - (NSString *)centralProfileInfoPath;
 
-// Convenience methods for ProfileManagerViewController
+// Convenience methods for ProfileTabViewController
 - (void)removeProfile:(NSString *)profileName;
 - (void)renameProfile:(NSString *)oldName to:(NSString *)newName;
 - (void)addProfile:(NSString *)profileName;
