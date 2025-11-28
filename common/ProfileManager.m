@@ -3,6 +3,7 @@
 #import "ContainerManager.h"
 #import <spawn.h>
 #import <sys/wait.h>
+#import "AppScopeManager.h"
 
 // Forward declaration for app termination
 @interface BottomButtons : NSObject
@@ -20,13 +21,7 @@
 - (void)sendActions:(NSSet *)actions withResult:(id)result;
 @end
 
-@interface IdentifierManager : NSObject
-+ (instancetype)sharedManager;
-- (BOOL)isApplicationEnabled:(NSString *)bundleID;
-- (NSDictionary *)getApplicationInfo:(NSString *)bundleID;
-- (void)regenerateAllEnabledIdentifiers;
-- (void)resetCanvasNoise;
-@end
+
 
 @interface LSApplicationProxy : NSObject
 + (id)applicationProxyForIdentifier:(id)identifier;
@@ -784,7 +779,7 @@
             }
             
             // Check if app is enabled
-            if ([identifierManager isApplicationEnabled:bundleID]) {
+            if (IsScope()) {
                 NSLog(@"[WeaponX] 🔄 Terminating enabled app: %@", bundleID);
                 
                 // Use killAppViaExecutableName method directly

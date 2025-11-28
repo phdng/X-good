@@ -12,7 +12,7 @@
 #import <ifaddrs.h>
 #import <net/if.h>
 #import "ProfileManager.h"
-#import "IdentifierManager.h"
+#import "AppScopeManager.h"
 #import <substrate.h>
 
 // Forward declarations for private API methods

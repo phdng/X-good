@@ -2,7 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
-#import "IdentifierManager.h"
+#import "AppScopeManager.h"
 #import "UserDefaultsUUIDManager.h"
 #import "ProfileManager.h"
 
@@ -153,7 +153,7 @@ static BOOL isUUIDKey(NSString *key) {
 #pragma mark - NSUserDefaults Hooks
 
 %hook NSUserDefaults
-
+// TODO 这里貌似会让应用闪退
 // Base method for getting objects
 - (id)objectForKey:(NSString *)defaultName {
     @try {        
@@ -407,5 +407,6 @@ static BOOL isUUIDKey(NSString *key) {
         // Skip for system processes
         if(!IsScope()) return;      
         PXLog(@"[WeaponX] 🔍 UserDefaults hooks initialized");
+        %init;
     }
 } 

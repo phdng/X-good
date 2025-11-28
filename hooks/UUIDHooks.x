@@ -13,7 +13,7 @@
 #import <pthread.h>
 #import "ProfileManager.h"
 #import <substrate.h>
-
+#import "AppScopeManager.h"
 // Macro for iOS version checking
 #define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != NSOrderedAscending)
 
@@ -34,179 +34,6 @@ static void clearCacheCallback(CFNotificationCenterRef center, void *observer, C
     });
 }
 
-// Update the shouldSpoofForBundle function to directly check settings files
-static BOOL shouldSpoofForBundle(NSString *bundleID) {
-    if (!bundleID) return NO;
-    
-    // Skip system apps, the tweak itself, and system processes - more comprehensive filtering
-    if ([bundleID hasPrefix:@"com.apple."] || 
-        [bundleID isEqualToString:@"com.hydra.projectx"] ||
-        [bundleID containsString:@"springboard"] ||
-        [bundleID containsString:@"backboardd"] ||
-        [bundleID containsString:@"mediaserverd"] ||
-        [bundleID containsString:@"searchd"] ||
-        [bundleID containsString:@"assertiond"] ||
-        [bundleID containsString:@"useractivityd"] ||
-        [bundleID containsString:@"apsd"] ||
-        [bundleID containsString:@"identityservicesd"] ||
-        [bundleID containsString:@"coreduetd"] ||
-        [bundleID containsString:@"sharingd"] ||
-        [bundleID containsString:@"mobiletimerd"] ||
-        ([bundleID containsString:@"system"] && [bundleID containsString:@"daemon"])) {
-        return NO;
-    }
-    
-    // Get the executable path to check if it's a system binary
-    NSString *executablePath = [[NSBundle mainBundle] executablePath];
-    if (executablePath && 
-        ([executablePath hasPrefix:@"/usr/"] || 
-         [executablePath hasPrefix:@"/bin/"] || 
-         [executablePath hasPrefix:@"/sbin/"])) {
-        return NO;
-    }
-    
-    // Initialize the cache queue if needed
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        cacheQueue = dispatch_queue_create("com.hydra.projectx.uuidcache", DISPATCH_QUEUE_SERIAL);
-        isInitialized = YES;
-    });
-    
-    // Check if for some reason initialization failed
-    if (!isInitialized || !cacheQueue) {
-        return NO;
-    }
-    
-    // Use sync block for thread-safe access to the cache
-    __block BOOL shouldSpoof = NO;
-    __block BOOL foundInCache = NO;
-    
-    dispatch_sync(cacheQueue, ^{
-        // Ensure the cache dictionary exists
-        if (!cachedBundleDecisions) {
-            cachedBundleDecisions = [NSMutableDictionary dictionary];
-        }
-        
-        // Check cache first
-        NSNumber *cachedDecision = cachedBundleDecisions[bundleID];
-        NSDate *decisionTimestamp = cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]];
-        
-        if (cachedDecision && decisionTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:decisionTimestamp] < kCacheValidityDuration) {
-            shouldSpoof = [cachedDecision boolValue];
-            foundInCache = YES;
-        }
-    });
-    
-    // If found in cache, return immediately
-    if (foundInCache) {
-        return shouldSpoof;
-    }
-    
-    // Not found in cache, need to compute the value safely
-    @try {
-        // Check if this app is enabled by directly reading the settings file
-        // First check if the app is in the scoped apps list (enabled in the tweak)
-        BOOL isAppEnabled = NO;
-        
-        // Try rootless path first for settings
-        NSArray *preferencesLocations = @[
-            @"/var/jb/var/mobile/Library/Preferences",
-            @"/var/jb/private/var/mobile/Library/Preferences",
-            @"/var/mobile/Library/Preferences"
-        ];
-        
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *scopedAppsFilePath = nil;
-        
-        // Try to find the global_scope.plist file
-        for (NSString *prefsPath in preferencesLocations) {
-            NSString *testPath = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-            if ([fileManager fileExistsAtPath:testPath]) {
-                scopedAppsFilePath = testPath;
-                break;
-            }
-        }
-        
-        if (scopedAppsFilePath) {
-            NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFilePath];
-            NSDictionary *scopedApps = scopedAppsDict[@"ScopedApps"];
-            
-            if (scopedApps && scopedApps[bundleID]) {
-                isAppEnabled = [scopedApps[bundleID][@"enabled"] boolValue];
-                PXLog(@"[WeaponX] 🔍 App %@ found in scoped apps, enabled: %@", bundleID, isAppEnabled ? @"YES" : @"NO");
-            } else {
-                PXLog(@"[WeaponX] 🔍 App %@ not found in scoped apps list", bundleID);
-            }
-        } else {
-            PXLog(@"[WeaponX] ⚠️ Could not find global_scope.plist file");
-        }
-        
-        // If the app is not enabled, no need to check further
-        if (!isAppEnabled) {
-            dispatch_sync(cacheQueue, ^{
-                cachedBundleDecisions[bundleID] = @NO;
-                cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-            });
-            return NO;
-        }
-        
-        // Now check if the UUID features are enabled by reading settings
-        BOOL systemBootUUIDEnabled = NO;
-        BOOL dyldCacheUUIDEnabled = NO;
-        
-        // Try to find the settings.plist file
-        NSString *settingsFilePath = nil;
-        for (NSString *prefsPath in preferencesLocations) {
-            NSString *testPath = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-            if ([fileManager fileExistsAtPath:testPath]) {
-                settingsFilePath = testPath;
-                break;
-            }
-        }
-        
-        if (settingsFilePath) {
-            NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:settingsFilePath];
-            NSDictionary *enabledIdentifiers = settingsDict[@"EnabledIdentifiers"];
-            
-            if (enabledIdentifiers) {
-                systemBootUUIDEnabled = [enabledIdentifiers[@"SystemBootUUID"] boolValue];
-                dyldCacheUUIDEnabled = [enabledIdentifiers[@"DyldCacheUUID"] boolValue];
-                
-                PXLog(@"[WeaponX] 🔍 Checking SystemBootUUID - Enabled: %@", systemBootUUIDEnabled ? @"YES" : @"NO");
-                PXLog(@"[WeaponX] 🔍 Checking DyldCacheUUID - Enabled: %@", dyldCacheUUIDEnabled ? @"YES" : @"NO");
-            }
-        } else {
-            PXLog(@"[WeaponX] ⚠️ Could not find settings.plist file");
-        }
-        
-        // Only spoof if app is enabled AND at least one UUID feature is enabled
-        shouldSpoof = isAppEnabled && (systemBootUUIDEnabled || dyldCacheUUIDEnabled);
-        
-        if (shouldSpoof) {
-            PXLog(@"[WeaponX] ✅ UUID spoofing enabled for %@", bundleID);
-        } else {
-            PXLog(@"[WeaponX] ℹ️ UUID features not enabled, skipping hooks for %@", bundleID);
-        }
-        
-        // Cache the decision
-        dispatch_sync(cacheQueue, ^{
-            cachedBundleDecisions[bundleID] = @(shouldSpoof);
-            cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        });
-    } @catch (NSException *exception) {
-        PXLog(@"[WeaponX] ❌ Exception in shouldSpoofForBundle: %@", exception);
-        shouldSpoof = NO;
-        
-        // Cache the negative decision to avoid repeated exceptions
-        dispatch_sync(cacheQueue, ^{
-            cachedBundleDecisions[bundleID] = @NO;
-            cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-        });
-    }
-    
-    return shouldSpoof;
-}
 
 // Direct check for SystemBootUUID being enabled
 static BOOL isSystemBootUUIDEnabled() {
@@ -457,18 +284,14 @@ static NSString *getSpoofedDyldCacheUUID() {
 // Hook NSUUID's UUID method to intercept system UUID requests
 + (instancetype)UUID {
     @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (shouldSpoofForBundle(bundleID)) {
-            // Use direct check instead of manager
-            if (isSystemBootUUIDEnabled()) {
-                NSString *bootUUID = getSpoofedSystemBootUUID();
-                if (bootUUID && bootUUID.length > 0) {
-                    NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
-                    if (uuid) {
-                        PXLog(@"[WeaponX] 🔄 Spoofing NSUUID with: %@", bootUUID);
-                        return uuid;
-                    }
+        // Use direct check instead of manager
+        if (isSystemBootUUIDEnabled()) {
+            NSString *bootUUID = getSpoofedSystemBootUUID();
+            if (bootUUID && bootUUID.length > 0) {
+                NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
+                if (uuid) {
+                    PXLog(@"[WeaponX] 🔄 Spoofing NSUUID with: %@", bootUUID);
+                    return uuid;
                 }
             }
         }
@@ -484,7 +307,6 @@ static NSString *getSpoofedDyldCacheUUID() {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID)) {
             // Use direct check instead of manager
             if (isSystemBootUUIDEnabled()) {
                 // Only spoof if this is a system UUID (we can check by comparing with the actual system UUID)
@@ -522,7 +344,7 @@ static NSString *getSpoofedDyldCacheUUID() {
                     }
                 }
             }
-        }
+        
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in UUIDString: %@", exception);
     }
@@ -535,7 +357,7 @@ static NSString *getSpoofedDyldCacheUUID() {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID) && isSystemBootUUIDEnabled()) {
+        if (isSystemBootUUIDEnabled()) {
             // Create string from bytes to see if it matches the system UUID
             CFUUIDRef cfuuid = CFUUIDCreateFromUUIDBytes(kCFAllocatorDefault, *((CFUUIDBytes *)bytes));
             if (!cfuuid) {
@@ -582,7 +404,7 @@ static NSString *getSpoofedDyldCacheUUID() {
     @try {
         // Check if we need to spoof
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (shouldSpoofForBundle(bundleID) && isSystemBootUUIDEnabled()) {
+        if (isSystemBootUUIDEnabled()) {
             // Generally we don't want to modify all descriptions, only ones that might be system UUIDs
             // We'll check if the description matches the UUID pattern first
             NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
@@ -629,16 +451,15 @@ static NSString *getSpoofedDyldCacheUUID() {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID)) {
-            // Use direct check instead of manager
-            if (isSystemBootUUIDEnabled()) {
-                NSString *bootUUID = getSpoofedSystemBootUUID();
-                if (bootUUID && bootUUID.length > 0) {
-                    PXLog(@"[WeaponX] 🔄 Spoofing System Boot UUID with: %@", bootUUID);
-                    return bootUUID;
-                }
+        // Use direct check instead of manager
+        if (isSystemBootUUIDEnabled()) {
+            NSString *bootUUID = getSpoofedSystemBootUUID();
+            if (bootUUID && bootUUID.length > 0) {
+                PXLog(@"[WeaponX] 🔄 Spoofing System Boot UUID with: %@", bootUUID);
+                return bootUUID;
             }
         }
+    
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in stringWithUUID: %@", exception);
     }
@@ -658,17 +479,16 @@ static NSString *getSpoofedDyldCacheUUID() {
         if (key && [(__bridge NSString *)key isEqualToString:@"IOPlatformUUID"]) {
             NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
             
-            if (shouldSpoofForBundle(bundleID)) {
-                // Use direct check instead of manager
-                if (isSystemBootUUIDEnabled()) {
-                    NSString *bootUUID = getSpoofedSystemBootUUID();
-                    if (bootUUID && bootUUID.length > 0) {
-                        PXLog(@"[WeaponX] 🔄 Spoofing IOPlatformUUID with: %@", bootUUID);
-                        return (__bridge_retained CFStringRef)bootUUID;
-                    }
+            // Use direct check instead of manager
+            if (isSystemBootUUIDEnabled()) {
+                NSString *bootUUID = getSpoofedSystemBootUUID();
+                if (bootUUID && bootUUID.length > 0) {
+                    PXLog(@"[WeaponX] 🔄 Spoofing IOPlatformUUID with: %@", bootUUID);
+                    return (__bridge_retained CFStringRef)bootUUID;
                 }
             }
         }
+        
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in IORegistryEntryCreateCFProperty: %@", exception);
     }
@@ -685,21 +505,20 @@ static NSString *getSpoofedDyldCacheUUID() {
         if (result == kIOReturnSuccess && properties && *properties) {
             NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
             
-            if (shouldSpoofForBundle(bundleID)) {
-                // Use direct check instead of manager
-                if (isSystemBootUUIDEnabled()) {
-                    NSMutableDictionary *props = (__bridge NSMutableDictionary *)*properties;
-                    
-                    // Check if the dictionary has IOPlatformUUID
-                    if (props[@"IOPlatformUUID"]) {
-                        NSString *bootUUID = getSpoofedSystemBootUUID();
-                        if (bootUUID && bootUUID.length > 0) {
-                            PXLog(@"[WeaponX] 🔄 Spoofing IOPlatformUUID in properties with: %@", bootUUID);
-                            props[@"IOPlatformUUID"] = bootUUID;
-                        }
+            // Use direct check instead of manager
+            if (isSystemBootUUIDEnabled()) {
+                NSMutableDictionary *props = (__bridge NSMutableDictionary *)*properties;
+                
+                // Check if the dictionary has IOPlatformUUID
+                if (props[@"IOPlatformUUID"]) {
+                    NSString *bootUUID = getSpoofedSystemBootUUID();
+                    if (bootUUID && bootUUID.length > 0) {
+                        PXLog(@"[WeaponX] 🔄 Spoofing IOPlatformUUID in properties with: %@", bootUUID);
+                        props[@"IOPlatformUUID"] = bootUUID;
                     }
                 }
             }
+            
         }
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in IORegistryEntryCreateCFProperties: %@", exception);
@@ -718,7 +537,7 @@ static bool replaced_dyld_get_shared_cache_uuid(uuid_t uuid_out) {
     @try {
         // First check if we need to spoof at all
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!shouldSpoofForBundle(bundleID) || !isDyldCacheUUIDEnabled() || !uuid_out) {
+        if ( !isDyldCacheUUIDEnabled() || !uuid_out) {
             // Call original if we're not spoofing
             if (orig_dyld_get_shared_cache_uuid) {
                 return orig_dyld_get_shared_cache_uuid(uuid_out);
@@ -839,69 +658,68 @@ static const struct dyld_all_image_infos* replaced_dyld_get_all_image_infos(void
         
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID)) {
-            // Use direct check instead of manager
-            // The compiler warns about comparing sharedCacheUUID with NULL because it's an array pointer
-            // Instead, we'll check if the version is high enough to safely access this field
-            if (isDyldCacheUUIDEnabled() && original->version >= 15) {
-                // Using per-bundle caching to ensure consistent but unique UUIDs across apps
-                DyldCacheUUIDManager *manager = [DyldCacheUUIDManager sharedManager];
-                NSString *dyldUUID = [manager currentDyldCacheUUID];
-                
+        // Use direct check instead of manager
+        // The compiler warns about comparing sharedCacheUUID with NULL because it's an array pointer
+        // Instead, we'll check if the version is high enough to safely access this field
+        if (isDyldCacheUUIDEnabled() && original->version >= 15) {
+            // Using per-bundle caching to ensure consistent but unique UUIDs across apps
+            DyldCacheUUIDManager *manager = [DyldCacheUUIDManager sharedManager];
+            NSString *dyldUUID = [manager currentDyldCacheUUID];
+            
+            if (!dyldUUID || dyldUUID.length == 0) {
+                // If no UUID is available, try to get one from the manager
+                dyldUUID = getSpoofedDyldCacheUUID();
                 if (!dyldUUID || dyldUUID.length == 0) {
-                    // If no UUID is available, try to get one from the manager
-                    dyldUUID = getSpoofedDyldCacheUUID();
-                    if (!dyldUUID || dyldUUID.length == 0) {
-                        // Fall back to original if we can't get a valid UUID
-                        return original;
-                    }
-                }
-                
-                // Get thread-local storage for this image info
-                NSMutableDictionary *threadCache = threadLocalCaches();
-                NSString *cacheKey = [NSString stringWithFormat:@"image_info_%@", bundleID];
-                
-                // Check if we already have a cached struct for this thread + bundle
-                NSDictionary *cachedInfo = threadCache[cacheKey];
-                id cachedUUIDObj = threadCache[[NSString stringWithFormat:@"uuid_%@", bundleID]];
-                uuid_t *cachedUUIDPtr = NULL;
-                if (cachedUUIDObj) {
-                    cachedUUIDPtr = (uuid_t *)[cachedUUIDObj pointerValue];
-                }
-                
-                // Only create a new struct if needed
-                if (cachedInfo && cachedUUIDPtr) {
-                    // Update last access time
-                    NSMutableDictionary *updatedCache = [cachedInfo mutableCopy];
-                    [updatedCache setObject:[NSDate date] forKey:@"lastAccess"];
-                    threadCache[cacheKey] = updatedCache;
-                    
-                    struct dyld_all_image_infos* spoofedInfos = (struct dyld_all_image_infos*)[cachedInfo[@"pointer"] pointerValue];
-                    
-                    // Replace the UUID in the original struct before returning
-                    if (spoofedInfos && spoofedInfos->uuidArray) {
-                        if (SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"15.0")) {
-                            // Use proper struct access for dyld_uuid_info
-                            struct dyld_uuid_info *uuidInfo = (struct dyld_uuid_info *)spoofedInfos->uuidArray;
-                            for (int i = 0; i < original->uuidArrayCount; i++) {
-                                // Use direct access to uuid field in dyld_uuid_info struct
-                                if (cachedUUIDPtr) {
-                                    memcpy((void*)uuidInfo[i].imageUUID, cachedUUIDPtr, sizeof(uuid_t));
-                                }
-                            }
-                        } else {
-                            // For older iOS versions
-                            struct dyld_uuid_info *uuidInfo = (struct dyld_uuid_info *)spoofedInfos->uuidArray;
-                            if (cachedUUIDPtr) {
-                                memcpy((void*)uuidInfo[0].imageUUID, cachedUUIDPtr, sizeof(uuid_t));
-                            }
-                        }
-                    }
-                    
-                    return (const struct dyld_all_image_infos*)spoofedInfos;
+                    // Fall back to original if we can't get a valid UUID
+                    return original;
                 }
             }
+            
+            // Get thread-local storage for this image info
+            NSMutableDictionary *threadCache = threadLocalCaches();
+            NSString *cacheKey = [NSString stringWithFormat:@"image_info_%@", bundleID];
+            
+            // Check if we already have a cached struct for this thread + bundle
+            NSDictionary *cachedInfo = threadCache[cacheKey];
+            id cachedUUIDObj = threadCache[[NSString stringWithFormat:@"uuid_%@", bundleID]];
+            uuid_t *cachedUUIDPtr = NULL;
+            if (cachedUUIDObj) {
+                cachedUUIDPtr = (uuid_t *)[cachedUUIDObj pointerValue];
+            }
+            
+            // Only create a new struct if needed
+            if (cachedInfo && cachedUUIDPtr) {
+                // Update last access time
+                NSMutableDictionary *updatedCache = [cachedInfo mutableCopy];
+                [updatedCache setObject:[NSDate date] forKey:@"lastAccess"];
+                threadCache[cacheKey] = updatedCache;
+                
+                struct dyld_all_image_infos* spoofedInfos = (struct dyld_all_image_infos*)[cachedInfo[@"pointer"] pointerValue];
+                
+                // Replace the UUID in the original struct before returning
+                if (spoofedInfos && spoofedInfos->uuidArray) {
+                    if (SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(@"15.0")) {
+                        // Use proper struct access for dyld_uuid_info
+                        struct dyld_uuid_info *uuidInfo = (struct dyld_uuid_info *)spoofedInfos->uuidArray;
+                        for (int i = 0; i < original->uuidArrayCount; i++) {
+                            // Use direct access to uuid field in dyld_uuid_info struct
+                            if (cachedUUIDPtr) {
+                                memcpy((void*)uuidInfo[i].imageUUID, cachedUUIDPtr, sizeof(uuid_t));
+                            }
+                        }
+                    } else {
+                        // For older iOS versions
+                        struct dyld_uuid_info *uuidInfo = (struct dyld_uuid_info *)spoofedInfos->uuidArray;
+                        if (cachedUUIDPtr) {
+                            memcpy((void*)uuidInfo[0].imageUUID, cachedUUIDPtr, sizeof(uuid_t));
+                        }
+                    }
+                }
+                
+                return (const struct dyld_all_image_infos*)spoofedInfos;
+            }
         }
+        
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in replaced_dyld_get_all_image_infos: %@", exception);
     }
@@ -918,7 +736,7 @@ static int replaced_gethostuuid(uuid_t id, const struct timespec *wait) {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (shouldSpoofForBundle(bundleID) && isSystemBootUUIDEnabled()) {
+        if (isSystemBootUUIDEnabled()) {
             NSString *bootUUID = getSpoofedSystemBootUUID();
             if (bootUUID && bootUUID.length > 0) {
                 // Convert string UUID to bytes
@@ -951,7 +769,7 @@ static int replaced_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, 
         if (name && strcmp(name, "kern.uuid") == 0) {
             NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
             
-            if (shouldSpoofForBundle(bundleID) && isSystemBootUUIDEnabled()) {
+            if (isSystemBootUUIDEnabled()) {
                 NSString *bootUUID = getSpoofedSystemBootUUID();
                 if (bootUUID && bootUUID.length > 0 && oldp && oldlenp) {
                     // Convert the UUID string to bytes
@@ -989,7 +807,7 @@ static CFUUIDRef replaced_CFUUIDCreate(CFAllocatorRef alloc) {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         // Only hook for system UUID if we shouldn't spoof for this app or UUID spoofing is disabled
-        if (!shouldSpoofForBundle(bundleID) || !isSystemBootUUIDEnabled()) {
+        if (!isSystemBootUUIDEnabled()) {
             return originalUUID;
         }
         
@@ -1138,13 +956,6 @@ static void setupAdditionalSystemUUIDHooks() {
                 }
             }
             
-            // Check if this app is actually configured for spoofing before initializing hooks
-            // This prevents unnecessary hooking in apps not configured in the tweak
-            if (!shouldSpoofForBundle(bundleID)) {
-                // Most apps will hit this branch and exit immediately
-                PXLog(@"[WeaponX] ℹ️ App %@ not configured for UUID spoofing, skipping hooks", bundleID);
-                return;
-            }
             
             // If we get here, the app is configured for spoofing, so we can initialize the hooks
             
@@ -1236,7 +1047,7 @@ static void setupAdditionalSystemUUIDHooks() {
             // Add after initializing hooks for _dyld_get_shared_cache_uuid and _dyld_get_all_image_infos
             @try {
                 // If this app is configured for spoofing and UUIDs are enabled, set up additional hooks
-                if (shouldSpoofForBundle(bundleID)) {
+                if (IsScope()) {
                     setupAdditionalSystemUUIDHooks();
                 }
             } @catch (NSException *exception) {

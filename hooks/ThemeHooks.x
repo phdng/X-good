@@ -3,7 +3,7 @@
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
 #import "ProfileManager.h"
-#import "IdentifierManager.h"
+#import "AppScopeManager.h"
 // Cache for bundle decisions and theme values
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSString *cachedThemeValue = nil;

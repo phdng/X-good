@@ -9,6 +9,7 @@
 #import <dlfcn.h>
 #import <mach/mach_time.h>
 #import "IdentifierManager.h"
+#import "AppScopeManager.h"
 #import <substrate.h>
 
 

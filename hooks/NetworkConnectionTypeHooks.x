@@ -12,7 +12,7 @@
 #import <arpa/inet.h>
 #import "NetworkManager.h"
 #import "ProfileManager.h"
-#import "IdentifierManager.h"
+#import "AppScopeManager.h"
 #include <dlfcn.h>
 
 

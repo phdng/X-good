@@ -3,7 +3,7 @@
 #import <WebKit/WebKit.h>
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
-#import "IdentifierManager.h"
+#import "AppScopeManager.h"
 
 // Cache for bundle decisions
 static NSMutableDictionary *cachedBundleDecisions = nil;

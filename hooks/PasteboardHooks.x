@@ -4,7 +4,7 @@
 #import "ProjectXLogging.h"
 #import "PasteboardUUIDManager.h"
 #import "ProfileManager.h"
-#import "IdentifierManager.h"
+#import "AppScopeManager.h"
 // Global variables to track state
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSMutableDictionary *customChangeCountMap = nil; // Store custom change counts per app

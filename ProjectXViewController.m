@@ -17,7 +17,7 @@
 #import <sys/wait.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
-
+#import "AppScopeManager.h"
 // Add missing methods via category
 @interface LSApplicationWorkspace (ProjectX)
 - (NSArray *)allInstalledApplications;
@@ -36,13 +36,10 @@
 @property (nonatomic, strong) ProgressHUDView *progressHUD;
 @property (nonatomic, strong) UIScrollView *scrollView;
 @property (nonatomic, strong) UIStackView *mainStackView;
-@property (nonatomic, strong) UIStackView *appsStackView;
-@property (nonatomic, strong) UITextField *bundleIDTextField;
 @property (nonatomic, strong) FreezeManager *freezeManager;
 
 @property (nonatomic, strong) NSMutableDictionary *identifierSwitches;
 @property (nonatomic, strong) UITableView *appsTableView;
-@property (nonatomic, strong) UIViewController *installedAppsPopupVC;
 @property (nonatomic, strong) NSDateFormatter *dateFormatter;
 @property (nonatomic, strong) UIButton *scrollToBottomButton;
 
@@ -57,12 +54,7 @@
 - (void)addIdentifierSection:(NSString *)type title:(NSString *)title;
 - (void)addAppManagementSection;
 - (UIView *)createSectionHeaderWithTitle:(NSString *)title;
-- (void)updateAppsList;
 - (instancetype)init;
-- (void)fetchAppIconForBundleID:(NSString *)bundleID completion:(void (^)(UIImage *icon))completion;
-- (UIImage *)createNotInAppStoreImage;
-- (void)installAppWithAdamId:(NSString *)adamId appExtVrsId:(NSString *)appExtVrsId bundleID:(NSString *)bundleID appName:(NSString *)appName version:(NSString *)version;
-
 // Add this new method to directly update identifier values
 - (void)directUpdateIdentifierValue:(NSString *)identifierType withValue:(NSString *)value;
 
@@ -80,8 +72,6 @@
 // Add helper methods for finding buttons by tag
 - (UIButton *)buttonWithTag:(NSInteger)tag;
 - (NSArray *)findSubviewsOfClass:(Class)cls inView:(UIView *)view;
-
-- (void)addApplicationWithExtensionsToScope:(NSString *)bundleID;
 
 // Add property to track advanced identifiers visibility in the @interface section
 @property (nonatomic, assign) BOOL showAdvancedIdentifiers;
@@ -539,7 +529,7 @@
     // Get all enabled apps
     NSDictionary *allApps = [self.manager getApplicationInfo:nil];
     for (NSString *bundleID in allApps) {
-        if ([self.manager isApplicationEnabled:bundleID]) {
+        if (IsScope()) {
             // Use posix_spawn to kill apps
             pid_t pid;
             const char *killall = "/usr/bin/killall";

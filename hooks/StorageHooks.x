@@ -1,5 +1,5 @@
 #import "ProjectX.h"
-#import "IdentifierManager.h"
+#import "AppScopeManager.h"
 #import "StorageManager.h"
 #import "ProjectXLogging.h"
 #import <Foundation/Foundation.h>

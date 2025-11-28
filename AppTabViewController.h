@@ -1,5 +1,7 @@
 #import <UIKit/UIKit.h>
-@interface AppTabViewController : UIViewController
+#import <AltList/ATLApplicationListMultiSelectionController.h>
+
+@interface AppTabViewController : ATLApplicationListMultiSelectionController
 
 
 @end 

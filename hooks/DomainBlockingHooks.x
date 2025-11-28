@@ -8,7 +8,7 @@
 #import <WebKit/WebKit.h>
 #import <SafariServices/SafariServices.h>
 #import "ProjectXLogging.h"
-#import "IdentifierManager.h"
+#import "AppScopeManager.h"
 #include <dlfcn.h>
 
 

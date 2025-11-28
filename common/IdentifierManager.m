@@ -219,7 +219,6 @@
         _settings = [NSMutableDictionary dictionary];
         _scopedApps = [NSMutableDictionary dictionary];
     }
-    // [self loadScopedApps];
     // 读取配置文件
     NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
     if (!identityDir) {
@@ -1253,24 +1252,6 @@
 
 #pragma mark - App Management
 
-- (void)refreshScopedAppsInfoIfNeeded {
-    // Iterate through all scoped apps and update their version/build info
-    for (NSString *bundleID in self.scopedApps) {
-        LSApplicationProxy *appProxy = [LSApplicationProxy applicationProxyForIdentifier:bundleID];
-        if (appProxy) {
-            NSString *currentVersion = appProxy.shortVersionString;
-            NSString *currentBuild = appProxy.bundleVersion ?: @"";
-            NSMutableDictionary *appInfo = self.scopedApps[bundleID];
-            BOOL needsUpdate = ![appInfo[@"version"] isEqualToString:currentVersion] ||
-                               ![appInfo[@"build"] isEqualToString:currentBuild];
-            if (needsUpdate) {
-                appInfo[@"version"] = currentVersion ?: @"";
-                appInfo[@"build"] = currentBuild ?: @"";
-            }
-        }
-    }
-    [self saveSettings];
-}
 
 - (void)addApplicationToScope:(NSString *)bundleID {
     if (!bundleID.length) {
@@ -1363,181 +1344,6 @@
     return displayApps;
 }
 
-// Cache for application enabled status to reduce frequent lookups and logging
-static NSMutableDictionary *_appEnabledCache = nil;
-static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 seconds
-
-- (BOOL)isApplicationEnabled:(NSString *)bundleID {
-    // Initialize cache if needed
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        _appEnabledCache = [NSMutableDictionary dictionary];
-    });
-    
-    // Check if we have a cached result that's still valid
-    NSDictionary *cachedResult = _appEnabledCache[bundleID];
-    if (cachedResult) {
-        NSTimeInterval timestamp = [cachedResult[@"timestamp"] doubleValue];
-        NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-        
-        // If the cache hasn't expired, use it
-        if (now - timestamp < _cacheExpirationTime) {
-            return [cachedResult[@"enabled"] boolValue];
-        }
-    }
-    
-    // Only log once every 30 seconds per app to avoid spamming logs
-    static NSString *lastLoggedApp = nil;
-    static NSTimeInterval lastLogTime = 0;
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    BOOL shouldLog = ![lastLoggedApp isEqualToString:bundleID] || (now - lastLogTime > 30.0);
-    
-    if (shouldLog) {
-        PXLog(@"[WeaponX] IdentifierManager DEBUG: Checking if app is enabled: %@", bundleID);
-        lastLoggedApp = [bundleID copy];
-        lastLogTime = now;
-    }
-    
-    // Never consider the WeaponX app itself as enabled for spoofing
-    if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
-        if (shouldLog) {
-            PXLog(@"[WeaponX] IdentifierManager DEBUG: WeaponX app itself is never considered enabled for spoofing");
-        }
-        
-        // Cache the result
-        _appEnabledCache[bundleID] = @{@"enabled": @NO, @"timestamp": @(now)};
-        return NO;
-    }
-    
-    // Direct equality check first for performance
-    if (self.scopedApps[bundleID]) {
-        BOOL isEnabled = [self.scopedApps[bundleID][@"enabled"] boolValue];
-        
-        if (shouldLog) {
-            PXLog(@"[WeaponX] IdentifierManager DEBUG: Found app %@ in scopedApps, enabled = %@", bundleID, isEnabled ? @"YES" : @"NO");
-        }
-        
-        // Cache the result
-        _appEnabledCache[bundleID] = @{@"enabled": @(isEnabled), @"timestamp": @(now)};
-        return isEnabled;
-    }
-    
-    // Ensure we have the latest scoped apps data
-    // Only reload scoped apps if we haven't reloaded recently
-    static NSTimeInterval lastReloadTime = 0;
-    if (now - lastReloadTime > 60.0) { // Only reload every minute at most
-        if (shouldLog) {
-            PXLog(@"[WeaponX] IdentifierManager DEBUG: App not found directly, reloading scoped apps");
-        }
-        [self loadScopedApps];
-        lastReloadTime = now;
-    }
-    
-    // Check again after potentially reloading the scoped apps
-    if (self.scopedApps[bundleID]) {
-        BOOL isEnabled = [self.scopedApps[bundleID][@"enabled"] boolValue];
-        
-        if (shouldLog) {
-            PXLog(@"[WeaponX] IdentifierManager DEBUG: Found app %@ after reload, enabled = %@", bundleID, isEnabled ? @"YES" : @"NO");
-        }
-        
-        // Cache the result
-        _appEnabledCache[bundleID] = @{@"enabled": @(isEnabled), @"timestamp": @(now)};
-        return isEnabled;
-    }
-    
-    // Fallback to case-insensitive comparison if needed (this is expensive, so only log if needed)
-    if (shouldLog) {
-        PXLog(@"[WeaponX] IdentifierManager DEBUG: App still not found, trying case-insensitive match");
-    }
-    
-    NSString *lowercaseBundleID = [bundleID lowercaseString];
-    for (NSString *key in self.scopedApps) {
-        if ([[key lowercaseString] isEqualToString:lowercaseBundleID]) {
-            BOOL isEnabled = [self.scopedApps[key][@"enabled"] boolValue];
-            
-            if (shouldLog) {
-                PXLog(@"[WeaponX] IdentifierManager DEBUG: Found app %@ via case-insensitive match with %@, enabled = %@", 
-                      bundleID, key, isEnabled ? @"YES" : @"NO");
-            }
-            
-            // Cache the result using the original bundle ID
-            _appEnabledCache[bundleID] = @{@"enabled": @(isEnabled), @"timestamp": @(now)};
-            return isEnabled;
-        }
-    }
-    
-    // App not found, only log this information sparingly
-    if (shouldLog) {
-        // Limit the keys we log to avoid excessive memory usage
-        NSArray *allKeys = [self.scopedApps allKeys];
-        NSArray *limitedKeys = allKeys.count > 10 ? [allKeys subarrayWithRange:NSMakeRange(0, 10)] : allKeys;
-        
-        PXLog(@"[WeaponX] IdentifierManager DEBUG: App %@ not found in scoped apps list", bundleID);
-        PXLog(@"[WeaponX] IdentifierManager DEBUG: First %lu scoped apps: %@", (unsigned long)limitedKeys.count, limitedKeys);
-    }
-    
-    // Cache the negative result
-    _appEnabledCache[bundleID] = @{@"enabled": @NO, @"timestamp": @(now)};
-    
-    return NO;
-}
-
-// New method to load scoped apps configuration explicitly
-- (void)loadScopedApps {
-    // Try rootless path first
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-    PXLog(@"[WeaponX] IdentifierManager DEBUG: Trying to load scoped apps from: %@", scopedAppsFile);
-    
-    // Fallback to standard path if rootless path doesn't exist
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-        PXLog(@"[WeaponX] IdentifierManager DEBUG: First path not found, trying Dopamine 2 path");
-        // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to older paths if needed
-        if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-            PXLog(@"[WeaponX] IdentifierManager DEBUG: Dopamine 2 path not found, trying legacy path");
-            prefsPath = @"/var/mobile/Library/Preferences";
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        }
-    }
-    
-    PXLog(@"[WeaponX] IdentifierManager DEBUG: Loading scoped apps from: %@", scopedAppsFile);
-    PXLog(@"[WeaponX] IdentifierManager DEBUG: File exists: %@", [fileManager fileExistsAtPath:scopedAppsFile] ? @"YES" : @"NO");
-    
-    // Load scoped apps from the global scope file
-    NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFile];
-    PXLog(@"[WeaponX] IdentifierManager DEBUG: Loaded dictionary: %@", scopedAppsDict ? @"YES" : @"NO");
-    
-    NSDictionary *savedApps = scopedAppsDict[@"ScopedApps"];
-    PXLog(@"[WeaponX] IdentifierManager DEBUG: Scoped apps entry found in dictionary: %@", savedApps ? @"YES" : @"NO");
-    
-    if (savedApps) {
-        PXLog(@"[WeaponX] IdentifierManager DEBUG: Number of scoped apps found: %lu", (unsigned long)savedApps.count);
-        if (savedApps.count > 0) {
-            PXLog(@"[WeaponX] IdentifierManager DEBUG: App list includes: %@", [savedApps allKeys]);
-        }
-        // Make sure we properly update the scoped apps dictionary
-        if (!self.scopedApps) {
-            self.scopedApps = [savedApps mutableCopy];
-        } else {
-            [self.scopedApps setDictionary:savedApps];
-        }
-        PXLog(@"[WeaponX] IdentifierManager: Loaded %lu scoped apps from %@", (unsigned long)savedApps.count, scopedAppsFile);
-    } else {
-        // Re-initialize the app list if loading failed
-        if (!self.scopedApps) {
-            self.scopedApps = [NSMutableDictionary dictionary];
-        } else {
-            [self.scopedApps removeAllObjects];
-        }
-        PXLog(@"[WeaponX] IdentifierManager: ⚠️ Failed to load scoped apps, using empty list");
-    }
-}
 
 #pragma mark - Persistence
 
@@ -1789,7 +1595,6 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     if (appInfo) {
         appInfo[@"extensionPattern"] = extensionPattern;
         self.scopedApps[bundleID] = appInfo;
-        [self saveScopedApps];
         
         PXLog(@"[WeaponX] Added extension pattern: %@ for app: %@", extensionPattern, bundleID);
     }
@@ -1847,47 +1652,6 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     return matches;
 }
 
-
-- (void)saveScopedApps {
-    // Get the proper preferences path
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-    
-    // Fallback to standard path if rootless path doesn't exist
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:prefsPath]) {
-        // Try Dopamine 2 path first
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to standard path if needed
-        if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-            prefsPath = @"/var/mobile/Library/Preferences";
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        }
-    }
-    
-    // Save scoped apps separately in the global scope file
-    NSDictionary *scopedAppsDict = @{@"ScopedApps": [self.scopedApps copy]};
-    BOOL success = [scopedAppsDict writeToFile:scopedAppsFile atomically:YES];
-    if (!success) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                      code:4006 
-                                  userInfo:@{NSLocalizedDescriptionKey: @"Failed to save global scoped apps"}];
-        return;
-    }
-    
-    // Set proper permissions for global scope file
-    NSError *permError = nil;
-    NSDictionary *fileAttributes = @{NSFilePosixPermissions: @0644,
-                                   NSFileOwnerAccountName: @"mobile"};
-    
-    if (![fileManager setAttributes:fileAttributes
-                      ofItemAtPath:scopedAppsFile
-                             error:&permError]) {
-        NSLog(@"[ProjectX] Warning: Failed to set global scope file permissions: %@", permError);
-    }
-}
 
 - (BOOL)isExtensionEnabled:(NSString *)bundleID {
     if (!bundleID) return NO;

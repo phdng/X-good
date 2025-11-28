@@ -1,6 +1,7 @@
 #import "ProjectX.h"
 #import "DeviceModelManager.h"
 #import "IdentifierManager.h"
+#import "AppScopeManager.h"
 #import "ProfileManager.h"
 #import "ProjectXLogging.h"
 #import <Foundation/Foundation.h>

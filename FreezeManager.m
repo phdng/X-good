@@ -2,6 +2,7 @@
 #import "IdentifierManager.h"
 #import <spawn.h>
 #import <sys/wait.h>
+#import "AppScopeManager.h"
 
 @interface FreezeManager ()
 @property (nonatomic, strong) BottomButtons *bottomButtons;
@@ -72,7 +73,7 @@
         return;
     }
     
-    if (![self.identifierManager isApplicationEnabled:bundleID]) {
+    if (!IsScope()) {
         NSLog(@"[FreezeManager] Skipping freeze for disabled app: %@", bundleID);
         return;
     }
@@ -109,7 +110,7 @@
         return;
     }
     
-    if (![self.identifierManager isApplicationEnabled:bundleID]) {
+    if (!IsScope()) {
         NSLog(@"[FreezeManager] App is not enabled: %@", bundleID);
         return;
     }

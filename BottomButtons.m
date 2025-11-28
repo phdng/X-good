@@ -4,6 +4,7 @@
 #import <spawn.h>
 #import <sys/wait.h>
 #import <objc/runtime.h>
+#import "AppScopeManager.h"
 
 @interface SBSRelaunchAction : NSObject
 + (id)actionWithReason:(id)arg1 options:(unsigned)arg2 targetURL:(id)arg3;
@@ -39,7 +40,7 @@
 #pragma mark - App Termination
 
 - (void)killAppViaExecutableName:(NSString *)bundleID {
-    if (![self.manager isApplicationEnabled:bundleID]) {
+    if (!IsScope()) {
         NSLog(@"[BottomButtons] Skipping kill for disabled app: %@", bundleID);
         return;
     }
@@ -530,7 +531,7 @@
             continue;
         }
         
-        if ([self.manager isApplicationEnabled:bundleID]) {
+        if (IsScope()) {
             // Try to terminate using terminateApplicationWithBundleID first
             [self terminateApplicationWithBundleID:bundleID];
             

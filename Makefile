@@ -53,7 +53,7 @@ ProjectX_LDFLAGS = -framework CoreData -framework UIKit -framework Foundation -r
 ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit IOKit Security CoreLocation CoreLocationUI
 ProjectX_CODESIGN_FLAGS = -Sent.plist
 ProjectX_CFLAGS = -fobjc-arc -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1  -I./common
-
+ProjectX_EXTRA_FRAMEWORKS = AltList
 
 
 # Ensure app is installed to the correct location with proper permissions

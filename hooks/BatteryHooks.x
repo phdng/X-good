@@ -2,7 +2,7 @@
 #import <objc/runtime.h>
 #import <substrate.h>
 #import "BatteryManager.h"
-#import "IdentifierManager.h"
+#import "AppScopeManager.h"
 #import "ProfileManager.h"
 
 // Helper: get battery level from profile battery_info.plist

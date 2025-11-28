@@ -11,7 +11,7 @@
 #import <substrate.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
-#import "IdentifierManager.h"
+#import "AppScopeManager.h"
 
 // Define the boot time structure for sysctl calls
 struct timeval_boot {

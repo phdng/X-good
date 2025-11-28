@@ -3,7 +3,7 @@
 #import "ProjectX.h"
 
 // Declare this in a category to avoid duplicate interface
-#define IsScope() [[IdentifierManager sharedManager] isScope]
+
 
 @interface IdentifierManager (AppManagement)
 
@@ -13,31 +13,14 @@
 - (void)removeApplicationFromScope:(NSString *)bundleID;
 - (void)setApplication:(NSString *)bundleID enabled:(BOOL)enabled;
 - (NSDictionary *)getApplicationInfo:(NSString *)bundleID;
-- (BOOL)isApplicationEnabled:(NSString *)bundleID;
-- (void)refreshScopedAppsInfoIfNeeded;
-- (void)addApplicationWithExtensionsToScope:(NSString *)bundleID;
-- (BOOL)isApplicationInScope:(NSString *)bundleID;
-- (BOOL)isExtensionEnabled:(NSString *)bundleID;
+
+
 - (BOOL)isBundleIDMatch:(NSString *)targetBundleID withPattern:(NSString *)patternBundleID;
-- (void)saveScopedApps;
+- (BOOL)isScope;
 
 #pragma mark - Custom Values
 - (NSString *) getValueForType:(NSString *)type;
 - (BOOL) setValueForType: (NSString *) value forType:(NSString *)type;
-// Set custom values for identifiers
-- (BOOL)setCustomIDFA:(NSString *)value;
-- (BOOL)setCustomIDFV:(NSString *)value;
-- (BOOL)setCustomDeviceName:(NSString *)value;
-- (BOOL)setCustomSerialNumber:(NSString *)value;
-- (BOOL)setCustomSystemBootUUID:(NSString *)value;
-- (BOOL)setCustomDyldCacheUUID:(NSString *)value;
-- (BOOL)setCustomPasteboardUUID:(NSString *)value;
-- (BOOL)setCustomKeychainUUID:(NSString *)value;
-- (BOOL)setCustomUserDefaultsUUID:(NSString *)value;
-- (BOOL)setCustomAppGroupUUID:(NSString *)value;
-- (BOOL)setCustomCoreDataUUID:(NSString *)value;
-- (BOOL)setCustomAppInstallUUID:(NSString *)value;
-- (BOOL)setCustomAppContainerUUID:(NSString *)value;
 
 - (NSDictionary *)currentIOSVersionInfo;
 
@@ -74,5 +57,5 @@
 - (BOOL)setCustomMEID:(NSString *)value;
 - (NSString *)generateIMEI;
 - (NSString *)generateMEID;
-- (BOOL) isScope;
+
 @end

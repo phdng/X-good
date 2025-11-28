@@ -67,7 +67,7 @@
     ProjectXViewController *identityVC = [[ProjectXViewController alloc] init];
     ProjectXViewController *profileVC = [[ProfileTabViewController alloc] init];
     SecurityTabViewController *securityVC = [[SecurityTabViewController alloc] init];
-    AppTabViewController *appVC = [[AppTabViewController alloc] init];
+    AppTabViewController  *appVC = [[AppTabViewController  alloc] init];
 
     // AccountViewController *accountVC = [[AccountViewController alloc] init];
     
