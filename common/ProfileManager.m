@@ -541,14 +541,13 @@
         }
         
         // 3. Get the IdentifierManager for other identifiers
-        Class identifierManagerClass = NSClassFromString(@"IdentifierManager");
-        if (identifierManagerClass) {
-            id identifierManager = [identifierManagerClass sharedManager];
-            if (identifierManager && [identifierManager respondsToSelector:@selector(regenerateAllEnabledIdentifiers)]) {
-                NSLog(@"[WeaponX] 🔄 Generating identifiers for new profile: %@", profile.name);
-                [identifierManager regenerateAllEnabledIdentifiers];
-            }
+      
+        IdentifierManager * identifierManager = [IdentifierManager sharedManager];
+        if (identifierManager && [identifierManager respondsToSelector:@selector(regenerateAllEnabledIdentifiers)]) {
+            NSLog(@"[WeaponX] 🔄 Generating identifiers for new profile: %@", profile.name);
+            [identifierManager regenerateAllEnabledIdentifiers];
         }
+        
     });
     
     // Save to disk
@@ -556,14 +555,12 @@
         if (success) {
             NSLog(@"[WeaponX] ✅ Profile created successfully: %@ (created at: %@)", profile.name, profile.createdAt);
             // Reset canvas fingerprint noise for new profile
-            Class identifierManagerClass = NSClassFromString(@"IdentifierManager");
-            if (identifierManagerClass) {
-                id manager = [identifierManagerClass sharedManager];
-                if ([manager respondsToSelector:@selector(resetCanvasNoise)]) {
-                    [manager resetCanvasNoise];
-                    NSLog(@"[WeaponX] 🎨 Canvas fingerprint noise reset after profile creation");
-                }
+            IdentifierManager * manager = [IdentifierManager sharedManager];
+            if ([manager respondsToSelector:@selector(resetCanvasNoise)]) {
+                [manager resetCanvasNoise];
+                NSLog(@"[WeaponX] 🎨 Canvas fingerprint noise reset after profile creation");
             }
+            
             // Post notification that profile has changed - UI components should refresh
             dispatch_async(dispatch_get_main_queue(), ^{
                 [[NSNotificationCenter defaultCenter] postNotificationName:@"com.hydra.projectx.profileChanged" object:nil];

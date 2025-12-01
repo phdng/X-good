@@ -23,6 +23,7 @@
         // 初始化scopedApps为空数组
         _scopedApps = [NSMutableSet set];
     }
+    // [IdentifierManager sharedManager];
     return self;
 }
 - (NSString *)preferencesFilePath{
@@ -37,12 +38,12 @@
         return NO;
     }
     // Check each scoped app's extension pattern
-    if ([self.scopedApps containsObject:bundleID]) {
+    if ([_scopedApps containsObject:bundleID]) {
+
         // PXLog(@"[WeaponX] Bundle ID %@ matches extension pattern %@ from app %@", bundleID, extensionPattern, scopedBundleID);
         return YES;
     }
     return NO;
-    // return [[IdentifierManager sharedManager] isScope];
 }
 
 - (NSMutableSet *)loadPreferences
@@ -50,19 +51,23 @@
     NSString *filePath = [self preferencesFilePath];
     // 检查plist文件是否存在
     if ([[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+        NSLog(@"file is exit");
         // 从plist文件读取数据（返回的是NSArray）
         NSArray *savedArray = [NSArray arrayWithContentsOfFile:filePath];
+        NSLog(@"saveArray:%@",savedArray);
         if (savedArray && [savedArray isKindOfClass:[NSArray class]]) {
             // 将NSArray转换为NSMutableSet
+            NSLog(@"res:%@",[NSMutableSet setWithArray:savedArray]);
             return [NSMutableSet setWithArray:savedArray];
         }
     }
+    NSLog(@"[return] nil");
     return nil;
 }
-- (void)savePreferences
+- (void)savePreferences:(NSMutableSet *)scopedApps
 {
     NSString *filePath = [self preferencesFilePath];
-    
+    _scopedApps = scopedApps;
     // 将NSSet转换为NSArray并保存到plist文件
 
     NSArray *applicationsArray = [_scopedApps allObjects];

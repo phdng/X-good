@@ -10,6 +10,7 @@
 #import <execinfo.h>
 #import <mach-o/dyld.h>
 #import "ProfileManager.h"
+#import "IdentifierManager.h"
 
 // Constants for proper size calculations - use only marketing units (1000-based)
 #define BYTES_PER_KB (1000ULL)
@@ -56,8 +57,8 @@ static NSDictionary *getStorageValues() {
         storageSystemEnabled = [defaults boolForKey:@"StorageSystemEnabled"];
     }
     
-    if (!storageSystemEnabled && NSClassFromString(@"IdentifierManager")) {
-        id manager = [NSClassFromString(@"IdentifierManager") sharedManager];
+    if (!storageSystemEnabled) {
+        IdentifierManager * manager = [IdentifierManager sharedManager];
         if (manager && [manager respondsToSelector:@selector(isIdentifierEnabled:)]) {
             storageSystemEnabled = [manager isIdentifierEnabled:@"StorageSystem"];
         }

@@ -5,8 +5,8 @@
 @implementation AppTabViewController
 - (void)loadPreferences
 {
-    NSMutableSet * scoped = [[AppScopeManager sharedManager] loadPreferences];
-    if(!scoped){
+    _selectedApplications= [[AppScopeManager sharedManager] loadPreferences];
+    if(!_selectedApplications){
         [super loadPreferences];
     }
 

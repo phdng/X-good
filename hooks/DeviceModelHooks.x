@@ -70,8 +70,8 @@ static NSString* getSpoofedDeviceModel() {
         }
         
         // METHOD 2: Use IdentifierManager if direct file access failed
-        if (!deviceModel.length && NSClassFromString(@"IdentifierManager")) {
-            IdentifierManager *manager = [NSClassFromString(@"IdentifierManager") sharedManager];
+        if (!deviceModel.length) {
+            IdentifierManager *manager = [IdentifierManager sharedManager];
             deviceModel = [manager getValueForType:@"DeviceModel"];
             
             if (deviceModel.length > 0) {

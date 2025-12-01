@@ -23,17 +23,6 @@ static NSTimeInterval kCacheValidityDuration = 600.0; // 10 minutes for better p
 static dispatch_queue_t cacheQueue = nil; // Queue for thread-safe access to cache
 static BOOL isInitialized = NO;
 
-// Callback function for notifications that clear the cache
-static void clearCacheCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    // Clear cached decisions using the dispatch queue for thread safety
-    dispatch_async(cacheQueue, ^{
-        if (cachedBundleDecisions) {
-            [cachedBundleDecisions removeAllObjects];
-            PXLog(@"[WeaponX] 🧹 Cleared UUID hooks decision cache");
-        }
-    });
-}
-
 
 // Direct check for SystemBootUUID being enabled
 static BOOL isSystemBootUUIDEnabled() {
@@ -118,11 +107,6 @@ static NSString *getSpoofedSystemBootUUID() {
             }
         }
         
-        // Try to read directly from plist files
-        // IdentifierManager *idManager = [NSClassFromString(@"IdentifierManager") sharedManager];
-        // if (!idManager) {
-        //     return [[NSUUID UUID] UUIDString];
-        // }
         
         NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
         
@@ -912,29 +896,7 @@ static void setupAdditionalSystemUUIDHooks() {
             NSString *executablePath = [[NSBundle mainBundle] executablePath];
             NSString *processName = [executablePath lastPathComponent];
             
-            // Skip for critical system processes to prevent crashes
-            // More comprehensive check than before to ensure stability
-            if (!bundleID || 
-                [bundleID hasPrefix:@"com.apple."] || 
-                [processName isEqualToString:@"SpringBoard"] ||
-                [processName isEqualToString:@"backboardd"] ||
-                [processName isEqualToString:@"assertiond"] ||
-                [processName isEqualToString:@"useractivityd"] ||
-                [processName isEqualToString:@"apsd"] ||
-                [processName hasPrefix:@"com.apple."] ||
-                [processName containsString:@"daemon"] ||
-                [processName containsString:@"assistant"] ||
-                [processName containsString:@"locationd"] ||
-                [processName containsString:@"powerd"] ||
-                [executablePath hasPrefix:@"/usr/libexec/"] ||
-                [executablePath hasPrefix:@"/usr/sbin/"] ||
-                [executablePath hasPrefix:@"/usr/bin/"] ||
-                [executablePath hasPrefix:@"/bin/"] ||
-                [executablePath hasPrefix:@"/sbin/"]) {
-                PXLog(@"[WeaponX] 🚫 Skipping UUID hooks for system process: %@", processName);
-                return;
-            }
-            
+            if(!IsScope())return;
             // Perform a more thorough check for iPad-specific processes that might be causing issues
             UIDevice *device = [UIDevice currentDevice];
             BOOL isIPad = [device userInterfaceIdiom] == UIUserInterfaceIdiomPad;
@@ -1022,37 +984,9 @@ static void setupAdditionalSystemUUIDHooks() {
                 PXLog(@"[WeaponX] ❌ Exception in UUID hooks setup: %@", exception);
             }
             
-            // Register for settings change notifications
-            CFNotificationCenterAddObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                NULL,
-                clearCacheCallback,
-                CFSTR("com.hydra.projectx.settings.changed"),
-                NULL,
-                CFNotificationSuspensionBehaviorDeliverImmediately
-            );
-            
-            // Register for profile change notifications
-            CFNotificationCenterAddObserver(
-                CFNotificationCenterGetDarwinNotifyCenter(),
-                NULL,
-                clearCacheCallback,
-                CFSTR("com.hydra.projectx.profileChanged"),
-                NULL,
-                CFNotificationSuspensionBehaviorDeliverImmediately
-            );
-            
             PXLog(@"[WeaponX] ✅ UUID hooks initialization complete for %@", bundleID);
-            
-            // Add after initializing hooks for _dyld_get_shared_cache_uuid and _dyld_get_all_image_infos
-            @try {
-                // If this app is configured for spoofing and UUIDs are enabled, set up additional hooks
-                if (IsScope()) {
-                    setupAdditionalSystemUUIDHooks();
-                }
-            } @catch (NSException *exception) {
-                PXLog(@"[WeaponX] ❌ Exception in additional hooks setup: %@", exception);
-            }
+            %init;
+            setupAdditionalSystemUUIDHooks();
         });
     }
 } 

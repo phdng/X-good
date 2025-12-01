@@ -1001,11 +1001,9 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
     
     // Get manager and check if identifier spoofing is enabled
     @try {
-        if (!%c(IdentifierManager)) {
-            return orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
-        }
+ 
         
-        IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
+        IdentifierManager *manager = [IdentifierManager sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         // Skip spoofing for system processes or if application isn't enabled
@@ -1060,11 +1058,7 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
 static char* (*orig_GSSystemGetSerialNo)(void);
 
 static char* hook_GSSystemGetSerialNo(void) {
-    if (!%c(IdentifierManager)) {
-        return orig_GSSystemGetSerialNo();
-    }
-    
-    IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
+    IdentifierManager *manager = [IdentifierManager sharedManager];
     NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
     
     PXLog(@"GSSystemGetSerialNo requested by app: %@", currentBundleID);

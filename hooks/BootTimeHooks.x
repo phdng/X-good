@@ -112,12 +112,7 @@ static void updateCachedBootTimeValues(void) {
 // Helper to check if a spoof identifier is enabled for the current profile
 static BOOL isBootTimeOrUptimeEnabled(void) {
     @try {
-        // Dynamically get IdentifierManager class and sharedManager
-        Class managerClass = NSClassFromString(@"IdentifierManager");
-        if (!managerClass) return NO;
-        id manager = [managerClass respondsToSelector:@selector(sharedManager)] ? [managerClass sharedManager] : nil;
-        if (!manager) return NO;
-        
+        IdentifierManager *manager = [IdentifierManager sharedManager];
         SEL isEnabledSel = NSSelectorFromString(@"isIdentifierEnabled:");
         if (![manager respondsToSelector:isEnabledSel]) return NO;
         

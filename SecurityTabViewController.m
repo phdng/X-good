@@ -330,8 +330,6 @@
     // Add Canvas Fingerprinting Protection control
     [self setupCanvasFingerprintingControl:contentView];
     
-    // Add Canvas Fingerprinting control
-    [self setupCanvasFingerprintingControl:contentView];
     
 }
 
@@ -389,7 +387,7 @@
     
     // Position control under the jailbreak detection control
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:180], // Position below Jailbreak Detection control
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:20], // Position below Jailbreak Detection control
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:60],
@@ -712,7 +710,7 @@
     
     // Position control under the network data spoof control
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:260], // Position below Network Data Spoof control
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:100], // Position below Network Data Spoof control
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:200], // Increased height to accommodate carrier details and local IP
@@ -1578,7 +1576,7 @@
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
         // Control view
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1150], // Position between App Version Spoofing and Canvas Fingerprinting
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:320], // Position between App Version Spoofing and Canvas Fingerprinting
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -1754,7 +1752,7 @@
     
     // Position control between Domain Blocking and Copyright label
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1300], // Moved down to be below Domain Blocking
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:480], // Moved down to be below Domain Blocking
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],

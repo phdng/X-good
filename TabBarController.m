@@ -81,13 +81,24 @@
     // self.accountNavController = [[UINavigationController alloc] initWithRootViewController:accountVC];
     
     // Configure tab bar items (excluding account)
-    identityNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Home" image:[UIImage systemImageNamed:@"house.fill"] tag:0];
-    profileNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"备份" image:[UIImage systemImageNamed:@"house.fill"] tag:1];
-    securityNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"设置" image:[UIImage systemImageNamed:@"shield.checkerboard"] tag:2];
-    appNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"应用" image:[UIImage systemImageNamed:@"shield.checkerboard"] tag:3];
-    
+    identityNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Home" 
+                                                        image:[UIImage systemImageNamed:@"house.fill"] 
+                                                            tag:0];
+
+    profileNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"备份" 
+                                                        image:[UIImage systemImageNamed:@"arrow.up.doc.on.clipboard"] 
+                                                        tag:1];
+
+    appNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"应用" 
+                                                    image:[UIImage systemImageNamed:@"square.grid.2x2"] 
+                                                    tag:2];
+
+    securityNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"设置" 
+                                                        image:[UIImage systemImageNamed:@"gear"] 
+                                                            tag:3];
+
     // Set view controllers (excluding account)
-    self.viewControllers = @[identityNav,profileNav, securityNav,appNav];
+    self.viewControllers = @[identityNav,profileNav, appNav, securityNav];
     
     // Set Home tab as default selected tab
     self.selectedIndex = 0;
@@ -137,40 +148,6 @@
 #pragma mark - UITabBarControllerDelegate
 
 - (void)tabBarController:(UITabBarController *)tabBarController didSelectViewController:(UIViewController *)viewController {
-    // Determine which tab was selected
-    NSInteger selectedIndex = tabBarController.selectedIndex;
-    NSString *tabName = @"Unknown";
-    
-    // Get the appropriate tab name based on the selected index
-    switch (selectedIndex) {
-
-        case 0:
-            tabName = @"Home Tab";
-            break;
-        case 1:
-            tabName = @"Profile Tab";
-            break;
-        case 2:
-            tabName = @"Security Tab";
-            break;
-     
-        default:
-            tabName = [NSString stringWithFormat:@"Tab %ld", (long)selectedIndex];
-            break;
-    }
-    
-    NSLog(@"[WeaponX] 🔄 User switched to %@", tabName);
-    
-    // Post a notification about the tab change
-    NSDictionary *userInfo = @{
-        @"selectedIndex": @(selectedIndex),
-        @"tabName": tabName,
-        @"viewController": viewController
-    };
-    
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"TabBarSelectionChangedNotification" 
-                                                        object:self 
-                                                      userInfo:userInfo];
 }
 
 
