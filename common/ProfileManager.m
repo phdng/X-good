@@ -713,80 +713,80 @@
         if (completion) completion(success, error);
     }];
 }
-
+// TODO 切换备份关闭应用
 - (void)terminateEnabledScopedApps {
-    NSLog(@"[WeaponX] 🔄 Terminating enabled scoped apps for profile switch");
+    // NSLog(@"[WeaponX] 🔄 Terminating enabled scoped apps for profile switch");
     
-    // Get the BottomButtons instance directly
-    id bottomButtons = [NSClassFromString(@"BottomButtons") sharedInstance];
-    if (!bottomButtons) {
-        NSLog(@"[WeaponX] ⚠️ Could not get BottomButtons instance for app termination");
-        return;
-    }
+    // // Get the BottomButtons instance directly
+    // id bottomButtons = [NSClassFromString(@"BottomButtons") sharedInstance];
+    // if (!bottomButtons) {
+    //     NSLog(@"[WeaponX] ⚠️ Could not get BottomButtons instance for app termination");
+    //     return;
+    // }
     
-    // Since the killEnabledApps method in BottomButtons works correctly,
-    // directly invoke it to kill all enabled apps
-    SEL killEnabledAppsSel = NSSelectorFromString(@"killEnabledApps");
-    if ([bottomButtons respondsToSelector:killEnabledAppsSel]) {
-        NSLog(@"[WeaponX] 🔪 Directly calling BottomButtons.killEnabledApps to terminate enabled apps");
+    // // Since the killEnabledApps method in BottomButtons works correctly,
+    // // directly invoke it to kill all enabled apps
+    // SEL killEnabledAppsSel = NSSelectorFromString(@"killEnabledApps");
+    // if ([bottomButtons respondsToSelector:killEnabledAppsSel]) {
+    //     NSLog(@"[WeaponX] 🔪 Directly calling BottomButtons.killEnabledApps to terminate enabled apps");
         
-        // Use NSInvocation to avoid ARC issues with performSelector
-        NSMethodSignature *signature = [bottomButtons methodSignatureForSelector:killEnabledAppsSel];
-        NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-        [invocation setTarget:bottomButtons];
-        [invocation setSelector:killEnabledAppsSel];
-        [invocation invoke];
+    //     // Use NSInvocation to avoid ARC issues with performSelector
+    //     NSMethodSignature *signature = [bottomButtons methodSignatureForSelector:killEnabledAppsSel];
+    //     NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
+    //     [invocation setTarget:bottomButtons];
+    //     [invocation setSelector:killEnabledAppsSel];
+    //     [invocation invoke];
         
-        NSLog(@"[WeaponX] ✅ Successfully called killEnabledApps method");
-    } else {
-        NSLog(@"[WeaponX] ❌ BottomButtons does not respond to killEnabledApps");
+    //     NSLog(@"[WeaponX] ✅ Successfully called killEnabledApps method");
+    // } else {
+    //     NSLog(@"[WeaponX] ❌ BottomButtons does not respond to killEnabledApps");
         
-        // Fallback to using killAppViaExecutableName directly with all enabled apps
-        id identifierManager = [NSClassFromString(@"IdentifierManager") sharedManager];
-        if (!identifierManager) {
-            NSLog(@"[WeaponX] ⚠️ Could not get IdentifierManager instance for app termination");
-            return;
-        }
+    //     // Fallback to using killAppViaExecutableName directly with all enabled apps
+    //     id identifierManager = [NSClassFromString(@"IdentifierManager") sharedManager];
+    //     if (!identifierManager) {
+    //         NSLog(@"[WeaponX] ⚠️ Could not get IdentifierManager instance for app termination");
+    //         return;
+    //     }
         
-        // Get all apps and filter by enabled
-        NSDictionary *allApps = [identifierManager getApplicationInfo:nil];
-        if (!allApps) {
-            NSLog(@"[WeaponX] ⚠️ Could not retrieve app information");
-            return;
-        }
+    //     // Get all apps and filter by enabled
+    //     NSDictionary *allApps = [identifierManager getApplicationInfo:nil];
+    //     if (!allApps) {
+    //         NSLog(@"[WeaponX] ⚠️ Could not retrieve app information");
+    //         return;
+    //     }
         
-        NSLog(@"[WeaponX] Found %lu total apps to check", (unsigned long)allApps.count);
+    //     NSLog(@"[WeaponX] Found %lu total apps to check", (unsigned long)allApps.count);
         
-        // Create a safelist of apps that should NEVER be terminated
-        NSArray *safeApps = @[
-            @"com.hydra.projectx",      // The tweak itself
-            @"com.apple.springboard",   // SpringBoard
-            @"com.apple.backboardd",    // BackBoard
-            @"com.apple.preferences",   // Settings
-            @"com.apple.mobilephone",   // Phone
-            @"com.apple.MobileSMS"      // Messages
-        ];
+    //     // Create a safelist of apps that should NEVER be terminated
+    //     NSArray *safeApps = @[
+    //         @"com.hydra.projectx",      // The tweak itself
+    //         @"com.apple.springboard",   // SpringBoard
+    //         @"com.apple.backboardd",    // BackBoard
+    //         @"com.apple.preferences",   // Settings
+    //         @"com.apple.mobilephone",   // Phone
+    //         @"com.apple.MobileSMS"      // Messages
+    //     ];
         
-        int terminatedCount = 0;
-        for (NSString *bundleID in allApps) {
-            // Skip apps in the safelist
-            if ([safeApps containsObject:bundleID]) {
-                NSLog(@"[WeaponX] 🛡️ Skipping termination of protected app: %@", bundleID);
-                continue;
-            }
+    //     int terminatedCount = 0;
+    //     for (NSString *bundleID in allApps) {
+    //         // Skip apps in the safelist
+    //         if ([safeApps containsObject:bundleID]) {
+    //             NSLog(@"[WeaponX] 🛡️ Skipping termination of protected app: %@", bundleID);
+    //             continue;
+    //         }
             
-            // Check if app is enabled
-            if (IsScope()) {
-                NSLog(@"[WeaponX] 🔄 Terminating enabled app: %@", bundleID);
+    //         // Check if app is enabled
+    //         if (IsScope()) {
+    //             NSLog(@"[WeaponX] 🔄 Terminating enabled app: %@", bundleID);
                 
-                // Use killAppViaExecutableName method directly
-                [bottomButtons killAppViaExecutableName:bundleID];
-                terminatedCount++;
-            }
-        }
+    //             // Use killAppViaExecutableName method directly
+    //             [bottomButtons killAppViaExecutableName:bundleID];
+    //             terminatedCount++;
+    //         }
+    //     }
         
-        NSLog(@"[WeaponX] ✅ Terminated %d enabled apps using fallback method", terminatedCount);
-    }
+    //     NSLog(@"[WeaponX] ✅ Terminated %d enabled apps using fallback method", terminatedCount);
+    // }
 }
 
 - (void)switchToProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion {

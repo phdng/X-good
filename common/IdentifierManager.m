@@ -796,123 +796,9 @@
 }
 // 页面展示用的 里面带格式化
 - (NSString *)currentValueForIdentifier:(NSString *)type {
-    // Special hardcoded serial number for Filza and ADManager
-    // if ([type isEqualToString:@"SerialNumber"]) {
-    //     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    //     if (bundleID) {
-    //         if ([bundleID isEqualToString:@"com.tigisoftware.Filza"] || 
-    //             [bundleID isEqualToString:@"com.tigisoftware.ADManager"]) {
-    //             // Return hardcoded serial number for these specific apps
-    //             NSString *hardcodedSerial = @"FCCC15Q4HG04";
-    //             PXLog(@"[WeaponX] 📱 Returning hardcoded serial number for %@: %@", bundleID, hardcodedSerial);
-    //             return hardcodedSerial;
-    //         }
-    //     }
-    // }
-    
     // First try to get from profile-specific storage
     NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
-    //   NSString *identityDir = [self profileIdentityPath];
-//     if (identityDir) {
-//         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-//         NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-//         NSString *value = deviceIds[type];
-        
-//         if (value) {
-//             PXLog(@"Found %@ value in device_ids.plist: %@", type, value);
-//             return value;
-//         }
-        
-//         // If not found in combined file, try type-specific files
-//         else if ([type isEqualToString:@"DeviceModel"]) {
-//             NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-//             NSDictionary *modelDict = [NSDictionary dictionaryWithContentsOfFile:modelPath];
-//             if (modelDict && modelDict[@"value"]) {
-//                 PXLog(@"Found DeviceModel in device_model.plist: %@", modelDict[@"value"]);
-//                 return modelDict[@"value"];
-//             }
-//         }
-//         else if ([type isEqualToString:@"DeviceName"]) {
-//             NSString *deviceNamePath = [identityDir stringByAppendingPathComponent:@"device_name.plist"];
-//             NSDictionary *deviceNameDict = [NSDictionary dictionaryWithContentsOfFile:deviceNamePath];
-//             if (deviceNameDict && deviceNameDict[@"value"]) {
-//                 PXLog(@"Found DeviceName in device_name.plist: %@", deviceNameDict[@"value"]);
-//                 return deviceNameDict[@"value"];
-//             }
-//         }
-//         else if ([type isEqualToString:@"SerialNumber"]) {
-//             NSString *serialPath = [identityDir stringByAppendingPathComponent:@"serial_number.plist"];
-//             NSDictionary *serialDict = [NSDictionary dictionaryWithContentsOfFile:serialPath];
-//             if (serialDict && serialDict[@"value"]) {
-//                 PXLog(@"Found SerialNumber in serial_number.plist: %@", serialDict[@"value"]);
-//                 return serialDict[@"value"];
-//             }
-//         }
-//         else if ([type isEqualToString:@"WiFi"]) {
-//             // Check for WiFi info in the profile
-//             NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
-//             NSDictionary *wifiInfo = [NSDictionary dictionaryWithContentsOfFile:wifiInfoPath];
-//             if (wifiInfo && wifiInfo[@"ssid"] && wifiInfo[@"bssid"]) {
-//                 NSString *formattedValue = [NSString stringWithFormat:@"%@ (%@)", wifiInfo[@"ssid"], wifiInfo[@"bssid"]];
-//                 PXLog(@"Found WiFi info in wifi_info.plist: %@", formattedValue);
-//                 return formattedValue;
-//             }
-//         }
-//         else if ([type isEqualToString:@"StorageSystem"]) {
-//             NSString *storagePath = [identityDir stringByAppendingPathComponent:@"storage.plist"];
-//             NSDictionary *storageDict = [NSDictionary dictionaryWithContentsOfFile:storagePath];
-//             if (storageDict && storageDict[@"TotalStorage"] && storageDict[@"FreeStorage"]) {
-//                 NSString *formattedStorage = [NSString stringWithFormat:@"Total: %@ GB, Free: %@ GB", 
-//                                              storageDict[@"TotalStorage"], 
-//                                              storageDict[@"FreeStorage"]];
-//                 PXLog(@"Found Storage info in storage.plist: %@", formattedStorage);
-//                 return formattedStorage;
-//             }
-//         }
-//         else if ([type isEqualToString:@"BatteryLevel"] || [type isEqualToString:@"LowPowerMode"]) {
-//             NSString *batteryPath = [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
-//             NSDictionary *batteryDict = [NSDictionary dictionaryWithContentsOfFile:batteryPath];
-//             if (batteryDict && batteryDict[type]) {
-//                 PXLog(@"Found %@ in battery_info.plist: %@", type, batteryDict[type]);
-//                 return batteryDict[type];
-//             }
-//         }
-//         else if ([type isEqualToString:@"SystemUptime"]) {
-//             NSString *profilePath = [self profileIdentityPath];
-// NSString *uptimePath = [profilePath stringByAppendingPathComponent:@"system_uptime.plist"];
-// NSDictionary *uptimeDict = [NSDictionary dictionaryWithContentsOfFile:uptimePath];
-// if (uptimeDict && uptimeDict[@"value"]) {
-//     NSTimeInterval uptime = [uptimeDict[@"value"] doubleValue];
-//     if (uptime > 0) {
-//         NSString *formattedUptime = [NSString stringWithFormat:@"%.2f hours", uptime / 3600.0];
-//         PXLog(@"[WeaponX] 📄 Showing SystemUptime from system_uptime.plist: %@", formattedUptime);
-//         return formattedUptime;
-//     }
-// }
-// return @"Not Set";
-//         }
-//         else if ([type isEqualToString:@"BootTime"]) {
-//             NSString *profilePath = [self profileIdentityPath];
-// NSString *bootTimePath = [profilePath stringByAppendingPathComponent:@"boot_time.plist"];
-// NSDictionary *bootTimeDict = [NSDictionary dictionaryWithContentsOfFile:bootTimePath];
-// if (bootTimeDict && bootTimeDict[@"value"]) {
-//     NSDate *bootTime = bootTimeDict[@"value"];
-//     if ([bootTime isKindOfClass:[NSDate class]]) {
-//         NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
-//         formatter.dateStyle = NSDateFormatterMediumStyle;
-//         formatter.timeStyle = NSDateFormatterMediumStyle;
-//         NSString *formattedBootTime = [formatter stringFromDate:bootTime];
-//         PXLog(@"[WeaponX] 📄 Showing BootTime from boot_time.plist: %@", formattedBootTime);
-//         return formattedBootTime;
-//     }
-// }
-// return @"Not Set";
-//         }
-        
-//         PXLog(@"No %@ value found in profile-specific files", type);
-//     } else {
-//         PXLog(@"Could not access identity directory for profile");
-//     }
+
         
 
     if ([type isEqualToString:@"SystemUptime"]) {
@@ -1250,99 +1136,6 @@
     return nil;
 }
 
-#pragma mark - App Management
-
-
-- (void)addApplicationToScope:(NSString *)bundleID {
-    if (!bundleID.length) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                       code:3001 
-                                   userInfo:@{NSLocalizedDescriptionKey: @"Invalid bundle ID"}];
-        return;
-    }
-    
-    // Prevent the WeaponX app itself from being added to the scope list
-    if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                       code:3003 
-                                   userInfo:@{NSLocalizedDescriptionKey: @"Cannot add the WeaponX app itself to the scope list"}];
-        PXLog(@"[WeaponX] ⚠️ Prevented attempt to add the WeaponX app to the scope list");
-        return;
-    }
-    
-    // Get app info using LSApplicationProxy
-    LSApplicationProxy *appProxy = [LSApplicationProxy applicationProxyForIdentifier:bundleID];
-    if (!appProxy) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                       code:3002 
-                                   userInfo:@{NSLocalizedDescriptionKey: @"Application not found"}];
-        return;
-    }
-    
-    NSMutableDictionary *appInfo = [NSMutableDictionary dictionary];
-    appInfo[@"name"] = appProxy.localizedName ?: bundleID;
-    appInfo[@"version"] = appProxy.shortVersionString ?: @"App Not Found";
-    NSString *buildVersion = nil;
-    id proxy = (id)appProxy;
-    if ([proxy respondsToSelector:@selector(bundleVersion)]) {
-        buildVersion = [proxy performSelector:@selector(bundleVersion)];
-    } else if ([proxy respondsToSelector:@selector(valueForKey:)]) {
-        buildVersion = [proxy valueForKey:@"bundleVersion"];
-        if (!buildVersion) {
-            buildVersion = [proxy valueForKey:@"CFBundleVersion"];
-        }
-    }
-    appInfo[@"build"] = buildVersion ?: @"Unknown";  // Add build number
-    appInfo[@"installed"] = @YES;
-    appInfo[@"enabled"] = @YES;
-    
-    // Store using the original case-sensitive bundle ID
-    appInfo[@"bundleID"] = bundleID;
-    appInfo[@"originalBundleID"] = bundleID;  // Store original case-sensitive version
-    
-    // Use the original case-sensitive bundle ID as the dictionary key
-    self.scopedApps[bundleID] = appInfo;
-    [self saveSettings];
-}
-
-- (void)removeApplicationFromScope:(NSString *)bundleID {
-    [self.scopedApps removeObjectForKey:bundleID];
-    [self saveSettings];
-}
-
-- (void)setApplication:(NSString *)bundleID enabled:(BOOL)enabled {
-    NSMutableDictionary *appInfo = [self.scopedApps[bundleID] mutableCopy];
-    if (appInfo) {
-        appInfo[@"enabled"] = @(enabled);
-        self.scopedApps[bundleID] = appInfo;
-        [self saveSettings];
-    }
-}
-
-- (NSDictionary *)getApplicationInfo:(NSString *)bundleID {
-    if (bundleID) {
-        NSDictionary *appInfo = self.scopedApps[bundleID];
-        if (appInfo) {
-            return [appInfo mutableCopy];
-        }
-        return nil;
-    }
-    
-    // Return all apps with their original case-preserved bundle IDs
-    NSMutableDictionary *displayApps = [NSMutableDictionary dictionary];
-    [self.scopedApps enumerateKeysAndObjectsUsingBlock:^(NSString *key, NSDictionary *appInfo, BOOL *stop) {
-        NSMutableDictionary *displayInfo = [appInfo mutableCopy];
-        NSString *originalBundleID = appInfo[@"originalBundleID"];
-        if (originalBundleID) {
-            // Use the original case-sensitive bundle ID
-            displayInfo[@"bundleID"] = originalBundleID;
-            displayApps[key] = displayInfo;
-        } else {
-            displayApps[key] = displayInfo;
-        }
-    }];
-    return displayApps;
-}
 
 
 #pragma mark - Persistence
@@ -1352,8 +1145,6 @@
     NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
     NSString *prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
     
-    // Global settings file for scoped apps (universal across all profiles)
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
     
     // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -1361,13 +1152,11 @@
         // Try Dopamine 2 path first
         prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
         prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         
         // Fallback to standard path if needed
         if (![fileManager fileExistsAtPath:prefsFile]) {
             prefsPath = @"/var/mobile/Library/Preferences";
             prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
             
             // If still not found, try the original filename as a fallback
             if (![fileManager fileExistsAtPath:prefsFile]) {
@@ -1415,26 +1204,12 @@
         return;
     }
     
-    // Save scoped apps separately in the global scope file
-    NSDictionary *scopedAppsDict = @{@"ScopedApps": [self.scopedApps copy]};
-    success = [scopedAppsDict writeToFile:scopedAppsFile atomically:YES];
-    if (!success) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                      code:4006 
-                                  userInfo:@{NSLocalizedDescriptionKey: @"Failed to save global scoped apps"}];
-        return;
-    }
-    
+
     // Set proper permissions for global scope file
     NSError *permError = nil;
     NSDictionary *fileAttributes = @{NSFilePosixPermissions: @0644,
                                    NSFileOwnerAccountName: @"mobile"};
     
-    if (![fileManager setAttributes:fileAttributes
-                      ofItemAtPath:scopedAppsFile
-                             error:&permError]) {
-        NSLog(@"[ProjectX] Warning: Failed to set global scope file permissions: %@", permError);
-    }
 
     // Set proper permissions
     if (![fileManager setAttributes:fileAttributes
@@ -1448,7 +1223,6 @@
     // Try rootless path first
     NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
     NSString *prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
     
     // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -1456,13 +1230,11 @@
         // Try Dopamine 2 path
         prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
         prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         
         // Fallback to standard path if needed
         if (![fileManager fileExistsAtPath:prefsFile]) {
             prefsPath = @"/var/mobile/Library/Preferences";
             prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
             
             // If still not found, try the original filename as a fallback
             if (![fileManager fileExistsAtPath:prefsFile]) {
@@ -1509,20 +1281,6 @@
         [self.settings setDictionary:savedSettings];
     }
     
-    // Load scoped apps from the global scope file
-    NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFile];
-    NSDictionary *savedApps = scopedAppsDict[@"ScopedApps"];
-    
-    // If not found in global scope file, try the legacy location
-    if (!savedApps && loadedDict[@"ScopedApps"]) {
-        savedApps = loadedDict[@"ScopedApps"];
-        NSLog(@"[ProjectX] Loaded scoped apps from legacy location, will migrate to global file");
-    }
-    
-    if (savedApps) {
-        [self.scopedApps setDictionary:savedApps];
-    }
-    
     // We no longer load identifier values from global settings as they're profile-specific
 }
 
@@ -1551,133 +1309,8 @@
     return nil;
 }
 
-- (NSArray *)availableIdentifiers {
-    // Return all available identifiers
-    NSArray *identifiers = @[
-        @"IDFA",
-        @"IDFV",
-        @"DeviceName",
-        @"SerialNumber",
-        @"IOSVersion",
-        @"WiFi",
-        @"StorageSystem",
-        @"Battery",
-        @"SystemBootUUID",
-        @"DyldCacheUUID",
-        @"PasteboardUUID",
-        @"KeychainUUID",
-        @"UserDefaultsUUID",
-        @"AppGroupUUID",
-        @"CoreDataUUID",
-        @"AppInstallUUID",
-        @"AppContainerUUID",
-        @"SystemUptime",
-        @"BootTime"
-    ];
-    
-    return identifiers;
-}
-
-- (void)addApplicationWithExtensionsToScope:(NSString *)bundleID {
-    if (!bundleID || [bundleID isEqualToString:@"com.hydra.projectx"]) {
-        return;
-    }
-    
-    // First add the main app
-    [self addApplicationToScope:bundleID];
-    
-    // Create a more specific extension pattern
-    // Instead of just using first component, use the main app's bundle ID as base
-    NSString *extensionPattern = [NSString stringWithFormat:@"%@.*", bundleID];
-    
-    // Store the extension pattern in the app's info
-    NSMutableDictionary *appInfo = [self.scopedApps[bundleID] mutableCopy];
-    if (appInfo) {
-        appInfo[@"extensionPattern"] = extensionPattern;
-        self.scopedApps[bundleID] = appInfo;
-        
-        PXLog(@"[WeaponX] Added extension pattern: %@ for app: %@", extensionPattern, bundleID);
-    }
-}
-- (BOOL)isScope{
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    // NSLog(@"%s app",bundleID);
-    // if([self isExtensionEnabled:bundleID]){
-    //     NSLog(@"%s app is selected",bundleID);
-    // }
-    // NSLog(@"%s app is not selected",bundleID);
-    if (!bundleID) return NO;
-    
-    // 是自己直接返回 不是则判断是否选中
-    if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
-        return NO;
-    }
-    
-    // Check each scoped app's extension pattern
-    for (NSString *scopedBundleID in self.scopedApps) {
-        NSDictionary *appInfo = self.scopedApps[scopedBundleID];
-        if (scopedBundleID && [self isBundleIDMatch:bundleID withPattern:scopedBundleID]) {
-            // PXLog(@"[WeaponX] Bundle ID %@ matches extension pattern %@ from app %@", bundleID, extensionPattern, scopedBundleID);
-            return [appInfo[@"enabled"] boolValue];
-        }
-    }
-    
-    return NO;
-}
-- (BOOL)isBundleIDMatch:(NSString *)targetBundleID withPattern:(NSString *)patternBundleID {
-    if (!targetBundleID || !patternBundleID) return NO;
-    
-    // Convert pattern to regex, escaping all dots except the wildcard
-    NSString *regexPattern = [patternBundleID stringByReplacingOccurrencesOfString:@"." withString:@"\\."];
-    regexPattern = [regexPattern stringByReplacingOccurrencesOfString:@"\\.*" withString:@".*"];
-    regexPattern = [NSString stringWithFormat:@"^%@$", regexPattern];
-    
-    NSError *error = nil;
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:regexPattern
-                                                                         options:NSRegularExpressionCaseInsensitive
-                                                                           error:&error];
-    if (error) {
-        PXLog(@"[WeaponX] Error creating regex for pattern %@: %@", patternBundleID, error);
-        return NO;
-    }
-    
-    NSRange range = NSMakeRange(0, targetBundleID.length);
-    NSTextCheckingResult *match = [regex firstMatchInString:targetBundleID options:0 range:range];
-    
-    BOOL matches = (match != nil);
-    if (matches) {
-        PXLog(@"[WeaponX] Bundle ID: %@ matches pattern: %@", targetBundleID, patternBundleID);
-    }
-    
-    return matches;
-}
-
-
-- (BOOL)isExtensionEnabled:(NSString *)bundleID {
-    if (!bundleID) return NO;
-    
-    // 是自己直接返回 不是则判断是否选中
-    if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
-        return NO;
-    }
-    
-    // Check each scoped app's extension pattern
-    for (NSString *scopedBundleID in self.scopedApps) {
-        NSDictionary *appInfo = self.scopedApps[scopedBundleID];
-        NSString *extensionPattern = appInfo[@"extensionPattern"];
-        NSLog(@"%@ match %@",bundleID,scopedBundleID);
-        if (extensionPattern && [self isBundleIDMatch:bundleID withPattern:extensionPattern]) {
-            PXLog(@"[WeaponX] Bundle ID %@ matches extension pattern %@ from app %@", bundleID, extensionPattern, scopedBundleID);
-            return [appInfo[@"enabled"] boolValue];
-        }
-    }
-    
-    return NO;
-}
 
 #pragma mark - Custom Values
-
-
 
 
 - (NSString *)generateIMEI {
@@ -1754,9 +1387,6 @@
     NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
     return ([string rangeOfCharacterFromSet:nonDigits].location == NSNotFound);
 }
-
-
-
 
 - (BOOL)validateUUID:(NSString *)uuid {
     if (!uuid) return NO;

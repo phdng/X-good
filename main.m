@@ -2,7 +2,6 @@
 #import "ProjectX.h"
 #import "TabBarController.h"
 #import <UserNotifications/UserNotifications.h>
-#import "AppDataCleaner.h"
 
 
 @interface AppDelegate : UIResponder <UIApplicationDelegate, UNUserNotificationCenterDelegate>

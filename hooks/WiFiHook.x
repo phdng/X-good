@@ -6,7 +6,6 @@
 #import <dlfcn.h>
 #import "ProjectXLogging.h"
 #import "WiFiManager.h"
-#import "MethodSwizzler.h"
 #import <Network/Network.h>
 #import <SystemConfiguration/SystemConfiguration.h>
 #import <ifaddrs.h>
@@ -295,74 +294,7 @@ static id replaced_dictionaryWithScanResult(id self, SEL _cmd, id arg1) {
     return originalResult;
 }
 
-#pragma mark - Swizzle Implementations for NEHotspotNetwork
 
-// Swizzle replacements for NEHotspotNetwork
-@implementation NEHotspotNetwork (WeaponXHooks)
-
-- (NSString *)weaponx_SSID {    
-    // Try to use cached info first
-    if (cachedWifiInfo && cachedWifiInfo[@"ssid"]) {
-        return cachedWifiInfo[@"ssid"];
-    }
-    
-    // Get WiFi info from profile
-    NSDictionary *wifiInfo = getProfileWiFiInfo();
-    if (wifiInfo && wifiInfo[@"ssid"]) {
-        // Update cache
-        if (!cachedWifiInfo) {
-            cachedWifiInfo = [NSMutableDictionary dictionary];
-        }
-        [cachedWifiInfo setDictionary:wifiInfo];
-        
-        return wifiInfo[@"ssid"];
-    }
-    
-    // Call original as fallback
-    return [self weaponx_SSID];
-}
-
-- (NSString *)weaponx_BSSID {
-
-    // Try to use cached info first
-    if (cachedWifiInfo && cachedWifiInfo[@"bssid"]) {
-        return cachedWifiInfo[@"bssid"];
-    }
-    
-    // Get WiFi info from profile
-    NSDictionary *wifiInfo = getProfileWiFiInfo();
-    if (wifiInfo && wifiInfo[@"bssid"]) {
-        // Update cache
-        if (!cachedWifiInfo) {
-            cachedWifiInfo = [NSMutableDictionary dictionary];
-        }
-        [cachedWifiInfo setDictionary:wifiInfo];
-        
-        return wifiInfo[@"bssid"];
-    }
-    
-    // Call original as fallback
-    return [self weaponx_BSSID];
-}
-
-// Additional NEHotspotNetwork property hook for signal strength
-- (NSNumber *)weaponx_signalStrength {
-    // Check if we should spoof
-    
-    // Return a realistic signal strength (0.7-0.9 range for good strength)
-    double strength = 0.7 + ((double)arc4random_uniform(20) / 100.0);
-    return @(strength);
-}
-
-// Additional NEHotspotNetwork property hook for secure flag
-- (BOOL)weaponx_secure {
-    // Check if we should spoof
-    
-    // Most networks are secure, so default to YES (true)
-    return YES;
-}
-
-@end
 
 #pragma mark - MobileWiFi Framework Hooks
 
@@ -463,27 +395,7 @@ static void initializeHooks(void) {
         }
     }
     
-    // Install NEHotspotNetwork swizzles
-    Class neHotspotNetworkClass = NSClassFromString(@"NEHotspotNetwork");
-    if (neHotspotNetworkClass) {
-        [MethodSwizzler swizzleClass:neHotspotNetworkClass 
-                   originalSelector:@selector(SSID) 
-                   swizzledSelector:@selector(weaponx_SSID)];
-        
-        [MethodSwizzler swizzleClass:neHotspotNetworkClass 
-                   originalSelector:@selector(BSSID) 
-                   swizzledSelector:@selector(weaponx_BSSID)];
-        
-        // Add additional property swizzles
-        [MethodSwizzler swizzleClass:neHotspotNetworkClass 
-                   originalSelector:@selector(signalStrength) 
-                   swizzledSelector:@selector(weaponx_signalStrength)];
-                   
-        [MethodSwizzler swizzleClass:neHotspotNetworkClass 
-                   originalSelector:@selector(secure) 
-                   swizzledSelector:@selector(weaponx_secure)];
-    }
-    
+
     // Install MobileWiFi framework hooks
     void *mobileWiFiLib = dlopen("/System/Library/PrivateFrameworks/MobileWiFi.framework/MobileWiFi", RTLD_NOW);
     if (mobileWiFiLib) {
@@ -604,7 +516,54 @@ static void initializeHooks(void) {
 }
 
 %end
+%hook NEHotspotNetwork
 
+- (id)SSID{
+    // Try to use cached info first
+    if (cachedWifiInfo && cachedWifiInfo[@"ssid"]) {
+        return cachedWifiInfo[@"ssid"];
+    }
+    
+    // Get WiFi info from profile
+    NSDictionary *wifiInfo = getProfileWiFiInfo();
+    if (wifiInfo && wifiInfo[@"ssid"]) {
+        // Update cache
+        if (!cachedWifiInfo) {
+            cachedWifiInfo = [NSMutableDictionary dictionary];
+        }
+        [cachedWifiInfo setDictionary:wifiInfo];
+        
+        return wifiInfo[@"ssid"];
+    }
+    return %orig;
+}
+- (id)BSSID{
+    if (cachedWifiInfo && cachedWifiInfo[@"bssid"]) {
+        return cachedWifiInfo[@"bssid"];
+    }
+    
+    // Get WiFi info from profile
+    NSDictionary *wifiInfo = getProfileWiFiInfo();
+    if (wifiInfo && wifiInfo[@"bssid"]) {
+        // Update cache
+        if (!cachedWifiInfo) {
+            cachedWifiInfo = [NSMutableDictionary dictionary];
+        }
+        [cachedWifiInfo setDictionary:wifiInfo];
+        
+        return wifiInfo[@"bssid"];
+    }
+    return %orig;
+}
+- (double)signalStrength{
+    double strength = 0.7 + ((double)arc4random_uniform(20) / 100.0);
+    return strength;
+}
+- (bool)isSecure{
+    return YES;
+}
+    
+%end
 #pragma mark - Constructor
 
 %ctor {

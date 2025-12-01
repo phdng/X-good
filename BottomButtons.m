@@ -233,7 +233,7 @@
     killConfig.baseForegroundColor = [UIColor systemRedColor];
     killConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
     killButton.configuration = killConfig;
-    [killButton addTarget:self action:@selector(killEnabledApps) forControlEvents:UIControlEventTouchUpInside];
+    // [killButton addTarget:self action:@selector(killEnabledApps) forControlEvents:UIControlEventTouchUpInside];
     killButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     killButton.layer.cornerRadius = 10;
     killButton.clipsToBounds = YES;
@@ -507,56 +507,5 @@
     return topController;
 }
 
-#pragma mark - App Management
-
-- (void)killEnabledApps {
-    // Get all enabled apps
-    NSDictionary *allApps = [self.manager getApplicationInfo:nil];
-    NSMutableArray *actions = [NSMutableArray array];
-    
-    // Create a safelist of apps that should NEVER be terminated
-    NSArray *safeApps = @[
-        @"com.hydra.projectx",      // The tweak itself
-        @"com.apple.springboard",   // SpringBoard
-        @"com.apple.backboardd",    // BackBoard
-        @"com.apple.preferences",   // Settings
-        @"com.apple.mobilephone",   // Phone
-        @"com.apple.MobileSMS"      // Messages
-    ];
-    
-    for (NSString *bundleID in allApps) {
-        // Skip apps in the safelist
-        if ([safeApps containsObject:bundleID]) {
-            NSLog(@"[BottomButtons] 🛡️ Skipping termination of protected app: %@", bundleID);
-            continue;
-        }
-        
-        if (IsScope()) {
-            // Try to terminate using terminateApplicationWithBundleID first
-            [self terminateApplicationWithBundleID:bundleID];
-            
-            // Create SBSRelaunchAction as additional measure
-            @try {
-                SBSRelaunchAction *action = [SBSRelaunchAction actionWithReason:@"terminate" options:4 targetURL:[NSURL URLWithString:[NSString stringWithFormat:@"com.apple.frontboard.systemappservices://%@", bundleID]]];
-                [actions addObject:action];
-            } @catch (NSException *exception) {
-                NSLog(@"[BottomButtons] Failed to create SBSRelaunchAction for %@: %@", bundleID, exception);
-            }
-            
-            // Try killing via executable name as final fallback
-            [self killAppViaExecutableName:bundleID];
-        }
-    }
-    
-    // Send relaunch actions
-    if (actions.count > 0) {
-        @try {
-            [[FBSSystemService sharedService] sendActions:[NSSet setWithArray:actions] withResult:nil];
-            NSLog(@"[BottomButtons] Successfully sent termination actions for %lu apps", (unsigned long)actions.count);
-        } @catch (NSException *exception) {
-            NSLog(@"[BottomButtons] Failed to send termination actions: %@", exception);
-        }
-    }
-}
 
 @end

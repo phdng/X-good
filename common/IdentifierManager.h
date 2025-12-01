@@ -7,16 +7,7 @@
 
 @interface IdentifierManager (AppManagement)
 
-#pragma mark - App Management
 
-- (void)addApplicationToScope:(NSString *)bundleID;
-- (void)removeApplicationFromScope:(NSString *)bundleID;
-- (void)setApplication:(NSString *)bundleID enabled:(BOOL)enabled;
-- (NSDictionary *)getApplicationInfo:(NSString *)bundleID;
-
-
-- (BOOL)isBundleIDMatch:(NSString *)targetBundleID withPattern:(NSString *)patternBundleID;
-- (BOOL)isScope;
 
 #pragma mark - Custom Values
 - (NSString *) getValueForType:(NSString *)type;

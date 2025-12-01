@@ -3,14 +3,10 @@
 #import "UptimeManager.h"
 #import "CopyHelper.h"
 #import "BottomButtons.h"
-#import "FreezeManager.h"
-#import "AppDataCleaner.h"
 #import "AppVersionManager.h"
-#import "ProfileCreationViewController.h"
 #import "ProfileManager.h"
 #import "StorageManager.h"
 #import "BatteryManager.h"
-#import "AppDataBackupRestoreViewController.h"
 #import <UIKit/UIKit.h>
 #import "ProgressHUDView.h"
 #import <spawn.h>
@@ -36,7 +32,6 @@
 @property (nonatomic, strong) ProgressHUDView *progressHUD;
 @property (nonatomic, strong) UIScrollView *scrollView;
 @property (nonatomic, strong) UIStackView *mainStackView;
-@property (nonatomic, strong) FreezeManager *freezeManager;
 
 @property (nonatomic, strong) NSMutableDictionary *identifierSwitches;
 @property (nonatomic, strong) UITableView *appsTableView;
@@ -48,7 +43,6 @@
 
 // Method declarations
 - (void)showError:(NSError *)error;
-- (void)killEnabledAppsAndRespring;
 - (void)loadSettings;
 - (void)setupUI;
 - (void)addIdentifierSection:(NSString *)type title:(NSString *)title;
@@ -65,8 +59,6 @@
 
 @property (nonatomic, strong) NSMutableArray *profiles;
 
-// Profile Management Methods
-- (void)setupProfileManagement;
 
 
 // Add helper methods for finding buttons by tag
@@ -80,9 +72,6 @@
 
 // Modify setupUI method to add a "Show Advanced" button and initially hide the advanced identifier sections
 - (void)setupUI;
-
-// Add methods for the show advanced button and advanced identifier sections
-- (void)addShowAdvancedButton;
 
 // Add a version of addIdentifierSection that adds to our tracking array and hides them initially
 - (void)addAdvancedIdentifierSection:(NSString *)type title:(NSString *)title;
@@ -317,7 +306,6 @@
     
     // Initialize managers
     self.manager = [IdentifierManager sharedManager];
-    self.freezeManager = [FreezeManager sharedManager];
     self.identifierSwitches = [NSMutableDictionary dictionary];
     
     // Add tap gesture recognizer to dismiss keyboard
@@ -338,12 +326,6 @@
     [[NSNotificationCenter defaultCenter] addObserver:self
                                              selector:@selector(keyboardWillHide:)
                                                  name:UIKeyboardWillHideNotification
-                                               object:nil];
-    
-    // Register for frozen state changes
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                             selector:@selector(handleFrozenStateChanged:)
-                                                 name:@"AppFrozenStateChanged"
                                                object:nil];
     
     
@@ -424,8 +406,6 @@
         [self.mainStackView.widthAnchor constraintEqualToAnchor:self.scrollView.widthAnchor constant:-32]
     ]];
     
-    // Add sections with visual separation
-    UIView *identifiersSection = [self createSectionHeaderWithTitle:@"Device IDs"];
     
     // Create header stack view for title and generate button
     UIStackView *headerStack = [[UIStackView alloc] init];
@@ -434,7 +414,6 @@
     headerStack.alignment = UIStackViewAlignmentCenter;
     headerStack.distribution = UIStackViewDistributionEqualSpacing;
     
-    [headerStack addArrangedSubview:identifiersSection];
     
 
     // Add Generate All button with minimalistic style
@@ -471,25 +450,23 @@
     [self addIdentifierSection:@"Battery" title:@"电池信息"];
     
     // Add basic UUID sections - moved System Uptime and Boot Time from advanced to basic
-    [self addIdentifierSection:@"SystemUptime" title:@"System Uptime"];
-    [self addIdentifierSection:@"BootTime" title:@"Boot Time"];
+    [self addIdentifierSection:@"SystemUptime" title:@"开机时长"];
+    [self addIdentifierSection:@"BootTime" title:@"启动时间"];
     
-    // Add "Show Advanced" button
-    [self addShowAdvancedButton];
     
     // Add advanced identifier sections (will be initially hidden)
-    [self addAdvancedIdentifierSection:@"KeychainUUID" title:@"Keychain UUID"];
-    [self addAdvancedIdentifierSection:@"UserDefaultsUUID" title:@"UserDefaults UUID"];
-    [self addAdvancedIdentifierSection:@"AppGroupUUID" title:@"App Group UUID"];
-    [self addAdvancedIdentifierSection:@"CoreDataUUID" title:@"Core Data UUID"];
-    [self addAdvancedIdentifierSection:@"AppInstallUUID" title:@"App Install UUID"];
-    [self addAdvancedIdentifierSection:@"AppContainerUUID" title:@"App Container UUID"];
+    [self addIdentifierSection:@"KeychainUUID" title:@"Keychain UUID"];
+    [self addIdentifierSection:@"UserDefaultsUUID" title:@"UserDefaults UUID"];
+    [self addIdentifierSection:@"AppGroupUUID" title:@"App Group UUID"];
+    [self addIdentifierSection:@"CoreDataUUID" title:@"Core Data UUID"];
+    [self addIdentifierSection:@"AppInstallUUID" title:@"App Install UUID"];
+    [self addIdentifierSection:@"AppContainerUUID" title:@"App Container UUID"];
     // Moved Serial Number and Pasteboard UUID from basic to advanced
-    [self addAdvancedIdentifierSection:@"SerialNumber" title:@"Serial Number"];
-    [self addAdvancedIdentifierSection:@"PasteboardUUID" title:@"Pasteboard UUID"];
+    [self addIdentifierSection:@"SerialNumber" title:@"Serial Number"];
+    [self addIdentifierSection:@"PasteboardUUID" title:@"Pasteboard UUID"];
     // Moved System Boot UUID and Dyld Cache UUID from basic to advanced
-    [self addAdvancedIdentifierSection:@"SystemBootUUID" title:@"System Boot UUID"];
-    [self addAdvancedIdentifierSection:@"DyldCacheUUID" title:@"Dyld Cache UUID"];
+    [self addIdentifierSection:@"SystemBootUUID" title:@"System Boot UUID"];
+    [self addIdentifierSection:@"DyldCacheUUID" title:@"Dyld Cache UUID"];
         
     
     // Add bottom buttons view
@@ -520,33 +497,6 @@
         idfvSwitch.on = [self.manager isIdentifierEnabled:@"IDFV"];
     }
     
-}
-
-
-#pragma mark - Process Management
-
-- (void)killEnabledAppsAndRespring {
-    // Get all enabled apps
-    NSDictionary *allApps = [self.manager getApplicationInfo:nil];
-    for (NSString *bundleID in allApps) {
-        if (IsScope()) {
-            // Use posix_spawn to kill apps
-            pid_t pid;
-            const char *killall = "/usr/bin/killall";
-            const char *bundleIDStr = [bundleID UTF8String];
-            char *const argv[] = {(char *)"killall", (char *)bundleIDStr, NULL};
-            posix_spawn(&pid, killall, NULL, NULL, argv, NULL);
-            int status;
-            waitpid(pid, &status, WEXITED);
-        }
-    }
-    
-    // Respring using sbreload
-    pid_t pid;
-    const char *sbreload = "/usr/bin/sbreload";
-    char *const argv[] = {(char *)"sbreload", NULL};
-    posix_spawn(&pid, sbreload, NULL, NULL, argv, NULL);
-    waitpid(pid, NULL, WEXITED);
 }
 
 #pragma mark - Error Handling
@@ -865,8 +815,6 @@
     return [allowedCharacters isSupersetOfSet:characterSet] || [string isEqualToString:@""];
 }
 
-
-#pragma mark - UITableViewDelegate
 
 
 #pragma mark - Switch Actions
@@ -1199,8 +1147,6 @@
 }
 
 
-
-
 - (void)directUpdateIdentifierValue:(NSString *)identifierType withValue:(NSString *)value {
     // Find all identifier cells
     BOOL foundContainer = NO;
@@ -1437,20 +1383,6 @@
     });
 }
 
-#pragma mark - UIScrollViewDelegate
-
-- (void)showSuccessMessage:(NSString *)message {
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Success"
-                                                                   message:message
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    
-    UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil];
-    [alert addAction:okAction];
-    
-    [self presentViewController:alert animated:YES completion:nil];
-}
-
-
 
 #pragma mark - ProfileTabViewControllerDelegate
 
@@ -1478,12 +1410,6 @@
                                          NULL, 
                                          NULL, 
                                          YES);
-}
-
-
-- (void)setupProfileManagement {
-    // Initialize profiles array
-    self.profiles = [[ProfileManager sharedManager].profiles mutableCopy];
 }
 
 
@@ -2131,183 +2057,9 @@
     });
 }
 
-// Add methods for the show advanced button and advanced identifier sections
-- (void)addShowAdvancedButton {
-    // Create a container for the button with padding
-    UIView *buttonContainer = [[UIView alloc] init];
-    buttonContainer.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.mainStackView addArrangedSubview:buttonContainer];
-    
-    // Create the "Show Advanced" button
-    self.showAdvancedButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.showAdvancedButton.translatesAutoresizingMaskIntoConstraints = NO;
-    
-    // Configure button with modern appearance
-    if (@available(iOS 15.0, *)) {
-        UIButtonConfiguration *config = [UIButtonConfiguration filledButtonConfiguration];
-        config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-        config.baseBackgroundColor = [UIColor systemBlueColor];
-        config.baseForegroundColor = [UIColor whiteColor];
-        config.title = @"Show Advanced Identifiers";
-        config.image = [UIImage systemImageNamed:@"chevron.down"];
-        config.imagePlacement = NSDirectionalRectEdgeTrailing;
-        config.imagePadding = 8;
-        config.contentInsets = NSDirectionalEdgeInsetsMake(8, 16, 8, 16);
-        self.showAdvancedButton.configuration = config;
-    } else {
-        // Fallback for older iOS versions - create a tinted button without using deprecated properties
-        UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
-        config.title = @"Show Advanced Identifiers";
-        config.background.backgroundColor = [UIColor systemBlueColor];
-        config.baseForegroundColor = [UIColor whiteColor];
-        config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-        
-        // Set content insets equivalent to UIEdgeInsetsMake(8, 16, 8, 16)
-        config.contentInsets = NSDirectionalEdgeInsetsMake(8, 16, 8, 16);
-        self.showAdvancedButton.configuration = config;
-        
-        // Add chevron icon manually for older iOS
-        UIImageView *chevronIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.down"]];
-        chevronIcon.tintColor = [UIColor whiteColor];
-        chevronIcon.translatesAutoresizingMaskIntoConstraints = NO;
-        [self.showAdvancedButton addSubview:chevronIcon];
-        
-        [NSLayoutConstraint activateConstraints:@[
-            [chevronIcon.trailingAnchor constraintEqualToAnchor:self.showAdvancedButton.trailingAnchor constant:-8],
-            [chevronIcon.centerYAnchor constraintEqualToAnchor:self.showAdvancedButton.centerYAnchor],
-            [chevronIcon.widthAnchor constraintEqualToConstant:12],
-            [chevronIcon.heightAnchor constraintEqualToConstant:12]
-        ]];
-    }
-    
-    [self.showAdvancedButton addTarget:self action:@selector(toggleAdvancedIdentifiers:) forControlEvents:UIControlEventTouchUpInside];
-    [buttonContainer addSubview:self.showAdvancedButton];
-    
-    // Center the button in its container
-    [NSLayoutConstraint activateConstraints:@[
-        [self.showAdvancedButton.centerXAnchor constraintEqualToAnchor:buttonContainer.centerXAnchor],
-        [self.showAdvancedButton.topAnchor constraintEqualToAnchor:buttonContainer.topAnchor constant:8],
-        [self.showAdvancedButton.bottomAnchor constraintEqualToAnchor:buttonContainer.bottomAnchor constant:-8],
-        [self.showAdvancedButton.widthAnchor constraintLessThanOrEqualToAnchor:buttonContainer.widthAnchor constant:-32]
-    ]];
-    
-    // Add some spacing after the button
-    [self.mainStackView setCustomSpacing:16 afterView:buttonContainer];
-}
 
-// Add a version of addIdentifierSection that adds to our tracking array and hides them initially
-- (void)addAdvancedIdentifierSection:(NSString *)type title:(NSString *)title {
-    // Get the current count of views in main stack before adding
-    NSUInteger beforeCount = self.mainStackView.arrangedSubviews.count;
-    
-    // Call the original method to create the section (adds title label and container)
-    [self addIdentifierSection:type title:title];
-    
-    // Get both the title label and container view that were just added
-    if (self.mainStackView.arrangedSubviews.count >= beforeCount + 2) {
-        // The title label is typically added first, then the container
-        UIView *titleLabel = self.mainStackView.arrangedSubviews[beforeCount];
-        UIView *containerView = self.mainStackView.arrangedSubviews[beforeCount + 1];
-        
-        // Initially hide both views
-        titleLabel.hidden = YES;
-        containerView.hidden = YES;
-        
-        // Add both views to our tracking array
-        [self.advancedIdentifierViews addObject:titleLabel];
-        [self.advancedIdentifierViews addObject:containerView];
-    } else {
-        // Fallback in case we couldn't identify both views properly
-        // Just hide the last view added (likely the container)
-        UIView *lastView = self.mainStackView.arrangedSubviews.lastObject;
-        lastView.hidden = YES;
-        [self.advancedIdentifierViews addObject:lastView];
-    }
-}
-
-// Handle toggle of advanced identifiers
-- (void)toggleAdvancedIdentifiers:(UIButton *)sender {
-    // Toggle the state
-    self.showAdvancedIdentifiers = !self.showAdvancedIdentifiers;
-    
-    // Update button appearance
-    if (@available(iOS 15.0, *)) {
-        UIButtonConfiguration *config = self.showAdvancedButton.configuration;
-        if (self.showAdvancedIdentifiers) {
-            config.title = @"Hide Advanced Identifiers";
-            config.image = [UIImage systemImageNamed:@"chevron.up"];
-        } else {
-            config.title = @"Show Advanced Identifiers";
-            config.image = [UIImage systemImageNamed:@"chevron.down"];
-        }
-        self.showAdvancedButton.configuration = config;
-    } else {
-        // Update for older iOS versions
-        if (self.showAdvancedIdentifiers) {
-            [self.showAdvancedButton setTitle:@"Hide Advanced Identifiers" forState:UIControlStateNormal];
-            
-            // Update chevron icon
-            for (UIView *subview in self.showAdvancedButton.subviews) {
-                if ([subview isKindOfClass:[UIImageView class]]) {
-                    UIImageView *imageView = (UIImageView *)subview;
-                    imageView.image = [UIImage systemImageNamed:@"chevron.up"];
-                    break;
-                }
-            }
-        } else {
-            [self.showAdvancedButton setTitle:@"Show Advanced Identifiers" forState:UIControlStateNormal];
-            
-            // Update chevron icon
-            for (UIView *subview in self.showAdvancedButton.subviews) {
-                if ([subview isKindOfClass:[UIImageView class]]) {
-                    UIImageView *imageView = (UIImageView *)subview;
-                    imageView.image = [UIImage systemImageNamed:@"chevron.down"];
-                    break;
-                }
-            }
-        }
-    }
-    
-    // Toggle visibility of advanced identifiers with animation
-    if (self.showAdvancedIdentifiers) {
-        // Show the advanced identifier views with a sequential animation
-        [UIView animateWithDuration:0.3 animations:^{
-            for (NSInteger i = 0; i < self.advancedIdentifierViews.count; i++) {
-                UIView *view = self.advancedIdentifierViews[i];
-                view.hidden = NO;
-                view.alpha = 0;
-                
-                // Add a slight delay between each view appearing
-                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(i * 0.05 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                    [UIView animateWithDuration:0.3 animations:^{
-                        view.alpha = 1.0;
-                    }];
-                });
-            }
-        }];
-        
-        // Scroll to show the first advanced identifier
-        if (self.advancedIdentifierViews.count > 0) {
-            UIView *firstView = self.advancedIdentifierViews.firstObject;
-            [self.scrollView scrollRectToVisible:firstView.frame animated:YES];
-        }
-    } else {
-        // Hide the advanced identifier views
-        [UIView animateWithDuration:0.2 animations:^{
-            for (UIView *view in self.advancedIdentifierViews) {
-                view.alpha = 0;
-            }
-        } completion:^(BOOL finished) {
-            for (UIView *view in self.advancedIdentifierViews) {
-                view.hidden = YES;
-            }
-        }];
-    }
-}
 
 #pragma mark - More Options Button Action
-
-
 
 
 - (void)handleProfileChanged:(NSNotification *)notification {
