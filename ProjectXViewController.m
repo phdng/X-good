@@ -8,7 +8,6 @@
 #import "StorageManager.h"
 #import "BatteryManager.h"
 #import <UIKit/UIKit.h>
-#import "ProgressHUDView.h"
 #import <spawn.h>
 #import <sys/wait.h>
 #import <dlfcn.h>
@@ -29,7 +28,6 @@
 @end
 
 @interface ProjectXViewController () <UITextFieldDelegate, UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate, UIScrollViewDelegate>
-@property (nonatomic, strong) ProgressHUDView *progressHUD;
 @property (nonatomic, strong) UIScrollView *scrollView;
 @property (nonatomic, strong) UIStackView *mainStackView;
 
@@ -259,50 +257,6 @@
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     
     
-    if (@available(iOS 15.0, *)) {
-        // Modern button style for iOS 15+
-        UIButtonConfiguration *filesConfig = [UIButtonConfiguration plainButtonConfiguration];
-        filesConfig.title = @"Files";
-        filesConfig.image = [UIImage systemImageNamed:@"arrow.down.circle"];
-        filesConfig.imagePlacement = NSDirectionalRectEdgeLeading;
-        filesConfig.imagePadding = 4;
-        filesConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-        filesConfig.baseForegroundColor = [UIColor systemBlueColor];
-    } else {
-        // Fallback for iOS 14 and below without using deprecated properties
-        // Create a container view to hold the image and text
-        UIView *buttonContentView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, 80, 30)];
-        
-        // Add icon image view
-        UIImageView *iconImageView = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"arrow.down.circle"]];
-        iconImageView.tintColor = [UIColor systemBlueColor];
-        iconImageView.translatesAutoresizingMaskIntoConstraints = NO;
-        iconImageView.contentMode = UIViewContentModeScaleAspectFit;
-        [buttonContentView addSubview:iconImageView];
-        
-        // Add text label
-        UILabel *textLabel = [[UILabel alloc] init];
-        textLabel.text = @"Files";
-        textLabel.font = [UIFont systemFontOfSize:16];
-        textLabel.textColor = [UIColor systemBlueColor];
-        textLabel.translatesAutoresizingMaskIntoConstraints = NO;
-        [buttonContentView addSubview:textLabel];
-        
-        // Set up constraints
-        [NSLayoutConstraint activateConstraints:@[
-            [iconImageView.leadingAnchor constraintEqualToAnchor:buttonContentView.leadingAnchor],
-            [iconImageView.centerYAnchor constraintEqualToAnchor:buttonContentView.centerYAnchor],
-            [iconImageView.widthAnchor constraintEqualToConstant:20],
-            [iconImageView.heightAnchor constraintEqualToConstant:20],
-            
-            [textLabel.leadingAnchor constraintEqualToAnchor:iconImageView.trailingAnchor constant:4],
-            [textLabel.trailingAnchor constraintEqualToAnchor:buttonContentView.trailingAnchor],
-            [textLabel.centerYAnchor constraintEqualToAnchor:buttonContentView.centerYAnchor]
-        ]];
-        
-
-    }
-        
     
     // Initialize managers
     self.manager = [IdentifierManager sharedManager];

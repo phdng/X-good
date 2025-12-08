@@ -197,33 +197,33 @@
         BOOL centralInfoExists = [_fileManager fileExistsAtPath:centralInfoPath];
         
         // Check if profile "0" directory exists
-        NSString *profileZeroPath = [_profilesDirectory stringByAppendingPathComponent:@"0"];
-        BOOL profileZeroExists = [_fileManager fileExistsAtPath:profileZeroPath isDirectory:NULL];
+        // NSString *profileZeroPath = [_profilesDirectory stringByAppendingPathComponent:@"0"];
+        // BOOL profileZeroExists = [_fileManager fileExistsAtPath:profileZeroPath isDirectory:NULL];
         
         // If current_profile_info.plist doesn't exist or profile "0" doesn't exist, we need to create them
-        if (!centralInfoExists || !profileZeroExists) {
-            NSLog(@"[WeaponX] ⚠️ No current profile info or profile '0' found, creating...");
-            // We'll create profile "0" immediately rather than waiting for loadProfiles completion
-            [self createProfileZeroImmediately];
+        // if (!centralInfoExists || !profileZeroExists) {
+        //     NSLog(@"[WeaponX] ⚠️ No current profile info or profile '0' found, creating...");
+        //     // We'll create profile "0" immediately rather than waiting for loadProfiles completion
+        //     [self createProfileZeroImmediately];
             
-            // Create current_profile_info.plist pointing to profile "0"
-            NSDate *now = [NSDate date];
-            NSDictionary *profileInfo = @{
-                @"ProfileId": @"0",
-                @"ProfileName": @"Default",
-                @"Description": @"Default Profile",
-                @"LastSelected": now
-            };
-            [profileInfo writeToFile:centralInfoPath atomically:YES];
-            [_fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:centralInfoPath error:nil];
+        //     // Create current_profile_info.plist pointing to profile "0"
+        //     NSDate *now = [NSDate date];
+        //     NSDictionary *profileInfo = @{
+        //         @"ProfileId": @"0",
+        //         @"ProfileName": @"Default",
+        //         @"Description": @"Default Profile",
+        //         @"LastSelected": now
+        //     };
+        //     [profileInfo writeToFile:centralInfoPath atomically:YES];
+        //     [_fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:centralInfoPath error:nil];
             
-            // Also write to active_profile_info.plist as a backup/legacy support
-            NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-            [profileInfo writeToFile:activeInfoPath atomically:YES];
-            [_fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:activeInfoPath error:nil];
+        //     // Also write to active_profile_info.plist as a backup/legacy support
+        //     NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+        //     [profileInfo writeToFile:activeInfoPath atomically:YES];
+        //     [_fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:activeInfoPath error:nil];
             
-            NSLog(@"[WeaponX] ✅ Created current_profile_info.plist with profile '0'");
-        }
+        //     NSLog(@"[WeaponX] ✅ Created current_profile_info.plist with profile '0'");
+        // }
         
         // Load profiles
         [self loadProfilesWithCompletion:^(BOOL success, NSError * _Nullable error) {
@@ -1530,65 +1530,65 @@
     NSLog(@"[WeaponX] ✅ Created and set profile '0' as the default profile");
 }
 
-// Immediate profile creation without waiting for loadProfiles
-- (void)createProfileZeroImmediately {
-    // Create profile directory
-    NSString *profileDir = [self.profilesDirectory stringByAppendingPathComponent:@"0"];
-    [self createDirectoryIfNeeded:profileDir];
+// // Immediate profile creation without waiting for loadProfiles
+// - (void)createProfileZeroImmediately {
+//     // Create profile directory
+//     NSString *profileDir = [self.profilesDirectory stringByAppendingPathComponent:@"0"];
+//     [self createDirectoryIfNeeded:profileDir];
     
-    // Create identity directory for device IDs
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
-    [self createDirectoryIfNeeded:identityDir];
-    [self.fileManager setAttributes:@{NSFilePosixPermissions: @0755} ofItemAtPath:identityDir error:nil];
+//     // Create identity directory for device IDs
+//     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
+//     [self createDirectoryIfNeeded:identityDir];
+//     [self.fileManager setAttributes:@{NSFilePosixPermissions: @0755} ofItemAtPath:identityDir error:nil];
     
-    // Create profile object for internal use
-    Profile *defaultProfile = [[Profile alloc] initWithName:@"Default" iconName:@"default_profile"];
-    [defaultProfile setValue:@"0" forKey:@"profileId"];
+//     // Create profile object for internal use
+//     Profile *defaultProfile = [[Profile alloc] initWithName:@"Default" iconName:@"default_profile"];
+//     [defaultProfile setValue:@"0" forKey:@"profileId"];
     
-    NSDate *now = [NSDate date];
-    defaultProfile.createdAt = now;
-    defaultProfile.lastUsed = now;
+//     NSDate *now = [NSDate date];
+//     defaultProfile.createdAt = now;
+//     defaultProfile.lastUsed = now;
     
-    // Create appdata.plist
-    NSString *appDataInfoPath = [profileDir stringByAppendingPathComponent:@"appdata.plist"];
-    NSDictionary *appDataInfoDict = @{
-        @"ProfileName": @"Default",
-        @"ProfileID": @"0",
-        @"ShortDescription": @"Default Profile",
-        @"Creation": now,
-        @"LastUsed": now
-    };
-    [appDataInfoDict writeToFile:appDataInfoPath atomically:YES];
-    [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:appDataInfoPath error:nil];
+//     // Create appdata.plist
+//     NSString *appDataInfoPath = [profileDir stringByAppendingPathComponent:@"appdata.plist"];
+//     NSDictionary *appDataInfoDict = @{
+//         @"ProfileName": @"Default",
+//         @"ProfileID": @"0",
+//         @"ShortDescription": @"Default Profile",
+//         @"Creation": now,
+//         @"LastUsed": now
+//     };
+//     [appDataInfoDict writeToFile:appDataInfoPath atomically:YES];
+//     [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:appDataInfoPath error:nil];
     
-    // Create identifiers.plist
-    NSString *identifiersPath = [profileDir stringByAppendingPathComponent:@"identifiers.plist"];
-    NSDictionary *identifiersDict = @{
-        @"DisplayName": @"Default",
-        @"Description": @"Default Profile",
-        @"Identifier": @"0"
-    };
-    [identifiersDict writeToFile:identifiersPath atomically:YES];
-    [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:identifiersPath error:nil];
+//     // Create identifiers.plist
+//     NSString *identifiersPath = [profileDir stringByAppendingPathComponent:@"identifiers.plist"];
+//     NSDictionary *identifiersDict = @{
+//         @"DisplayName": @"Default",
+//         @"Description": @"Default Profile",
+//         @"Identifier": @"0"
+//     };
+//     [identifiersDict writeToFile:identifiersPath atomically:YES];
+//     [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:identifiersPath error:nil];
     
-    // Create scoped-apps.plist
-    NSString *scopedAppsPath = [profileDir stringByAppendingPathComponent:@"scoped-apps.plist"];
-    NSDictionary *scopedAppsDict = @{
-        @"ProfileName": @"Default",
-        @"ProfileDescription": @"Default Profile",
-        @"Apps": @[]
-    };
-    [scopedAppsDict writeToFile:scopedAppsPath atomically:YES];
-    [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:scopedAppsPath error:nil];
+//     // Create scoped-apps.plist
+//     NSString *scopedAppsPath = [profileDir stringByAppendingPathComponent:@"scoped-apps.plist"];
+//     NSDictionary *scopedAppsDict = @{
+//         @"ProfileName": @"Default",
+//         @"ProfileDescription": @"Default Profile",
+//         @"Apps": @[]
+//     };
+//     [scopedAppsDict writeToFile:scopedAppsPath atomically:YES];
+//     [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:scopedAppsPath error:nil];
     
-    // Create device_ids.plist in identity directory for immediate identifier storage
-    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-    NSDictionary *emptyDeviceIds = @{};
-    [emptyDeviceIds writeToFile:deviceIdsPath atomically:YES];
-    [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:deviceIdsPath error:nil];
+//     // Create device_ids.plist in identity directory for immediate identifier storage
+//     NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+//     NSDictionary *emptyDeviceIds = @{};
+//     [emptyDeviceIds writeToFile:deviceIdsPath atomically:YES];
+//     [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:deviceIdsPath error:nil];
     
-    NSLog(@"[WeaponX] ✅ Immediately created profile '0' directory structure");
-}
+//     NSLog(@"[WeaponX] ✅ Immediately created profile '0' directory structure");
+// }
 - (NSString *)getActiveProfileId {
     // First check the primary profile info file
     NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";

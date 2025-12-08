@@ -5,6 +5,7 @@
 #import <sys/wait.h>
 #import <objc/runtime.h>
 #import "AppScopeManager.h"
+#import "ActionManager.h"
 
 @interface SBSRelaunchAction : NSObject
 + (id)actionWithReason:(id)arg1 options:(unsigned)arg2 targetURL:(id)arg3;
@@ -225,18 +226,18 @@
     [containerView addSubview:buttonStackView];
     
     // Create kill button with soft minimalistic style
-    UIButton *killButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    UIButtonConfiguration *killConfig = [UIButtonConfiguration plainButtonConfiguration];
-    killConfig.title = @"一键新机";
-    killConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    killConfig.background.backgroundColor = [UIColor.systemRedColor colorWithAlphaComponent:0.15];
-    killConfig.baseForegroundColor = [UIColor systemRedColor];
-    killConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
-    killButton.configuration = killConfig;
-    // [killButton addTarget:self action:@selector(killEnabledApps) forControlEvents:UIControlEventTouchUpInside];
-    killButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    killButton.layer.cornerRadius = 10;
-    killButton.clipsToBounds = YES;
+    UIButton *newPhoneButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    UIButtonConfiguration *newPhoneBtnConfig = [UIButtonConfiguration plainButtonConfiguration];
+    newPhoneBtnConfig.title = @"一键新机";
+    newPhoneBtnConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+    newPhoneBtnConfig.background.backgroundColor = [UIColor.systemGreenColor colorWithAlphaComponent:0.15];
+    newPhoneBtnConfig.baseForegroundColor = [UIColor systemGreenColor];
+    newPhoneBtnConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
+    newPhoneButton.configuration = newPhoneBtnConfig;
+    [newPhoneButton addTarget:self action:@selector(newPhoneTap) forControlEvents:UIControlEventTouchUpInside];
+    newPhoneButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    newPhoneButton.layer.cornerRadius = 10;
+    newPhoneButton.clipsToBounds = YES;
     
     // Create respring button with soft minimalistic style
     UIButton *applyButton = [UIButton buttonWithType:UIButtonTypeSystem];
@@ -253,7 +254,7 @@
     applyButton.clipsToBounds = YES;
     
     // Add buttons to stack view
-    [buttonStackView addArrangedSubview:killButton];
+    [buttonStackView addArrangedSubview:newPhoneButton];
     [buttonStackView addArrangedSubview:applyButton];
     
     // Setup constraints
@@ -297,7 +298,12 @@
     
     [topController presentViewController:alert animated:YES completion:nil];
 }
+- (void)newPhoneTap{
+    // TODO 弹出加载框
+    [[ActionManager sharedManager] newPhone];
 
+    // TODO 关闭加载框
+}
 - (void)performRespring {
     NSLog(@"[BottomButtons] 🔄 Attempting to respring device");
     

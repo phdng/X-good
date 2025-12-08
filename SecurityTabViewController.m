@@ -12,8 +12,6 @@
 #import <MapKit/MapKit.h>
 
 
-
-
 @interface SecurityTabViewController () <UITextFieldDelegate>
 
 // Domain Blocking Properties
@@ -46,81 +44,6 @@
     return self;
 }
 
-- (NSString *)flagEmojiForCountryCode:(NSString *)countryCode {
-    if (!countryCode || countryCode.length != 2) {
-        PXLog(@"[WeaponX] Invalid country code for flag emoji: %@", countryCode);
-        return nil;
-    }
-    
-    // Convert country code to uppercase
-    countryCode = [countryCode uppercaseString];
-    
-    // Create array of country codes and corresponding emojis
-    NSDictionary *flagEmojis = @{
-        @"US": @"🇺🇸",
-        @"GB": @"🇬🇧",
-        @"CA": @"🇨🇦",
-        @"AU": @"🇦🇺",
-        @"IN": @"🇮🇳",
-        @"JP": @"🇯🇵",
-        @"DE": @"🇩🇪",
-        @"FR": @"🇫🇷",
-        @"IT": @"🇮🇹",
-        @"ES": @"🇪🇸",
-        @"BR": @"🇧🇷",
-        @"RU": @"🇷🇺",
-        @"CN": @"🇨🇳",
-        @"KR": @"🇰🇷",
-        @"ID": @"🇮🇩",
-        @"MX": @"🇲🇽",
-        @"NL": @"🇳🇱",
-        @"TR": @"🇹🇷",
-        @"SA": @"🇸🇦",
-        @"CH": @"🇨🇭",
-        @"SE": @"🇸🇪",
-        @"PL": @"🇵🇱",
-        @"BE": @"🇧🇪",
-        @"IR": @"🇮🇷",
-        @"NO": @"🇳🇴",
-        @"AT": @"🇦🇹",
-        @"IL": @"🇮🇱",
-        @"DK": @"🇩🇰",
-        @"SG": @"🇸🇬",
-        @"FI": @"🇫🇮",
-        @"NZ": @"🇳🇿",
-        @"MY": @"🇲🇾",
-        @"TH": @"🇹🇭",
-        @"AE": @"🇦🇪",
-        @"PH": @"🇵🇭",
-        @"IE": @"🇮🇪",
-        @"PT": @"🇵🇹",
-        @"GR": @"🇬🇷",
-        @"CZ": @"🇨🇿",
-        @"VN": @"🇻🇳",
-        @"RO": @"🇷🇴",
-        @"ZA": @"🇿🇦",
-        @"UA": @"🇺🇦",
-        @"HK": @"🇭🇰",
-        @"HU": @"🇭🇺",
-        @"BG": @"🇧🇬",
-        @"HR": @"🇭🇷",
-        @"LT": @"🇱🇹",
-        @"EE": @"🇪🇪",
-        @"SK": @"🇸🇰"
-    };
-    
-    NSString *flag = flagEmojis[countryCode];
-    if (!flag) {
-        PXLog(@"[WeaponX] No predefined flag emoji for country code: %@", countryCode);
-        // Fallback to dynamic generation for unsupported country codes
-        flag = [[NSString alloc] initWithFormat:@"%C%C",
-                (unichar)(0x1F1E6 + [countryCode characterAtIndex:0] - 'A'),
-                (unichar)(0x1F1E6 + [countryCode characterAtIndex:1] - 'A')];
-    }
-    
-    PXLog(@"[WeaponX] Generated flag emoji for %@: %@", countryCode, flag);
-    return flag;
-}
 
 
 - (void)refreshPinnedCoordinates {

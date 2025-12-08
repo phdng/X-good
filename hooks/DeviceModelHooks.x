@@ -18,6 +18,8 @@ static int (*orig_uname)(struct utsname *);
 static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 static CFTypeRef (*orig_IORegistryEntryCreateCFProperty)(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options);
 static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
+static CFTypeRef (*orig_MGCopyAnswer)(CFStringRef prop);
+
 
 
 #pragma mark - Helper Functions
@@ -417,10 +419,9 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
     return result;
 }
 
-// MGCopyAnswer hook for device model
-%hookf(NSString *, MGCopyAnswer, CFStringRef property) {
+CFTypeRef hook_MGCopyAnswer(CFStringRef property){
     if (!property) {
-        return %orig; // Handle null property case
+        return orig_MGCopyAnswer(property); // Handle null property case
     }
     
     NSString *propertyString = (__bridge NSString *)property;
@@ -459,20 +460,24 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
     BOOL isHWModelProperty = [hwModelProperties containsObject:propertyString];
     
     // Get the original value first for logging
-    NSString *originalValue = %orig;
-    
+    CFTypeRef originalValue = orig_MGCopyAnswer(property);
+    NSString *originalValueString = nil;
+
+    if (originalValue && CFGetTypeID(originalValue) == CFStringGetTypeID()) {
+        originalValueString = (__bridge NSString *)originalValue;
+    }
     // Handle device model properties
     if (isModelProperty) {
         // Log regardless of whether spoofing is enabled
         PXLog(@"[model] MGCopyAnswer(%@) called by app: %@ - original value: %@", 
-            propertyString, currentBundleID, originalValue ?: @"<nil>");
+            propertyString, currentBundleID, originalValueString ?: @"<nil>");
         
         NSString *spoofedModel = getSpoofedDeviceModel();
         
         if (spoofedModel.length > 0) {
             PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                propertyString, originalValue ?: @"<nil>", spoofedModel, currentBundleID);
-            return [spoofedModel copy];
+                propertyString, originalValueString ?: @"<nil>", spoofedModel, currentBundleID);
+            return (__bridge_retained CFTypeRef)spoofedModel;
         } else {
             PXLog(@"[model] WARNING: getSpoofedDeviceModel returned empty for MGCopyAnswer property: %@", 
                 propertyString);
@@ -481,27 +486,27 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
     // Handle board ID properties
     else if (isBoardIDProperty) {
         PXLog(@"[model] MGCopyAnswer BoardID(%@) called by app: %@ - original value: %@", 
-            propertyString, currentBundleID, originalValue ?: @"<nil>");
+            propertyString, currentBundleID, originalValueString ?: @"<nil>");
         
         NSString *spoofedBoardID = getSpoofedBoardID();
         
         if (spoofedBoardID.length > 0) {
             PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                propertyString, originalValue ?: @"<nil>", spoofedBoardID, currentBundleID);
-            return [spoofedBoardID copy];
+                propertyString, originalValueString ?: @"<nil>", spoofedBoardID, currentBundleID);
+            return (__bridge_retained CFTypeRef)spoofedBoardID;
         }
     }
     // Handle hw.model properties
     else if (isHWModelProperty) {
         PXLog(@"[model] MGCopyAnswer HWModel(%@) called by app: %@ - original value: %@", 
-            propertyString, currentBundleID, originalValue ?: @"<nil>");
+            propertyString, currentBundleID, originalValueString ?: @"<nil>");
         
         NSString *spoofedHWModel = getSpoofedHWModel();
         
         if (spoofedHWModel.length > 0) {
             PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                propertyString, originalValue ?: @"<nil>", spoofedHWModel, currentBundleID);
-            return [spoofedHWModel copy];
+                propertyString, originalValueString ?: @"<nil>", spoofedHWModel, currentBundleID);
+            return (__bridge_retained CFTypeRef)spoofedHWModel;
         }
     }
 
@@ -509,6 +514,7 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
     // For all other properties, pass through to the original implementation
     return originalValue;
 }
+
 
 // Hook for UIDevice methods - many apps use combinations of these
 %hook UIDevice
@@ -718,6 +724,18 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
         } @catch (NSException *e) {
             PXLog(@"[model] ERROR hooking sysctl(): %@", e);
         }
+        @try{
+            void *lib = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
+            void *MGCopyAnswer_addr = dlsym(lib, "MGCopyAnswer");
+            if(MGCopyAnswer_addr){
+                MSHookFunction(MGCopyAnswer_addr, (void *)hook_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
+            }else {
+                PXLog(@"[model] Could not find MGCopyAnswer");
+            }
+        }@catch (NSException *e) {
+            PXLog(@"[model] ERROR hooking MGCopyAnswer(): %@", e);
+        }
+
         
         // Look up IOKit functions dynamically
         void *IOKitHandle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);

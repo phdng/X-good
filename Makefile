@@ -1,8 +1,6 @@
-# TARGET := iphone:clang:16.5:15.0
 ARCHS = arm64
-# ROOTLESS = 1
-LOGOS_DEFAULT_GENERATOR = internal
-INSTALL_TARGET_PROCESSES = SpringBoard ProjectX
+# LOGOS_DEFAULT_GENERATOR = internal
+INSTALL_TARGET_PROCESSES = SpringBoard
 DEBUG=0
 FINALPACKAGE=1
 
@@ -23,18 +21,11 @@ else
 	TARGET = iphone:clang:16.5:12.0
 endif
 
-# Ensure rootless paths
-THEOS_PACKAGE_SCHEME = rootless
-THEOS_PACKAGE_INSTALL_PREFIX = /var/jb
-
-# Note: This project now includes a Notification Service Extension for rich push notifications
-# The extension needs to be manually added in Xcode after installing this package
-# See /NotificationServiceExtension/README.md for integration instructions
-
 include $(THEOS)/makefiles/common.mk
 
 TWEAK_NAME = ProjectXTweak
 APPLICATION_NAME = ProjectX
+TOOL_NAME = ProjectXDaemon
 
 # Tweak files
 ProjectXTweak_FILES = $(wildcard hooks/*.x) $(wildcard common/*.m) $(wildcard hooks/*.m)
@@ -42,27 +33,30 @@ ProjectXTweak_CFLAGS = -fobjc-arc -Wno-error=unused-variable -Wno-error=unused-f
 ProjectXTweak_FRAMEWORKS = UIKit Foundation AdSupport UserNotifications IOKit Security CoreLocation CoreFoundation Network CoreTelephony SystemConfiguration WebKit SafariServices
 ProjectXTweak_PRIVATE_FRAMEWORKS = MobileCoreServices AppSupport SpringBoardServices
 ProjectXTweak_INSTALL_PATH = /Library/MobileSubstrate/DynamicLibraries
-# ProjectXTweak_LDFLAGS = -F$(THEOS)/vendor/lib -framework CydiaSubstrate
+
+
 
 # App files
-ProjectX_FILES = $(filter-out WeaponXDaemon.m , $(wildcard *.m)) $(wildcard common/*.m)
+ProjectX_FILES = $(wildcard *.m) $(wildcard common/*.m)
 ProjectX_RESOURCE_DIRS = Assets.xcassets
 ProjectX_RESOURCE_FILES = Info.plist Icon.png LaunchScreen.storyboard
 ProjectX_PRIVATE_FRAMEWORKS = FrontBoardServices SpringBoardServices BackBoardServices StoreKitUI MobileCoreServices
-ProjectX_LDFLAGS = -framework CoreData -framework UIKit -framework Foundation -rpath /var/jb/usr/lib
+# ProjectX_LDFLAGS = -framework CoreData -framework UIKit -framework Foundation 
 ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit IOKit Security CoreLocation CoreLocationUI
 ProjectX_CODESIGN_FLAGS = -Sent.plist
 ProjectX_CFLAGS = -fobjc-arc -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1  -I./common
 ProjectX_EXTRA_FRAMEWORKS = AltList
 
-
 # Ensure app is installed to the correct location with proper permissions
 ProjectX_INSTALL_PATH = /Applications
-ProjectX_APPLICATION_MODE = 0755
 
-# Make sure both tweak and application are built
-all::
-	@echo "Building tweak, application, and daemon..."
+ProjectXDaemon_FILES = $(wildcard daemon/*.m)
+ProjectXDaemon_CFLAGS = -fobjc-arc
+ProjectXDaemon_FRAMEWORKS = Foundation IOKit
+ProjectXDaemon_INSTALL_PATH = /usr/local/bin
+ProjectXDaemon_CODESIGN_FLAGS = -Sent.plist
+ProjectXDaemon_LDFLAGS = -framework IOKit
+ProjectXDaemon_EXTRA_FRAMEWORKS = GCDWebServers
 
 include $(THEOS_MAKE_PATH)/application.mk
 include $(THEOS_MAKE_PATH)/tweak.mk

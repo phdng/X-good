@@ -455,7 +455,7 @@
     
     // "Profiles" text - centered in the title view
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(50, 0, 100, 44)];
-    titleLabel.text = @"Profiles";
+    titleLabel.text = @"备份id";
     titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
     titleLabel.textColor = [UIColor labelColor];
     titleLabel.textAlignment = NSTextAlignmentCenter;
@@ -475,7 +475,7 @@
     
     // "Current" text (top line)
     UILabel *currentLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 2, 40, 14)];
-    currentLabel.text = @"Current";
+    currentLabel.text = @"当前";
     currentLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightRegular];
     currentLabel.textColor = [UIColor secondaryLabelColor];
     currentLabel.textAlignment = NSTextAlignmentRight;
@@ -701,13 +701,13 @@
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0) {
-        return @"Device Storage";
+        return @"存储空间";
     } else if (section == 1) {
-        return @"SEARCH PROFILES";
+        return @"搜索备份";
     } else if (section == 2) {
-        return @"PROFILE ACTIONS";
+        return @"操作";
     } else {
-        return @"Available Profiles";
+        return @"备份";
     }
 }
 

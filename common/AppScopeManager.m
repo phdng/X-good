@@ -1,11 +1,11 @@
 #import "AppScopeManager.h"
-
+#import <roothide.h>
 @interface AppScopeManager()
 @property (nonatomic, strong) NSMutableSet *scopedApps;
-
 @end
 
 @implementation AppScopeManager
+
 + (instancetype)sharedManager {
     static AppScopeManager *sharedManager = nil;
     static dispatch_once_t onceToken;
@@ -14,68 +14,110 @@
     });
     return sharedManager;
 }
+
 - (instancetype)init {
     self = [super init];
-    NSMutableSet *apps =  [self loadPreferences];
+    NSMutableSet *apps = [self loadPreferences];
     if(apps){
         _scopedApps = apps;
-    }else{
-        // 初始化scopedApps为空数组
+    } else {
+        // 初始化scopedApps为空集合
         _scopedApps = [NSMutableSet set];
     }
-    // [IdentifierManager sharedManager];
     return self;
 }
-- (NSString *)preferencesFilePath{
-    return @"/var/jb/var/mobile/Library/Preferences/ProjectXScopes.plist";
+
+- (NSString *)preferencesFilePath {
+    return jbroot(@"/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist");
 }
 
-- (BOOL)isScope{
+- (BOOL)isScope {
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if (!bundleID) return NO;
-    // 是自己直接返回 不是则判断是否选中
+    
+    // 是自己直接返回
     if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
         return NO;
     }
+    
     // Check each scoped app's extension pattern
     if ([_scopedApps containsObject:bundleID]) {
-
-        // PXLog(@"[WeaponX] Bundle ID %@ matches extension pattern %@ from app %@", bundleID, extensionPattern, scopedBundleID);
         return YES;
     }
     return NO;
 }
 
-- (NSMutableSet *)loadPreferences
-{
+- (NSMutableSet *)loadPreferences {
     NSString *filePath = [self preferencesFilePath];
+    
     // 检查plist文件是否存在
     if ([[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
-        NSLog(@"file is exit");
-        // 从plist文件读取数据（返回的是NSArray）
-        NSArray *savedArray = [NSArray arrayWithContentsOfFile:filePath];
-        NSLog(@"saveArray:%@",savedArray);
-        if (savedArray && [savedArray isKindOfClass:[NSArray class]]) {
-            // 将NSArray转换为NSMutableSet
-            NSLog(@"res:%@",[NSMutableSet setWithArray:savedArray]);
-            return [NSMutableSet setWithArray:savedArray];
+        NSLog(@"file exists");
+        
+        // 从plist文件读取数据（现在是一个字典）
+        NSDictionary *preferencesDict = [NSDictionary dictionaryWithContentsOfFile:filePath];
+        NSLog(@"preferencesDict: %@", preferencesDict);
+        
+        if (preferencesDict && [preferencesDict isKindOfClass:[NSDictionary class]]) {
+            // 从嵌套结构中获取Bundles数组
+            NSDictionary *filterDict = preferencesDict[@"Filter"];
+            if (filterDict && [filterDict isKindOfClass:[NSDictionary class]]) {
+                NSArray *bundlesArray = filterDict[@"Bundles"];
+                if (bundlesArray && [bundlesArray isKindOfClass:[NSArray class]]) {
+                    // 将NSArray转换为NSMutableSet
+                    NSMutableSet *resultSet = [NSMutableSet setWithArray:bundlesArray];
+                    NSLog(@"loaded bundles: %@", resultSet);
+                    return resultSet;
+                }
+            }
         }
     }
+    
     NSLog(@"[return] nil");
     return nil;
 }
-- (void)savePreferences:(NSMutableSet *)scopedApps
-{
+
+- (void)savePreferences:(NSMutableSet *)scopedApps {
     NSString *filePath = [self preferencesFilePath];
     _scopedApps = scopedApps;
-    // 将NSSet转换为NSArray并保存到plist文件
-
-    NSArray *applicationsArray = [_scopedApps allObjects];
-    BOOL success = [applicationsArray writeToFile:filePath atomically:YES];
+    
+    // 构建嵌套的字典结构
+    NSDictionary *preferencesDict = @{
+        @"Filter": @{
+            @"Bundles": [_scopedApps allObjects] ?: @[]
+        }
+    };
+    
+    BOOL success = [preferencesDict writeToFile:filePath atomically:YES];
     
     if (!success) {
         NSLog(@"Failed to save preferences to plist file: %@", filePath);
+    } else {
+        NSLog(@"Preferences saved successfully: %@", preferencesDict);
     }
+}
+
+// 为了兼容性，可以添加一个转换旧格式的方法
+- (void)migrateOldFormatIfNeeded {
+    NSString *filePath = [self preferencesFilePath];
+    
+    if ([[NSFileManager defaultManager] fileExistsAtPath:filePath]) {
+        // 尝试读取为数组（旧格式）
+        NSArray *oldArray = [NSArray arrayWithContentsOfFile:filePath];
+        
+        if (oldArray && [oldArray isKindOfClass:[NSArray class]]) {
+            NSLog(@"Migrating old format to new format");
+            // 转换为新格式并保存
+            _scopedApps = [NSMutableSet setWithArray:oldArray];
+            [self savePreferences:_scopedApps];
+            NSLog(@"Migration completed");
+        }
+    }
+}
+
+// 在初始化后调用迁移方法
+- (void)initializeWithMigration {
+    [self migrateOldFormatIfNeeded];
 }
 
 @end
