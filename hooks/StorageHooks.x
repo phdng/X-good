@@ -1,5 +1,4 @@
 #import "ProjectX.h"
-#import "AppScopeManager.h"
 #import "StorageManager.h"
 #import "ProjectXLogging.h"
 #import <Foundation/Foundation.h>
@@ -768,13 +767,6 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 %ctor {
     @autoreleasepool {
         @try {
-            // CRITICAL: Only install hooks if this app is actually scoped
-            if (!IsScope()) {
-                // App is NOT scoped - no hooks, no interference, no crashes
-                PXLog(@"[StorageHooks] App is not scoped, skipping hook installation");
-                return;
-            }
-            
             PXLog(@"[StorageHooks] App is scoped, setting up storage hooks");
             
             // Hook statfs

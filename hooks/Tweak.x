@@ -1,6 +1,5 @@
 #import "ProjectX.h"
 #import "IdentifierManager.h"
-#import "AppScopeManager.h"
 #import <AdSupport/ASIdentifierManager.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
@@ -1006,10 +1005,6 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
         IdentifierManager *manager = [IdentifierManager sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        // Skip spoofing for system processes or if application isn't enabled
-        if (!IsScope()) {
-            return orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
-        }
         
         // Convert CoreFoundation key to NSString for easier handling
         NSString *keyString = (__bridge NSString *)key;
@@ -1093,11 +1088,8 @@ static char* hook_GSSystemGetSerialNo(void) {
 }
 
 // Constructor
-%ctor {
-    if(!IsScope()) return;
-    
+%ctor {    
     PXLog(@"ProjectX tweak initializing...");
-
 
     // Detect iOS version
     NSOperatingSystemVersion osVersion = [[NSProcessInfo processInfo] operatingSystemVersion];

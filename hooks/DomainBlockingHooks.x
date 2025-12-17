@@ -8,7 +8,6 @@
 #import <WebKit/WebKit.h>
 #import <SafariServices/SafariServices.h>
 #import "ProjectXLogging.h"
-#import "AppScopeManager.h"
 #include <dlfcn.h>
 
 
@@ -514,11 +513,6 @@ static int hooked_getnameinfo(const struct sockaddr *sa, socklen_t salen, char *
         
         // TEMPORARY DEBUG
         NSLog(@"[DomainBlocking] Constructor called");
-        if (!IsScope()) {
-            NSLog(@"[DomainBlocking] Not a scoped app - skipping hooks");
-            // Not a scoped app - no need to initialize hooks
-            return;
-        }
         // OPTIMIZATION: Check if domain blocking is globally enabled before expensive initialization
         DomainBlockingSettings *settings = [DomainBlockingSettings sharedSettings];
         NSLog(@"[DomainBlocking] Settings loaded, enabled: %@", settings.isEnabled ? @"YES" : @"NO");

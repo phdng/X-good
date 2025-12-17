@@ -1,11 +1,11 @@
 #import "AppTabViewController.h"
 #import "AppTabViewController.h"
-#import "AppScopeManager.h"
+#import "DaemonApiManager.h"
 
 @implementation AppTabViewController
 - (void)loadPreferences
 {
-    _selectedApplications= [[AppScopeManager sharedManager] loadPreferences];
+    _selectedApplications = [[DaemonApiManager sharedManager] getScopeApps];
     if(!_selectedApplications){
         [super loadPreferences];
     }
@@ -14,7 +14,7 @@
 
 - (void)savePreferences
 {
-    [[AppScopeManager sharedManager] savePreferences:_selectedApplications];
+    [[DaemonApiManager sharedManager] saveScopeApps:_selectedApplications];
 }
 
 @end 

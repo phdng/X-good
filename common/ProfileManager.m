@@ -3,7 +3,7 @@
 #import "ContainerManager.h"
 #import <spawn.h>
 #import <sys/wait.h>
-#import "AppScopeManager.h"
+#import "IdentifierManager.h"
 
 // Forward declaration for app termination
 @interface BottomButtons : NSObject

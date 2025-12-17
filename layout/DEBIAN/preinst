@@ -5,16 +5,14 @@
 # Detect jailbreak type
 if [ -d "/var/jb" ]; then
     JBPREFIX="/var/jb"
+    launchctl bootout system /var/jb/Library/LaunchDaemons/wangmc.projectx.plist
 elif [ -d "/var/LIB" ]; then
     JBPREFIX="/var/LIB"
 else
     JBPREFIX=""
+    launchctl bootout system /Library/LaunchDaemons/wangmc.projectx.plist
 fi
 
-# Create ElleKit directory if needed
-mkdir -p ${JBPREFIX}/Library/ElleKit/DynamicLibraries 2>/dev/null || true
 
-# For backwards compatibility
-mkdir -p ${JBPREFIX}/Library/MobileSubstrate/DynamicLibraries 2>/dev/null || true
 
 exit 0 

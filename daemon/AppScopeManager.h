@@ -1,5 +1,4 @@
 #import <Foundation/Foundation.h>
-#import "IdentifierManager.h"
 
 #define IsScope() [[AppScopeManager sharedManager] isScope]
 

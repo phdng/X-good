@@ -3,7 +3,6 @@
 #import <WebKit/WebKit.h>
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
-#import "AppScopeManager.h"
 
 // Cache for bundle decisions
 static NSMutableDictionary *cachedBundleDecisions = nil;
@@ -602,10 +601,6 @@ static void refreshSettings(CFNotificationCenterRef center, void *observer, CFSt
 %ctor {
     @autoreleasepool {
         PXLog(@"[CanvasFingerprint] Initializing Canvas Fingerprint Protection hooks");
-        if (!IsScope()) {
-            PXLog(@"[CanvasFingerprint] App is not scoped, skipping hook installation");
-            return;
-        }
         // Initialize caches
         cachedBundleDecisions = [NSMutableDictionary dictionary];
         noiseSeedCache = [NSMutableDictionary dictionary];

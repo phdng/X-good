@@ -2,7 +2,6 @@
 #import <objc/runtime.h>
 #import <substrate.h>
 #import "BatteryManager.h"
-#import "AppScopeManager.h"
 #import "ProfileManager.h"
 
 // Helper: get battery level from profile battery_info.plist
@@ -46,7 +45,6 @@ static NSInteger hook_batteryState(UIDevice *self, SEL _cmd) {
 
 %ctor {
     @autoreleasepool {
-        if(!IsScope()) return;
         Class deviceClass = objc_getClass("UIDevice");
         if (deviceClass) {
             MSHookMessageEx(deviceClass, @selector(batteryLevel), (IMP)hook_batteryLevel, (IMP *)&orig_batteryLevel);

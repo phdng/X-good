@@ -10,9 +10,11 @@ echo "===================================="
 if [ -d /var/jb ]; then
     JBPREFIX="/var/jb"
     echo "✅ Rootless jailbreak detected, using prefix: $JBPREFIX"
+    launchctl load /var/jb/Library/LaunchDaemons/wangmc.projectx.plist 
 else
     JBPREFIX=""
     echo "✅ Traditional jailbreak detected, using no prefix"
+    launchctl load /Library/LaunchDaemons/wangmc.projectx.plist 
 fi
 
 # Create required directories with proper permissions

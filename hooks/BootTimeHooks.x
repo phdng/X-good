@@ -11,7 +11,6 @@
 #import <substrate.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
-#import "AppScopeManager.h"
 
 // Define the boot time structure for sysctl calls
 struct timeval_boot {
@@ -250,7 +249,7 @@ static void installSystemCallHooks(void) {
     @autoreleasepool {
         @try {
 
-            if (!IsScope() || !isBootTimeOrUptimeEnabled()) {
+            if (!isBootTimeOrUptimeEnabled()) {
                 // App is NOT scoped - no hooks, no interference, no crashes
                 return;
             }

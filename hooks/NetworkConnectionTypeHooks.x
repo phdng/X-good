@@ -12,7 +12,6 @@
 #import <arpa/inet.h>
 #import "NetworkManager.h"
 #import "ProfileManager.h"
-#import "AppScopeManager.h"
 #include <dlfcn.h>
 
 
@@ -927,127 +926,123 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
         
         PXLog(@"[NetworkHook] Initializing network connection type hooks");
         
-        // Only initialize hooks if this is a scoped app
-        if (IsScope()) {
-            // Initialize CoreTelephony hooks
-            %init;
-            
-            // Initialize Network.framework hooks if available
-            Class NWPathClass = NSClassFromString(@"NWPath");
-            if (NWPathClass) {
-                %init(NetworkFrameworkHooks);
-                PXLog(@"[NetworkHook] Successfully initialized Network.framework hooks");
+        // Initialize CoreTelephony hooks
+        %init;
+        
+        // Initialize Network.framework hooks if available
+        Class NWPathClass = NSClassFromString(@"NWPath");
+        if (NWPathClass) {
+            %init(NetworkFrameworkHooks);
+            PXLog(@"[NetworkHook] Successfully initialized Network.framework hooks");
+        }
+        
+        // Setup the SCNetworkReachabilityGetFlags hook
+        void *SCNetworkReachabilityGetFlagsPtr = dlsym(RTLD_DEFAULT, "SCNetworkReachabilityGetFlags");
+        if (SCNetworkReachabilityGetFlagsPtr) {
+            // Use ElleKit for hooking (preferred for iOS 15+)
+            MSHookFunction(SCNetworkReachabilityGetFlagsPtr, 
+                    (void *)hooked_SCNetworkReachabilityGetFlags, 
+                    (void **)&original_SCNetworkReachabilityGetFlags);
+            PXLog(@"[NetworkHook] Successfully hooked SCNetworkReachabilityGetFlags");
+        } else {
+            PXLog(@"[NetworkHook] ERROR: Could not find SCNetworkReachabilityGetFlags function!");
+        }
+        
+        // Enable getifaddrs hook for local IP spoofing
+        void *getifaddrsPtr = dlsym(RTLD_DEFAULT, "getifaddrs");
+        if (getifaddrsPtr) {
+            MSHookFunction(getifaddrsPtr, (void *)hooked_getifaddrs, (void **)&original_getifaddrs);
+            PXLog(@"[NetworkHook] Successfully hooked getifaddrs for local IP spoofing");
+        } else {
+            PXLog(@"[NetworkHook] ERROR: Could not find getifaddrs function!");
+        }
+        
+        // Note: We don't hook CNCopySupportedInterfaces or CNCopyCurrentNetworkInfo
+        // as they are already handled by WiFiHook.x for SSID/BSSID spoofing
+        
+        // Register for notification when settings change
+        CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+        CFNotificationCenterAddObserver(darwinCenter,
+                                        NULL,
+                                        networkSettingsChanged,
+                                        CFSTR("com.hydra.projectx.networkConnectionTypeChanged"),
+                                        NULL,
+                                        CFNotificationSuspensionBehaviorDeliverImmediately);
+        
+        // Register for notification when ISO country code changes
+        CFNotificationCenterAddObserver(darwinCenter,
+                                        NULL,
+                                        isoCountryCodeChanged,
+                                        CFSTR("com.hydra.projectx.networkISOCountryCodeChanged"),
+                                        NULL,
+                                        CFNotificationSuspensionBehaviorDeliverImmediately);
+        
+        // Register for notification when carrier details change
+        CFNotificationCenterAddObserver(darwinCenter,
+                                        NULL,
+                                        carrierDetailsChanged,
+                                        CFSTR("com.hydra.projectx.carrierDetailsChanged"),
+                                        NULL,
+                                        CFNotificationSuspensionBehaviorDeliverImmediately);
+        
+        // Register for notification when signal strength settings change
+        CFNotificationCenterAddObserver(darwinCenter,
+                                        NULL,
+                                        signalStrengthSettingsChanged,
+                                        CFSTR("com.hydra.projectx.signalStrengthSettingsChanged"),
+                                        NULL,
+                                        CFNotificationSuspensionBehaviorDeliverImmediately);
+        
+        // Log initial state
+        NetworkConnectionType initialType = getNetworkConnectionType();
+        if (initialType != -1) {
+            NSString *connectionName;
+            switch (initialType) {
+                case NetworkConnectionTypeNone:
+                    connectionName = @"None";
+                    break;
+                case NetworkConnectionTypeWiFi:
+                    connectionName = @"WiFi";
+                    break;
+                case NetworkConnectionTypeCellular:
+                    connectionName = @"Cellular";
+                    break;
+                case NetworkConnectionTypeAuto:
+                    connectionName = @"Auto";
+                    break;
+                default:
+                    connectionName = @"Unknown";
+                    break;
             }
             
-            // Setup the SCNetworkReachabilityGetFlags hook
-            void *SCNetworkReachabilityGetFlagsPtr = dlsym(RTLD_DEFAULT, "SCNetworkReachabilityGetFlags");
-            if (SCNetworkReachabilityGetFlagsPtr) {
-                // Use ElleKit for hooking (preferred for iOS 15+)
-                MSHookFunction(SCNetworkReachabilityGetFlagsPtr, 
-                       (void *)hooked_SCNetworkReachabilityGetFlags, 
-                       (void **)&original_SCNetworkReachabilityGetFlags);
-                PXLog(@"[NetworkHook] Successfully hooked SCNetworkReachabilityGetFlags");
+            if (initialType == NetworkConnectionTypeWiFi || 
+                (initialType == NetworkConnectionTypeAuto && shouldUseWiFiForAutoMode())) {
+                NSString *localIP = getProfileLocalIPAddress();
+                PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ (Local IP: %@) for scoped app", 
+                        connectionName, localIP);
+            } else if (initialType == NetworkConnectionTypeCellular ||
+                        (initialType == NetworkConnectionTypeAuto && !shouldUseWiFiForAutoMode())) {
+                NSString *isoCode = getCurrentISOCountryCode();
+                PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ (ISO: %@) for scoped app", 
+                        connectionName, isoCode);
             } else {
-                PXLog(@"[NetworkHook] ERROR: Could not find SCNetworkReachabilityGetFlags function!");
-            }
-            
-            // Enable getifaddrs hook for local IP spoofing
-            void *getifaddrsPtr = dlsym(RTLD_DEFAULT, "getifaddrs");
-            if (getifaddrsPtr) {
-                MSHookFunction(getifaddrsPtr, (void *)hooked_getifaddrs, (void **)&original_getifaddrs);
-                PXLog(@"[NetworkHook] Successfully hooked getifaddrs for local IP spoofing");
-            } else {
-                PXLog(@"[NetworkHook] ERROR: Could not find getifaddrs function!");
-            }
-            
-            // Note: We don't hook CNCopySupportedInterfaces or CNCopyCurrentNetworkInfo
-            // as they are already handled by WiFiHook.x for SSID/BSSID spoofing
-            
-            // Register for notification when settings change
-            CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-            CFNotificationCenterAddObserver(darwinCenter,
-                                           NULL,
-                                           networkSettingsChanged,
-                                           CFSTR("com.hydra.projectx.networkConnectionTypeChanged"),
-                                           NULL,
-                                           CFNotificationSuspensionBehaviorDeliverImmediately);
-            
-            // Register for notification when ISO country code changes
-            CFNotificationCenterAddObserver(darwinCenter,
-                                           NULL,
-                                           isoCountryCodeChanged,
-                                           CFSTR("com.hydra.projectx.networkISOCountryCodeChanged"),
-                                           NULL,
-                                           CFNotificationSuspensionBehaviorDeliverImmediately);
-            
-            // Register for notification when carrier details change
-            CFNotificationCenterAddObserver(darwinCenter,
-                                           NULL,
-                                           carrierDetailsChanged,
-                                           CFSTR("com.hydra.projectx.carrierDetailsChanged"),
-                                           NULL,
-                                           CFNotificationSuspensionBehaviorDeliverImmediately);
-            
-            // Register for notification when signal strength settings change
-            CFNotificationCenterAddObserver(darwinCenter,
-                                           NULL,
-                                           signalStrengthSettingsChanged,
-                                           CFSTR("com.hydra.projectx.signalStrengthSettingsChanged"),
-                                           NULL,
-                                           CFNotificationSuspensionBehaviorDeliverImmediately);
-            
-            // Log initial state
-            NetworkConnectionType initialType = getNetworkConnectionType();
-            if (initialType != -1) {
-                NSString *connectionName;
-                switch (initialType) {
-                    case NetworkConnectionTypeNone:
-                        connectionName = @"None";
-                        break;
-                    case NetworkConnectionTypeWiFi:
-                        connectionName = @"WiFi";
-                        break;
-                    case NetworkConnectionTypeCellular:
-                        connectionName = @"Cellular";
-                        break;
-                    case NetworkConnectionTypeAuto:
-                        connectionName = @"Auto";
-                        break;
-                    default:
-                        connectionName = @"Unknown";
-                        break;
-                }
-                
-                if (initialType == NetworkConnectionTypeWiFi || 
-                    (initialType == NetworkConnectionTypeAuto && shouldUseWiFiForAutoMode())) {
-                    NSString *localIP = getProfileLocalIPAddress();
-                    PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ (Local IP: %@) for scoped app", 
-                          connectionName, localIP);
-                } else if (initialType == NetworkConnectionTypeCellular ||
-                          (initialType == NetworkConnectionTypeAuto && !shouldUseWiFiForAutoMode())) {
-                    NSString *isoCode = getCurrentISOCountryCode();
-                    PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ (ISO: %@) for scoped app", 
-                          connectionName, isoCode);
-                } else {
-                    PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ for scoped app", 
-                          connectionName);
-                }
-            } else {
-                PXLog(@"[NetworkHook] Network connection type spoofing disabled");
-            }
-            
-            // Setup CNCopyCurrentNetworkInfo hook for WiFi signal strength
-            void *CNCopyCurrentNetworkInfoPtr = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
-            if (CNCopyCurrentNetworkInfoPtr) {
-                MSHookFunction(CNCopyCurrentNetworkInfoPtr,
-                      (void *)hooked_CNCopyCurrentNetworkInfo,
-                      (void **)&original_CNCopyCurrentNetworkInfo);
-                PXLog(@"[NetworkHook] Successfully hooked CNCopyCurrentNetworkInfo for WiFi signal strength spoofing");
-            } else {
-                PXLog(@"[NetworkHook] ERROR: Could not find CNCopyCurrentNetworkInfo function!");
+                PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ for scoped app", 
+                        connectionName);
             }
         } else {
-            PXLog(@"[NetworkHook] App is not scoped, network spoofing will not be applied");
+            PXLog(@"[NetworkHook] Network connection type spoofing disabled");
         }
+        
+        // Setup CNCopyCurrentNetworkInfo hook for WiFi signal strength
+        void *CNCopyCurrentNetworkInfoPtr = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
+        if (CNCopyCurrentNetworkInfoPtr) {
+            MSHookFunction(CNCopyCurrentNetworkInfoPtr,
+                    (void *)hooked_CNCopyCurrentNetworkInfo,
+                    (void **)&original_CNCopyCurrentNetworkInfo);
+            PXLog(@"[NetworkHook] Successfully hooked CNCopyCurrentNetworkInfo for WiFi signal strength spoofing");
+        } else {
+            PXLog(@"[NetworkHook] ERROR: Could not find CNCopyCurrentNetworkInfo function!");
+        }
+    
     }
 } 

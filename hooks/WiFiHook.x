@@ -11,7 +11,6 @@
 #import <ifaddrs.h>
 #import <net/if.h>
 #import "ProfileManager.h"
-#import "AppScopeManager.h"
 #import <substrate.h>
 
 // Forward declarations for private API methods
@@ -570,15 +569,7 @@ static void initializeHooks(void) {
     @autoreleasepool {
         @try {
             PXLog(@"[WiFiHook] Initializing WiFi hooks");
-            // CRITICAL: Only install hooks if this app is actually scoped
-            if (!IsScope()) {
-                // App is NOT scoped - no hooks, no interference, no crashes
-                PXLog(@"[WiFiHook] App is not scoped, skipping hook installation");
-                return;
-            }
-            
-            PXLog(@"[WiFiHook] App is scoped, setting up WiFi hooks");
-            
+                        
             // Initialize cache dictionaries
             cachedBundleDecisions = [NSMutableDictionary dictionary];
             

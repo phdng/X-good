@@ -1,6 +1,5 @@
 #import "ProjectX.h"
 #import "DeviceModelManager.h"
-#import "AppScopeManager.h"
 #import "ProfileManager.h"
 #import "ProjectXLogging.h"
 #import <Foundation/Foundation.h>
@@ -1699,14 +1698,11 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     @autoreleasepool {
         @try {
             PXLog(@"[DeviceSpec] Initializing device specifications spoofing hooks");
-            if(!IsScope()) return;
             
             // Always initialize caches
             deviceSpecsCache = [NSMutableDictionary dictionary];
             cachedBundleDecisions = [NSMutableDictionary dictionary];
             
-            
-
             PXLog(@"[DeviceSpec] App is scoped, installing device specification hooks");
             
             // Initialize memory hook function pointers for scoped apps only

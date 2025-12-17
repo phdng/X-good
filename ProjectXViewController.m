@@ -12,7 +12,7 @@
 #import <sys/wait.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
-#import "AppScopeManager.h"
+
 // Add missing methods via category
 @interface LSApplicationWorkspace (ProjectX)
 - (NSArray *)allInstalledApplications;

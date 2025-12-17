@@ -13,7 +13,7 @@
 #import <pthread.h>
 #import "ProfileManager.h"
 #import <substrate.h>
-#import "AppScopeManager.h"
+
 // Macro for iOS version checking
 #define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != NSOrderedAscending)
 
@@ -858,7 +858,6 @@ static void setupAdditionalSystemUUIDHooks() {
             NSString *executablePath = [[NSBundle mainBundle] executablePath];
             NSString *processName = [executablePath lastPathComponent];
             
-            if(!IsScope())return;
             // Perform a more thorough check for iPad-specific processes that might be causing issues
             UIDevice *device = [UIDevice currentDevice];
             BOOL isIPad = [device userInterfaceIdiom] == UIUserInterfaceIdiomPad;

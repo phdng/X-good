@@ -2,7 +2,6 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
-#import "AppScopeManager.h"
 #import "UserDefaultsUUIDManager.h"
 #import "ProfileManager.h"
 
@@ -405,7 +404,6 @@ static BOOL isUUIDKey(NSString *key) {
 %ctor {
     @autoreleasepool {
         // Skip for system processes
-        if(!IsScope()) return;      
         PXLog(@"[WeaponX] 🔍 UserDefaults hooks initialized");
         %init;
     }

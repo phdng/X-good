@@ -4,7 +4,6 @@
 #import <spawn.h>
 #import <sys/wait.h>
 #import <objc/runtime.h>
-#import "AppScopeManager.h"
 #import "ActionManager.h"
 
 @interface SBSRelaunchAction : NSObject
@@ -41,10 +40,6 @@
 #pragma mark - App Termination
 
 - (void)killAppViaExecutableName:(NSString *)bundleID {
-    if (!IsScope()) {
-        NSLog(@"[BottomButtons] Skipping kill for disabled app: %@", bundleID);
-        return;
-    }
     
     // Generate haptic feedback
     UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];

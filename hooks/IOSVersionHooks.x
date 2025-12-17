@@ -9,7 +9,6 @@
 #import <dlfcn.h>
 #import <mach/mach_time.h>
 #import "IdentifierManager.h"
-#import "AppScopeManager.h"
 #import <substrate.h>
 
 
@@ -1035,12 +1034,6 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
 
 %ctor {
     @autoreleasepool {   
-        // CRITICAL: Only install hooks if this app is actually scoped
-        if (!IsScope()) {
-            // App is NOT scoped - no hooks, no interference, no crashes
-            NSLog(@"App is not scoped, skipping iOS version hook installation");
-            return;
-        }
         
         NSLog(@"App is scoped, installing iOS version hooks");
         

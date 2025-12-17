@@ -2,5 +2,10 @@
 
 # Extremely simplified prerm script to avoid dpkg interruption
 # Do nothing that might interrupt dpkg
+if [ -d /var/jb ]; then
+    JBPREFIX="/var/jb"
+else
+    JBPREFIX=""
+fi
 
 exit 0 

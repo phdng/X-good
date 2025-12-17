@@ -1,7 +1,6 @@
 #import "ProjectX.h"
 #import "DeviceModelManager.h"
 #import "IdentifierManager.h"
-#import "AppScopeManager.h"
 #import "ProfileManager.h"
 #import "ProjectXLogging.h"
 #import <Foundation/Foundation.h>
@@ -684,10 +683,6 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
     @autoreleasepool {
         PXLog(@"[model] Initializing device model spoofing hooks");
         
-        // CRITICAL SAFETY CHECK: Only initialize hooks if we can get a valid bundle ID
-        // This prevents hooks from running during early boot process or in system services
-        if(!IsScope()) return;
-
         
         // Test if we can retrieve a spoofed model before proceeding
         NSString *testModel = getSpoofedDeviceModel();

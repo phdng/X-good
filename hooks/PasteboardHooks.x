@@ -4,7 +4,7 @@
 #import "ProjectXLogging.h"
 #import "PasteboardUUIDManager.h"
 #import "ProfileManager.h"
-#import "AppScopeManager.h"
+
 // Global variables to track state
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSMutableDictionary *customChangeCountMap = nil; // Store custom change counts per app
@@ -557,9 +557,6 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @autoreleasepool {
         // Skip for system processes
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!IsScope()) {
-            return;
-        }
         
         
         PXLog(@"[WeaponX] 📋 Initialized PasteboardHooks for %@", bundleID);
