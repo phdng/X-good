@@ -55,7 +55,6 @@
 
 - (void)setupNetworkDataSpoofControl:(UIView *)contentView;
 - (void)setupNetworkConnectionTypeControl:(UIView *)contentView;
-- (void)setupCanvasFingerprintingControl:(UIView *)contentView;
 - (void)setupAlertChecksSection:(UIView *)contentView;
 
 @end

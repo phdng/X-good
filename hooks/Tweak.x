@@ -1,5 +1,3 @@
-#import "ProjectX.h"
-#import "IdentifierManager.h"
 #import <AdSupport/ASIdentifierManager.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
@@ -23,6 +21,7 @@
 #import <CoreGraphics/CoreGraphics.h>
 #import <CoreMotion/CoreMotion.h> // Import CoreMotion framework for sensor spoofing
 #import "LocationSpoofingManager.h" // Import location spoofing manager
+#import "DataManager.h"
 
 // Forward declarations for classes we need to hook
 @interface SBScreenshotManager : NSObject
@@ -1002,7 +1001,6 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
     @try {
  
         
-        IdentifierManager *manager = [IdentifierManager sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         
@@ -1020,20 +1018,19 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
                 return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)hardcodedSerial);
             }
             
-            if ([manager isIdentifierEnabled:@"SerialNumber"]) {
-                NSString *spoofedSerial = [manager getValueForType:@"SerialNumber"];
-                if (spoofedSerial) {
-                    PXLog(@"Spoofing IOPlatformSerialNumber with: %@", spoofedSerial);
-                    // Ensure proper memory management with CoreFoundation objects
-                    return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)spoofedSerial);
-                }
+            NSString *spoofedSerial = CurrentPhoneInfo().serialNumber;
+            if (spoofedSerial) {
+                PXLog(@"Spoofing IOPlatformSerialNumber with: %@", spoofedSerial);
+                // Ensure proper memory management with CoreFoundation objects
+                return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)spoofedSerial);
             }
+            
         }
         
         
         // IMEI for cellular devices
-        if ([keyString isEqualToString:@"kIMEIKey"] && [manager isIdentifierEnabled:@"IMEI"]) {
-            NSString *spoofedIMEI = [manager getValueForType:@"IMEI"];
+        if ([keyString isEqualToString:@"kIMEIKey"]) {
+            NSString *spoofedIMEI = CurrentPhoneInfo().IMEI;
             if (spoofedIMEI) {
                 PXLog(@"Spoofing IMEI with: %@", spoofedIMEI);
                 return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)spoofedIMEI);
@@ -1053,7 +1050,6 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
 static char* (*orig_GSSystemGetSerialNo)(void);
 
 static char* hook_GSSystemGetSerialNo(void) {
-    IdentifierManager *manager = [IdentifierManager sharedManager];
     NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
     
     PXLog(@"GSSystemGetSerialNo requested by app: %@", currentBundleID);
@@ -1071,18 +1067,17 @@ static char* hook_GSSystemGetSerialNo(void) {
     }
     
     
-    if ([manager isIdentifierEnabled:@"SerialNumber"]) {
-        NSString *spoofedSerial = [manager getValueForType:@"SerialNumber"];
-        if (spoofedSerial) {
-            PXLog(@"Spoofing GSSystemGetSerialNo with: %@", spoofedSerial);
-            
-            // Convert NSString to char* that will persist
-            // Note: This will leak a small amount of memory but it's necessary
-            // since we can't free the memory after returning it
-            char *serialStr = strdup([spoofedSerial UTF8String]);
-            return serialStr;
-        }
+    NSString *spoofedSerial = CurrentPhoneInfo().serialNumber;
+    if (spoofedSerial) {
+        PXLog(@"Spoofing GSSystemGetSerialNo with: %@", spoofedSerial);
+        
+        // Convert NSString to char* that will persist
+        // Note: This will leak a small amount of memory but it's necessary
+        // since we can't free the memory after returning it
+        char *serialStr = strdup([spoofedSerial UTF8String]);
+        return serialStr;
     }
+    
     
     return orig_GSSystemGetSerialNo();
 }

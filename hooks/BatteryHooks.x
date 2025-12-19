@@ -1,7 +1,6 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <substrate.h>
-#import "BatteryManager.h"
 #import "ProfileManager.h"
 
 // Helper: get battery level from profile battery_info.plist

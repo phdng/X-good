@@ -1,6 +1,3 @@
-#import "ProjectX.h"
-#import "DeviceModelManager.h"
-#import "ProfileManager.h"
 #import "ProjectXLogging.h"
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
@@ -14,6 +11,8 @@
 #import <substrate.h>
 #import <mach-o/arch.h>
 #import <dlfcn.h>
+#import "DataManager.h"
+
 // Define the swap usage structure if it's not available
 #ifndef HAVE_XSW_USAGE
 struct xsw_usage {
@@ -49,8 +48,6 @@ static void logMemoryHook(NSString *apiName);
 
 // Function declarations
 
-static NSString *getSpoofedDeviceModel(void);
-static NSDictionary *getDeviceSpecs(void);
 static float getFreeMemoryPercentage(void);
 static void getConsistentMemoryStats(unsigned long long totalMemory, 
                                     unsigned long long *freeMemory,
@@ -65,140 +62,6 @@ static CGSize parseResolution(NSString *resolutionString);
 
 #pragma mark - Helper Functions
 
-
-// Get the device model from profile
-static NSString *getSpoofedDeviceModel() {
-    @try {
-
-        // Build path to identity directory
-        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
-            
-        // First try device_model.plist (detailed specs)
-        NSString *deviceModelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-        NSDictionary *deviceModelDict = [NSDictionary dictionaryWithContentsOfFile:deviceModelPath];
-        NSString  *deviceModel = deviceModelDict[@"value"];
-            
-        if (!deviceModel || deviceModel.length == 0) {
-            // Fallback to device_ids.plist (combined storage)
-            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-            deviceModel = deviceIds[@"DeviceModel"];
-        }
-        
-        
-        // METHOD 2: Use DeviceModelManager as fallback
-        if (!deviceModel.length && NSClassFromString(@"DeviceModelManager")) {
-            DeviceModelManager *deviceManager = [NSClassFromString(@"DeviceModelManager") sharedManager];
-            deviceModel = [deviceManager currentDeviceModel] ?: [deviceManager generateDeviceModel];
-        }
-        
-        // METHOD 3: Emergency fallback
-        if (!deviceModel.length) {
-            deviceModel = @"iPhone14,6"; // iPhone SE (3rd Gen) as fallback
-        }
-        
-        return deviceModel;
-    } @catch (NSException *exception) {
-        return @"iPhone14,6"; // Fallback on exception
-    }
-}
-
-// Get all device specifications for the current spoofed model
-static NSDictionary *getDeviceSpecs() {
-    // Initialize cache if needed
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        deviceSpecsCache = [NSMutableDictionary dictionary];
-    });
-    
-    // Check if specs are already cached
-    @synchronized(deviceSpecsCache) {
-        NSDictionary *cachedSpecs = deviceSpecsCache[@"specs"];
-        if (cachedSpecs && [[NSDate date] timeIntervalSinceDate:cacheTimestamp] < kCacheValidityDuration) {
-            return cachedSpecs;
-        }
-    }
-    
-    @try {
-        // METHOD 1: Try to get specs directly from profile plist files
-
-        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
-        
-    
-        // Fallback to device_ids.plist and reconstruct specs
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-        
-        if (deviceIds && deviceIds[@"DeviceModel"]) {
-            // Reconstruct specs from device_ids.plist
-            NSMutableDictionary *specs = [NSMutableDictionary dictionary];
-            specs[@"value"] = deviceIds[@"DeviceModel"];
-            specs[@"name"] = deviceIds[@"DeviceModelName"] ?: @"Unknown";
-            specs[@"screenResolution"] = deviceIds[@"ScreenResolution"] ?: @"Unknown";
-            specs[@"viewportResolution"] = deviceIds[@"ViewportResolution"] ?: @"Unknown";
-            specs[@"devicePixelRatio"] = deviceIds[@"DevicePixelRatio"] ?: @(0);
-            specs[@"screenDensity"] = deviceIds[@"ScreenDensityPPI"] ?: @(0);
-            specs[@"cpuArchitecture"] = deviceIds[@"CPUArchitecture"] ?: @"Unknown";
-            specs[@"deviceMemory"] = deviceIds[@"DeviceMemory"] ?: @(0);
-            specs[@"gpuFamily"] = deviceIds[@"GPUFamily"] ?: @"Unknown";
-            specs[@"cpuCoreCount"] = deviceIds[@"CPUCoreCount"] ?: @(0);
-            specs[@"metalFeatureSet"] = deviceIds[@"MetalFeatureSet"] ?: @"Unknown";
-            
-            // Reconstruct webGLInfo
-            NSMutableDictionary *webGLInfo = [NSMutableDictionary dictionary];
-            webGLInfo[@"webglVendor"] = deviceIds[@"WebGLVendor"] ?: @"Apple";
-            webGLInfo[@"webglRenderer"] = deviceIds[@"WebGLRenderer"] ?: @"Apple GPU";
-            webGLInfo[@"unmaskedVendor"] = @"Apple Inc.";
-            webGLInfo[@"unmaskedRenderer"] = deviceIds[@"GPUFamily"] ?: @"Apple GPU";
-            webGLInfo[@"webglVersion"] = @"WebGL 2.0";
-            webGLInfo[@"maxTextureSize"] = @(16384);
-            webGLInfo[@"maxRenderBufferSize"] = @(16384);
-            specs[@"webGLInfo"] = webGLInfo;
-            
-            PXLog(@"[DeviceSpec] Reconstructed device specs from device_ids.plist");
-            
-            // Cache the specifications
-            @synchronized(deviceSpecsCache) {
-                deviceSpecsCache[@"specs"] = specs;
-                cacheTimestamp = [NSDate date];
-            }
-            
-            return specs;
-        }
-    
-        
-        // METHOD 2: Fallback to DeviceModelManager
-        // Get the current spoofed device model
-        NSString *deviceModel = getSpoofedDeviceModel();
-        if (!deviceModel.length) {
-            return nil;
-        }
-        
-        // Get the specifications from DeviceModelManager
-        DeviceModelManager *deviceManager = [NSClassFromString(@"DeviceModelManager") sharedManager];
-        if (!deviceManager) {
-            PXLog(@"[DeviceSpec] WARNING: DeviceModelManager not available");
-            return nil;
-        }
-        
-        NSDictionary *specs = [deviceManager deviceSpecificationsForModel:deviceModel];
-        if (!specs) {
-            PXLog(@"[DeviceSpec] WARNING: No specifications found for device model: %@", deviceModel);
-            return nil;
-        }
-        
-        // Cache the specifications
-        @synchronized(deviceSpecsCache) {
-            deviceSpecsCache[@"specs"] = specs;
-            cacheTimestamp = [NSDate date];
-        }
-        
-        return specs;
-    } @catch (NSException *exception) {
-        PXLog(@"[DeviceSpec] Exception getting device specifications: %@", exception);
-        return nil;
-    }
-}
 
 // Parse resolution string (e.g., "2556x1179") into CGSize
 static CGSize parseResolution(NSString *resolutionString) {
@@ -223,14 +86,14 @@ static CGSize parseResolution(NSString *resolutionString) {
 - (CGRect)bounds {
     CGRect originalBounds = %orig;
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return originalBounds;
     }
     
     // Get the viewport resolution and device pixel ratio from specs
-    NSString *viewportResString = specs[@"viewportResolution"];
-    CGFloat pixelRatio = [specs[@"devicePixelRatio"] floatValue];
+    NSString *viewportResString = model.viewportResolution;
+    CGFloat pixelRatio = [model.devicePixelRatio floatValue];
     
     if (!viewportResString || pixelRatio <= 0) {
         return originalBounds;
@@ -262,13 +125,9 @@ static CGSize parseResolution(NSString *resolutionString) {
 - (CGRect)nativeBounds {
     CGRect originalNativeBounds = %orig;
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
-        return originalNativeBounds;
-    }
     
     // Get the screen resolution from specs
-    NSString *screenResString = specs[@"screenResolution"];
+    NSString *screenResString = CurrentPhoneInfo().deviceModel.resolution;
     if (!screenResString) {
         return originalNativeBounds;
     }
@@ -294,14 +153,13 @@ static CGSize parseResolution(NSString *resolutionString) {
 // Hook for scale (affects UI element sizes)
 - (CGFloat)scale {
     CGFloat originalScale = %orig;
-    
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return originalScale;
     }
     
     // Get the device pixel ratio from specs
-    CGFloat pixelRatio = [specs[@"devicePixelRatio"] floatValue];
+    CGFloat pixelRatio = [model.devicePixelRatio floatValue];
     if (pixelRatio <= 0) {
         return originalScale;
     }
@@ -335,13 +193,13 @@ static CGSize parseResolution(NSString *resolutionString) {
 // Hook for physical memory (RAM)
 - (unsigned long long)physicalMemory {
     unsigned long long originalMemory = %orig;  
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return originalMemory;
     }
     
     // Get the device memory from specs (in GB)
-    NSInteger deviceMemoryGB = [specs[@"deviceMemory"] integerValue];
+    NSInteger deviceMemoryGB = [model.deviceMemory integerValue];
     if (deviceMemoryGB <= 0) {
         return originalMemory;
     }
@@ -376,13 +234,13 @@ static CGSize parseResolution(NSString *resolutionString) {
 - (unsigned long long)availableMemory {
     unsigned long long originalAvailableMemory = %orig;
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return originalAvailableMemory;
     }
     
     // Get the device memory from specs (in GB)
-    NSInteger deviceMemoryGB = [specs[@"deviceMemory"] integerValue];
+    NSInteger deviceMemoryGB = [model.deviceMemory integerValue];
     if (deviceMemoryGB <= 0) {
         return originalAvailableMemory;
     }
@@ -408,13 +266,13 @@ static CGSize parseResolution(NSString *resolutionString) {
 // Hook for processor count
 - (NSUInteger)processorCount {
     NSUInteger originalCount = %orig;
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return originalCount;
     }
     
     // Get CPU core count from specs
-    NSInteger cpuCoreCount = [specs[@"cpuCoreCount"] integerValue];
+    NSInteger cpuCoreCount = [model.cpuCoreCount integerValue];
     if (cpuCoreCount <= 0) {
         return originalCount;
     }
@@ -434,13 +292,13 @@ static CGSize parseResolution(NSString *resolutionString) {
 - (NSString *)machineHardwareName {
     NSString *originalName = %orig;
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return originalName;
     }
     
     // Get CPU architecture from specs
-    NSString *cpuArchitecture = specs[@"cpuArchitecture"];
+    NSString *cpuArchitecture = model.cpuArchitecture;
     if (!cpuArchitecture || cpuArchitecture.length == 0) {
         return originalName;
     }
@@ -467,13 +325,13 @@ static CGSize parseResolution(NSString *resolutionString) {
 - (void)_didFinishLoadForFrame:(WKFrameInfo *)frame {
     %orig;
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return;
     }
     
     // Get the device memory from specs (in GB)
-    NSInteger deviceMemoryGB = [specs[@"deviceMemory"] integerValue];
+    NSInteger deviceMemoryGB = [model.deviceMemory integerValue];
     if (deviceMemoryGB <= 0) {
         return;
     }
@@ -512,12 +370,12 @@ static CGSize parseResolution(NSString *resolutionString) {
 - (NSString *)getParameter:(unsigned)pname {
     NSString *original = %orig;
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return original;
     }
     
-    NSDictionary *webGLInfo = specs[@"webGLInfo"];
+    WebGLInfo *webGLInfo = model.webGLInfo;
     if (!webGLInfo) {
         return original;
     }
@@ -527,17 +385,17 @@ static CGSize parseResolution(NSString *resolutionString) {
     NSString *spoofedValue = nil;
     
     if (pname == 0x1F00) { // VENDOR
-        spoofedValue = webGLInfo[@"webglVendor"];
+        spoofedValue = webGLInfo.webglVendor;
     } else if (pname == 0x1F01) { // RENDERER
-        spoofedValue = webGLInfo[@"webglRenderer"];
+        spoofedValue = webGLInfo.webglRenderer;
     } else if (pname == 0x1F02) { // VERSION
-        spoofedValue = webGLInfo[@"webglVersion"];
+        spoofedValue = webGLInfo.webglVersion;
     } else if (pname == 0x8B4F || pname == 0x8B4E) { // UNMASKED_VENDOR_WEBGL or UNMASKED_RENDERER_WEBGL
-        spoofedValue = (pname == 0x8B4F) ? webGLInfo[@"unmaskedVendor"] : webGLInfo[@"unmaskedRenderer"];
+        spoofedValue = (pname == 0x8B4F) ? webGLInfo.unmaskedVendor : webGLInfo.unmaskedRenderer;
     } else if (pname == 0x0D33) { // MAX_TEXTURE_SIZE
-        return [NSString stringWithFormat:@"%@", webGLInfo[@"maxTextureSize"]];
+        return [NSString stringWithFormat:@"%@", webGLInfo.maxTextureSize];
     } else if (pname == 0x8D57) { // MAX_RENDERBUFFER_SIZE
-        return [NSString stringWithFormat:@"%@", webGLInfo[@"maxRenderBufferSize"]];
+        return [NSString stringWithFormat:@"%@", webGLInfo.maxRenderBufferSize];
     }
     
     if (spoofedValue) {
@@ -569,12 +427,12 @@ static CGSize parseResolution(NSString *resolutionString) {
     NSString *originalName = %orig;
     
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return originalName;
     }
     
-    NSString *gpuFamily = specs[@"gpuFamily"];
+    NSString *gpuFamily = model.gpuFamily;
     if (!gpuFamily) {
         return originalName;
     }
@@ -594,12 +452,12 @@ static CGSize parseResolution(NSString *resolutionString) {
     NSString *originalFamilyName = %orig;
     
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return originalFamilyName;
     }
     
-    NSString *gpuFamily = specs[@"gpuFamily"];
+    NSString *gpuFamily = model.gpuFamily;
     if (!gpuFamily) {
         return originalFamilyName;
     }
@@ -624,13 +482,13 @@ static CGSize parseResolution(NSString *resolutionString) {
 - (CGFloat)native_scale {
     CGFloat originalScale = %orig;
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return originalScale;
     }
     
     // Calculate from screen density (PPI)
-    NSInteger screenDensity = [specs[@"screenDensity"] integerValue];
+    NSInteger screenDensity = [model.screenDensity integerValue];
     if (screenDensity <= 0) {
         return originalScale;
     }
@@ -660,21 +518,21 @@ static CGSize parseResolution(NSString *resolutionString) {
     %orig;
     
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if(!model){
         return;
     }
     
-    NSString *deviceModel = getSpoofedDeviceModel();
+    NSString *deviceModel = model.modelName;
     if (!deviceModel) {
         return;
     }
     
     // Prepare values from specs
-    NSString *screenResolution = specs[@"screenResolution"] ?: @"";
-    CGFloat devicePixelRatio = [specs[@"devicePixelRatio"] floatValue];
-    NSInteger deviceMemory = [specs[@"deviceMemory"] integerValue];
-    NSInteger cpuCoreCount = [specs[@"cpuCoreCount"] integerValue];
+    NSString *screenResolution = model.resolution ?: @"";
+    CGFloat devicePixelRatio = [model.devicePixelRatio floatValue];
+    NSInteger deviceMemory = [model.deviceMemory integerValue];
+    NSInteger cpuCoreCount = [model.cpuCoreCount integerValue];
     
     // Create a comprehensive JavaScript to override browser properties
     NSString *script = [NSString stringWithFormat:
@@ -784,7 +642,7 @@ static CGSize parseResolution(NSString *resolutionString) {
     %orig;
     
     
-    NSString *deviceModel = getSpoofedDeviceModel();
+    NSString *deviceModel = CurrentPhoneInfo().deviceModel.modelName;
     if (!deviceModel) {
         return;
     }
@@ -915,12 +773,12 @@ static CGSize parseResolution(NSString *resolutionString) {
     %orig;
     
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return;
     }
     
-    NSInteger cpuCoreCount = [specs[@"cpuCoreCount"] integerValue];
+    NSInteger cpuCoreCount = [model.cpuCoreCount integerValue];
     if (cpuCoreCount <= 0) {
         return;
     }
@@ -949,12 +807,12 @@ static CGSize parseResolution(NSString *resolutionString) {
     %orig;
     
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return;
     }
     
-    NSInteger cpuCoreCount = [specs[@"cpuCoreCount"] integerValue];
+    NSInteger cpuCoreCount = [model.cpuCoreCount integerValue];
     if (cpuCoreCount <= 0) {
         return;
     }
@@ -980,12 +838,12 @@ static CGSize parseResolution(NSString *resolutionString) {
     unsigned int original = %orig;
     
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return original;
     }
     
-    NSInteger cpuCoreCount = [specs[@"cpuCoreCount"] integerValue];
+    NSInteger cpuCoreCount = [model.cpuCoreCount integerValue];
     if (cpuCoreCount <= 0) {
         return original;
     }
@@ -1013,7 +871,6 @@ static void logMemoryHook(NSString *apiName) {
         PXLog(@"[DeviceSpec] Memory spoofing API '%@' was accessed", apiName);
     }
 }
-
 // Function to calculate free memory percentage based on device specs
 static float getFreeMemoryPercentage(void) {
     // Default free memory percentage (typical for iOS devices under normal usage)
@@ -1021,23 +878,14 @@ static float getFreeMemoryPercentage(void) {
     
     
     // Get device specs
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return defaultFreePercentage;
     }
     
-    // If we have a specific free memory percentage in specs, use it
-    NSNumber *freeMemoryPercent = specs[@"freeMemoryPercentage"];
-    if (freeMemoryPercent) {
-        float percentage = [freeMemoryPercent floatValue];
-        // Validate the percentage is reasonable
-        if (percentage > 0.1 && percentage < 0.7) {
-            return percentage;
-        }
-    }
     
     // Otherwise use a realistic value based on device memory
-    NSInteger deviceMemoryGB = [specs[@"deviceMemory"] integerValue];
+    NSInteger deviceMemoryGB = [model.deviceMemory integerValue];
     if (deviceMemoryGB <= 0) {
         return defaultFreePercentage;
     }
@@ -1086,12 +934,12 @@ static NXArchInfo* hook_nx_get_local_arch_info()
 {
     NXArchInfo* original = orig_nx_get_local_arch_info();
     
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return original;
     }
     
-    NSString *cpuArchitecture = specs[@"cpuArchitecture"];
+    NSString *cpuArchitecture = model.cpuArchitecture;
     if (!cpuArchitecture) {
         return original;
     }
@@ -1172,13 +1020,13 @@ static kern_return_t hook_host_statistics64(host_t host, host_flavor_t flavor, h
     }
     
     // Get device specs
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return result;
     }
     
     // Get the device memory from specs (in GB)
-    NSInteger deviceMemoryGB = [specs[@"deviceMemory"] integerValue];
+    NSInteger deviceMemoryGB = [model.deviceMemory integerValue];
     if (deviceMemoryGB <= 0) {
         return result;
     }
@@ -1282,14 +1130,14 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     }
     
     // Get device specs
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
         return result;
     }
 
     // Get CPU architecture for processor-related sysctls
-    NSString *cpuArchitecture = specs[@"cpuArchitecture"];
-    NSInteger cpuCoreCount = [specs[@"cpuCoreCount"] integerValue];
+    NSString *cpuArchitecture = model.cpuArchitecture;
+    NSInteger cpuCoreCount = [model.cpuCoreCount integerValue];
     
 
     // Handle CPU-related sysctls
@@ -1549,7 +1397,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     // Handle memory-related sysctls
     else if (strcmp(name, "hw.memsize") == 0 || strcmp(name, "hw.physmem") == 0) {
         // Get the device memory from specs (in GB)
-        NSInteger deviceMemoryGB = [specs[@"deviceMemory"] integerValue];
+        NSInteger deviceMemoryGB = [CurrentPhoneInfo().deviceModel.deviceMemory integerValue];
         if (deviceMemoryGB <= 0) {
             return result;
         }
@@ -1578,7 +1426,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
         xsw_usage *swap = (xsw_usage *)oldp;
         
         // Get the device memory from specs (in GB)
-        NSInteger deviceMemoryGB = [specs[@"deviceMemory"] integerValue];
+        NSInteger deviceMemoryGB = [model.deviceMemory integerValue];
         if (deviceMemoryGB <= 0) {
             return result;
         }
@@ -1634,7 +1482,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     }
     else if (strcmp(name, "hw.machine") == 0) {
         // Machine name - should return the device model like "iPhone10,1"
-        NSString *deviceModel = getSpoofedDeviceModel();
+        NSString *deviceModel = CurrentPhoneInfo().deviceModel.modelName;
         if (deviceModel && deviceModel.length > 0) {
             const char *machineStr = [deviceModel UTF8String];
             if (machineStr && *oldlenp > 0) {

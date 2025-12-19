@@ -1,5 +1,3 @@
-#import "ProjectX.h"
-#import "StorageManager.h"
 #import "ProjectXLogging.h"
 #import <Foundation/Foundation.h>
 #import <sys/mount.h>
@@ -8,8 +6,7 @@
 #import <IOKit/IOKitLib.h>
 #import <execinfo.h>
 #import <mach-o/dyld.h>
-#import "ProfileManager.h"
-#import "IdentifierManager.h"
+#import "DataManager.h"
 
 // Constants for proper size calculations - use only marketing units (1000-based)
 #define BYTES_PER_KB (1000ULL)
@@ -38,81 +35,6 @@
 static CFTypeRef (*orig_IORegistryEntryCreateCFProperty)(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options);
 
 
-// Helper function to get consistent storage values directly from storage.plist
-static NSDictionary *getStorageValues() {
-    static NSDictionary *cachedStorageValues = nil;
-    static NSTimeInterval lastLoadTime = 0;
-    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
-    
-    // Increased cache duration from 5 to 30 seconds to reduce I/O and CPU overhead
-    if (cachedStorageValues && (now - lastLoadTime < 30.0)) {
-        return cachedStorageValues;
-    }
-    
-    // First check if the feature is globally enabled
-    BOOL storageSystemEnabled = NO;
-    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.hydra.projectx.settings"];
-    if (defaults) {
-        storageSystemEnabled = [defaults boolForKey:@"StorageSystemEnabled"];
-    }
-    
-    if (!storageSystemEnabled) {
-        IdentifierManager * manager = [IdentifierManager sharedManager];
-        if (manager && [manager respondsToSelector:@selector(isIdentifierEnabled:)]) {
-            storageSystemEnabled = [manager isIdentifierEnabled:@"StorageSystem"];
-        }
-    }
-    
-    // If feature is disabled globally, return nil to abort spoofing
-    if (!storageSystemEnabled) {
-        return nil;
-    }
-    
-    @try {
-        // First try to get active profile ID
-        NSString *profileId = [[ProfileManager sharedManager] getActiveProfileId];
-        
-        if (profileId) {
-            // Build path to storage.plist for this profile
-            NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
-            NSString *storagePath = [profileDir stringByAppendingPathComponent:@"storage.plist"];
-            
-            // Try to load values from storage.plist
-            NSDictionary *storageDict = [NSDictionary dictionaryWithContentsOfFile:storagePath];
-            if (storageDict && storageDict[@"TotalStorage"] && storageDict[@"FreeStorage"]) {
-                cachedStorageValues = [storageDict copy];
-                lastLoadTime = now;
-                return cachedStorageValues;
-            }
-        }
-        
-        // Fallback to StorageManager if plist not found
-        StorageManager *storageManager = [%c(StorageManager) sharedManager];
-        if (storageManager) {
-            NSString *totalStorage = [storageManager totalStorageCapacity];
-            NSString *freeStorage = [storageManager freeStorageSpace];
-            
-            if (totalStorage && freeStorage) {
-                cachedStorageValues = @{
-                    @"TotalStorage": totalStorage,
-                    @"FreeStorage": freeStorage
-                };
-                lastLoadTime = now;
-                return cachedStorageValues;
-            }
-        }
-    } @catch (NSException *exception) {
-        // If any error occurs, use default values
-    }
-    
-    // Final fallback
-    cachedStorageValues = @{
-        @"TotalStorage": @"128",
-        @"FreeStorage": @"38.4"
-    };
-    lastLoadTime = now;
-    return cachedStorageValues;
-}
 
 // Helper to convert GB string to bytes using marketing units (1000-based)
 static uint64_t __attribute__((unused)) convertGBStringToBytes(NSString *gbString) {
@@ -181,11 +103,11 @@ static void getStorageValuesForApp(uint64_t *totalBytes, uint64_t *freeBytes) {
     
     @try {
         // Get storage values from plist
-        NSDictionary *storageInfo = getStorageValues();
+        StorageInfo *storageInfo = CurrentPhoneInfo().storageInfo;
         if (!storageInfo) return;
         
         // Get total storage value as string
-        NSString *totalSpaceStr = storageInfo[@"TotalStorage"];
+        NSString *totalSpaceStr = storageInfo.totalStorage;
         if (!totalSpaceStr || [totalSpaceStr length] == 0) return;
         
         // Convert to numeric value
@@ -265,7 +187,7 @@ static void getStorageValuesForApp(uint64_t *totalBytes, uint64_t *freeBytes) {
         *totalBytes = storageCapacity;
         
         // Calculate free space based on percentage
-        NSString *freeSpaceStr = storageInfo[@"FreeStorage"];
+        NSString *freeSpaceStr = storageInfo.freeStorage;
         if (freeSpaceStr && [freeSpaceStr length] > 0) {
             double freeGbValue = [freeSpaceStr doubleValue];
             if (freeGbValue >= 0 && freeGbValue <= totalStorageGB) {

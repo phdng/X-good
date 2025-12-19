@@ -2,67 +2,14 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
-#import "UserDefaultsUUIDManager.h"
 #import "ProfileManager.h"
+#import "DataManager.h"
 
 // Function declarations
-static NSString *getSpoofedUserDefaultsUUID();
 static BOOL isUUIDKey(NSString *key);
 static id processDictionaryValues(id object);
 
 
-// Add function to get spoofed UserDefaults UUID from manager
-static NSString *getSpoofedUserDefaultsUUID() {
-    // Use the UserDefaultsUUIDManager for consistent values across the app and hooks
-    UserDefaultsUUIDManager *manager = [UserDefaultsUUIDManager sharedManager];
-    NSString *uuid = [manager currentUserDefaultsUUID];
-    
-    if (uuid && uuid.length > 0) {
-        return uuid;
-    }
-    
-
-    // Build path to the profile's identity directory
-    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
-    
-    // Read from device_ids.plist first (combined identifiers file)
-    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-    NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-    if (deviceIds && deviceIds[@"UserDefaultsUUID"]) {
-        PXLog(@"[WeaponX] 🔍 Found UserDefaults UUID in device_ids.plist: %@", deviceIds[@"UserDefaultsUUID"]);
-        return deviceIds[@"UserDefaultsUUID"];
-    }
-    
-    // Try specific userdefaults_uuid.plist as fallback
-    NSString *userDefaultsUUIDPath = [identityDir stringByAppendingPathComponent:@"userdefaults_uuid.plist"];
-    NSDictionary *userDefaultsInfo = [NSDictionary dictionaryWithContentsOfFile:userDefaultsUUIDPath];
-    if (userDefaultsInfo && userDefaultsInfo[@"value"]) {
-        PXLog(@"[WeaponX] 🔍 Found UserDefaults UUID in userdefaults_uuid.plist: %@", userDefaultsInfo[@"value"]);
-        return userDefaultsInfo[@"value"];
-    }
-       
-    
-    // If all else fails, use a persistent fallback UUID
-    NSString *fallbackUUIDPath = @"/var/jb/var/mobile/Library/WeaponX/fallback_userdefaults_uuid.plist";
-    NSMutableDictionary *fallbackDict = [NSMutableDictionary dictionaryWithContentsOfFile:fallbackUUIDPath];
-    
-    if (!fallbackDict) {
-        fallbackDict = [NSMutableDictionary dictionary];
-    }
-    
-    NSString *fallbackUUID = fallbackDict[@"UserDefaultsUUID"];
-    if (!fallbackUUID) {
-        // Generate new UUID only if we don't have one saved
-        fallbackUUID = [[NSUUID UUID] UUIDString];
-        fallbackDict[@"UserDefaultsUUID"] = fallbackUUID;
-        [fallbackDict writeToFile:fallbackUUIDPath atomically:YES];
-        PXLog(@"[WeaponX] 🔍 Generated and saved persistent fallback UUID: %@", fallbackUUID);
-    } else {
-        PXLog(@"[WeaponX] 🔍 Using existing fallback UUID: %@", fallbackUUID);
-    }
-    
-    return fallbackUUID;
-}
 
 // Function to recursively process dictionary values and replace UUIDs
 static id processDictionaryValues(id object) {
@@ -76,7 +23,7 @@ static id processDictionaryValues(id object) {
         NSDictionary *dict = (NSDictionary *)object;
         NSMutableDictionary *result = [NSMutableDictionary dictionaryWithCapacity:dict.count];
         
-        NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+        NSString *spoofedUUID = CurrentPhoneInfo().userDefaultsUUID;
         
         for (id key in dict) {
             // Check if this key is UUID-related
@@ -157,7 +104,7 @@ static BOOL isUUIDKey(NSString *key) {
 - (id)objectForKey:(NSString *)defaultName {
     @try {        
         if (isUUIDKey(defaultName)) {
-            NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            NSString *spoofedUUID = CurrentPhoneInfo().userDefaultsUUID;
             PXLog(@"[WeaponX] 🔍 Spoofing UserDefaults UUID for key '%@' with: %@", defaultName, spoofedUUID);
             return spoofedUUID;
         }
@@ -181,7 +128,7 @@ static BOOL isUUIDKey(NSString *key) {
 - (NSString *)stringForKey:(NSString *)defaultName {
     @try {        
         if (isUUIDKey(defaultName)) {
-            NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            NSString *spoofedUUID = CurrentPhoneInfo().userDefaultsUUID;
             PXLog(@"[WeaponX] 🔍 Spoofing UserDefaults string UUID for key '%@' with: %@", defaultName, spoofedUUID);
             return spoofedUUID;
         }
@@ -233,7 +180,7 @@ static BOOL isUUIDKey(NSString *key) {
     @try {        
         // Only handle data that might represent a UUID
         if (isUUIDKey(defaultName)) {
-            NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            NSString *spoofedUUID = CurrentPhoneInfo().userDefaultsUUID;
             NSData *spoofedData = [spoofedUUID dataUsingEncoding:NSUTF8StringEncoding];
             PXLog(@"[WeaponX] 🔍 Spoofing UserDefaults data UUID for key '%@'", defaultName);
             return spoofedData;
@@ -243,7 +190,7 @@ static BOOL isUUIDKey(NSString *key) {
         
         // Check if the data might be a UUID (16 bytes)
         if (originalData && originalData.length == 16) {
-            NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            NSString *spoofedUUID = CurrentPhoneInfo().userDefaultsUUID;
             
             // Convert UUID string to 16-byte binary format
             NSString *hexString = [[spoofedUUID stringByReplacingOccurrencesOfString:@"-" withString:@""] lowercaseString];
@@ -311,7 +258,7 @@ static BOOL isUUIDKey(NSString *key) {
     @try {        
         // If setting a UUID value, replace with our spoofed UUID
         if (isUUIDKey(defaultName) && [value isKindOfClass:[NSString class]]) {
-            NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            NSString *spoofedUUID = CurrentPhoneInfo().userDefaultsUUID;
             PXLog(@"[WeaponX] 🔍 Intercepting and spoofing UUID being saved to UserDefaults for key '%@'", defaultName);
             return %orig(spoofedUUID, defaultName);
         }
@@ -333,7 +280,7 @@ static BOOL isUUIDKey(NSString *key) {
 - (void)setString:(NSString *)value forKey:(NSString *)defaultName {
     @try {        
         if (isUUIDKey(defaultName)) {
-            NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            NSString *spoofedUUID = CurrentPhoneInfo().userDefaultsUUID;
             PXLog(@"[WeaponX] 🔍 Intercepting and spoofing UUID string being saved to UserDefaults for key '%@'", defaultName);
             return %orig(spoofedUUID, defaultName);
         }
@@ -364,7 +311,7 @@ static BOOL isUUIDKey(NSString *key) {
     @try {
         
         if (isUUIDKey(defaultName) && value) {
-            NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            NSString *spoofedUUID = CurrentPhoneInfo().userDefaultsUUID;
             NSData *spoofedData = [spoofedUUID dataUsingEncoding:NSUTF8StringEncoding];
             PXLog(@"[WeaponX] 🔍 Intercepting and spoofing data UUID being saved to UserDefaults for key '%@'", defaultName);
             return %orig(spoofedData, defaultName);
@@ -372,7 +319,7 @@ static BOOL isUUIDKey(NSString *key) {
         
         // If the data looks like a UUID (16 bytes), replace it
         if (value && value.length == 16) {
-            NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            NSString *spoofedUUID = CurrentPhoneInfo().userDefaultsUUID;
             
             // Convert UUID string to 16-byte binary format
             NSString *hexString = [[spoofedUUID stringByReplacingOccurrencesOfString:@"-" withString:@""] lowercaseString];

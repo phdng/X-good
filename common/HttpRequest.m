@@ -10,7 +10,7 @@ void sendRequestWithMethod(NSString *urlString, NSString *method, id parameters,
 
 #pragma mark - GET请求函数
 void daemonGET(NSString *urlString, RequestCompletionHandler completion){
-    sendGETRequest([kMainUrl stringByAppendingPathComponent:urlString], completion);
+    sendGETRequest([kMainUrl stringByAppendingString:urlString], completion);
 }
 
 void sendGETRequest(NSString *urlString, RequestCompletionHandler completion) {
@@ -19,7 +19,7 @@ void sendGETRequest(NSString *urlString, RequestCompletionHandler completion) {
 
 #pragma mark - POST请求函数
 void daemonPOST(NSString *urlString, id parameters, RequestCompletionHandler completion) {
-    sendPOSTRequest([kMainUrl stringByAppendingPathComponent:urlString], parameters, nil, completion);
+    sendPOSTRequest([kMainUrl stringByAppendingString:urlString], parameters, nil, completion);
 }
 
 void sendPOSTRequest(NSString *urlString, id parameters, NSDictionary *headers, RequestCompletionHandler completion) {

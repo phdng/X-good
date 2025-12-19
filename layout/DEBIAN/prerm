@@ -2,10 +2,11 @@
 
 # Extremely simplified prerm script to avoid dpkg interruption
 # Do nothing that might interrupt dpkg
-if [ -d /var/jb ]; then
+if [ -d "/var/jb" ]; then
     JBPREFIX="/var/jb"
+    launchctl bootout system /var/jb/Library/LaunchDaemons/wangmc.projectx.plist
 else
     JBPREFIX=""
+    launchctl bootout system /Library/LaunchDaemons/wangmc.projectx.plist
 fi
-
 exit 0 

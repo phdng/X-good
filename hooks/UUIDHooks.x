@@ -2,9 +2,6 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
-#import "IdentifierManager.h"
-#import "SystemUUIDManager.h"
-#import "DyldCacheUUIDManager.h"
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <mach-o/dyld_images.h>
@@ -13,6 +10,7 @@
 #import <pthread.h>
 #import "ProfileManager.h"
 #import <substrate.h>
+#import "DataManager.h"
 
 // Macro for iOS version checking
 #define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != NSOrderedAscending)
@@ -21,8 +19,6 @@
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSTimeInterval kCacheValidityDuration = 600.0; // 10 minutes for better performance
 static dispatch_queue_t cacheQueue = nil; // Queue for thread-safe access to cache
-static BOOL isInitialized = NO;
-
 
 // Direct check for SystemBootUUID being enabled
 static BOOL isSystemBootUUIDEnabled() {
@@ -82,184 +78,7 @@ static BOOL isDyldCacheUUIDEnabled() {
     return NO;
 }
 
-// Add functions to get spoofed UUIDs from managers
-static NSString *getSpoofedSystemBootUUID() {
-    @try {
-        // Use the SystemUUIDManager for consistent values across the app and hooks
-        SystemUUIDManager *manager = [SystemUUIDManager sharedManager];
-        if (!manager) {
-            // Generate a safer fallback if manager is unavailable
-            return [[NSUUID UUID] UUIDString];
-        }
-        
-        NSString *uuid = [manager currentBootUUID];
-        
-        // Validate UUID format
-        if (uuid && uuid.length > 0 && ![uuid isEqualToString:@"(null)"]) {
-            // Check if it's a valid UUID format (basic validation)
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                    options:NSRegularExpressionCaseInsensitive 
-                                                                                      error:nil];
-            if ([regex numberOfMatchesInString:uuid 
-                                       options:0 
-                                         range:NSMakeRange(0, uuid.length)] > 0) {
-                return uuid;
-            }
-        }
-        
-        
-        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
-        
-        if (identityDir) {
-            // First try the combined device_ids.plist
-            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-            NSString *value = deviceIds[@"SystemBootUUID"];
-            
-            if (value && value.length > 0 && ![value isEqualToString:@"(null)"]) {
-                // Basic validation for UUID format
-                NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                        options:NSRegularExpressionCaseInsensitive 
-                                                                                          error:nil];
-                if ([regex numberOfMatchesInString:value 
-                                           options:0 
-                                             range:NSMakeRange(0, value.length)] > 0) {
-                    PXLog(@"[WeaponX] 🔄 Got SystemBootUUID from device_ids.plist: %@", value);
-                    // Update the manager for future consistency
-                    if ([manager respondsToSelector:@selector(setCurrentBootUUID:)]) {
-                        [manager setCurrentBootUUID:value];
-                    }
-                    return value;
-                }
-            }
-            
-            // Try the specific uuid file
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"system_boot_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"] && [uuidDict[@"value"] length] > 0 && ![uuidDict[@"value"] isEqualToString:@"(null)"]) {
-                // Validate UUID format
-                NSString *uuidValue = uuidDict[@"value"];
-                NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                        options:NSRegularExpressionCaseInsensitive 
-                                                                                          error:nil];
-                if ([regex numberOfMatchesInString:uuidValue 
-                                           options:0 
-                                             range:NSMakeRange(0, uuidValue.length)] > 0) {
-                    PXLog(@"[WeaponX] 🔄 Got SystemBootUUID from system_boot_uuid.plist: %@", uuidValue);
-                    // Update the manager for future consistency
-                    if ([manager respondsToSelector:@selector(setCurrentBootUUID:)]) {
-                        [manager setCurrentBootUUID:uuidValue];
-                    }
-                    return uuidValue;
-                }
-            }
-        }
-        
-        // If we still don't have a UUID, generate a new one rather than using zeros
-        uuid = [[NSUUID UUID] UUIDString];
-        PXLog(@"[WeaponX] 🔄 Generated fallback UUID: %@", uuid);
-        
-        // Store this for future consistency
-        if ([manager respondsToSelector:@selector(setCurrentBootUUID:)]) {
-            [manager setCurrentBootUUID:uuid];
-        }
-        
-        return uuid;
-    } @catch (NSException *exception) {
-        PXLog(@"[WeaponX] ❌ Exception in getSpoofedSystemBootUUID: %@", exception);
-        return [[NSUUID UUID] UUIDString];
-    }
-}
 
-static NSString *getSpoofedDyldCacheUUID() {
-    @try {
-        // Use the DyldCacheUUIDManager for consistent values across the app and hooks
-        DyldCacheUUIDManager *manager = [DyldCacheUUIDManager sharedManager];
-        if (!manager) {
-            // Generate a safer fallback if manager is unavailable
-            return [[NSUUID UUID] UUIDString];
-        }
-        
-        NSString *uuid = [manager currentDyldCacheUUID];
-        
-        // Validate UUID format
-        if (uuid && uuid.length > 0 && ![uuid isEqualToString:@"(null)"]) {
-            // Check if it's a valid UUID format (basic validation)
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                    options:NSRegularExpressionCaseInsensitive 
-                                                                                      error:nil];
-            if ([regex numberOfMatchesInString:uuid 
-                                       options:0 
-                                         range:NSMakeRange(0, uuid.length)] > 0) {
-                return uuid;
-            }
-        }
-        
-        // Try to read directly from plist files
- 
-        
-        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
-        
-        if (identityDir) {
-            // First try the combined device_ids.plist
-            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-            NSString *value = deviceIds[@"DyldCacheUUID"];
-            
-            if (value && value.length > 0 && ![value isEqualToString:@"(null)"]) {
-                // Basic validation for UUID format
-                NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                        options:NSRegularExpressionCaseInsensitive 
-                                                                                          error:nil];
-                if ([regex numberOfMatchesInString:value 
-                                           options:0 
-                                             range:NSMakeRange(0, value.length)] > 0) {
-                    PXLog(@"[WeaponX] 🔄 Got DyldCacheUUID from device_ids.plist: %@", value);
-                    // Update the manager for future consistency
-                    if ([manager respondsToSelector:@selector(setCurrentDyldCacheUUID:)]) {
-                        [manager setCurrentDyldCacheUUID:value];
-                    }
-                    return value;
-                }
-            }
-            
-            // Try the specific uuid file
-            NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"dyld_cache_uuid.plist"];
-            NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-            if (uuidDict && uuidDict[@"value"] && [uuidDict[@"value"] length] > 0 && ![uuidDict[@"value"] isEqualToString:@"(null)"]) {
-                // Validate UUID format
-                NSString *uuidValue = uuidDict[@"value"];
-                NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                        options:NSRegularExpressionCaseInsensitive 
-                                                                                          error:nil];
-                if ([regex numberOfMatchesInString:uuidValue 
-                                           options:0 
-                                             range:NSMakeRange(0, uuidValue.length)] > 0) {
-                    PXLog(@"[WeaponX] 🔄 Got DyldCacheUUID from dyld_cache_uuid.plist: %@", uuidValue);
-                    // Update the manager for future consistency
-                    if ([manager respondsToSelector:@selector(setCurrentDyldCacheUUID:)]) {
-                        [manager setCurrentDyldCacheUUID:uuidValue];
-                    }
-                    return uuidValue;
-                }
-            }
-        }
-        
-        // If we still don't have a UUID, generate a new one rather than using zeros
-        uuid = [[NSUUID UUID] UUIDString];
-        PXLog(@"[WeaponX] 🔄 Generated fallback UUID: %@", uuid);
-        
-        // Store this for future consistency
-        if ([manager respondsToSelector:@selector(setCurrentDyldCacheUUID:)]) {
-            [manager setCurrentDyldCacheUUID:uuid];
-        }
-        
-        return uuid;
-    } @catch (NSException *exception) {
-        PXLog(@"[WeaponX] ❌ Exception in getSpoofedDyldCacheUUID: %@", exception);
-        return [[NSUUID UUID] UUIDString];
-    }
-}
 
 #pragma mark - NSUUID Hooks
 
@@ -270,7 +89,7 @@ static NSString *getSpoofedDyldCacheUUID() {
     @try {
         // Use direct check instead of manager
         if (isSystemBootUUIDEnabled()) {
-            NSString *bootUUID = getSpoofedSystemBootUUID();
+            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
             if (bootUUID && bootUUID.length > 0) {
                 NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
                 if (uuid) {
@@ -288,9 +107,7 @@ static NSString *getSpoofedDyldCacheUUID() {
 
 // Hook UUIDString method to intercept UUID string requests
 - (NSString *)UUIDString {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
             // Use direct check instead of manager
             if (isSystemBootUUIDEnabled()) {
                 // Only spoof if this is a system UUID (we can check by comparing with the actual system UUID)
@@ -319,7 +136,7 @@ static NSString *getSpoofedDyldCacheUUID() {
                     if (platformUUID) {
                         NSString *systemUUID = (__bridge_transfer NSString *)platformUUID;
                         if ([originalUUID isEqualToString:systemUUID]) {
-                            NSString *bootUUID = getSpoofedSystemBootUUID();
+                            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
                             if (bootUUID && bootUUID.length > 0) {
                                 PXLog(@"[WeaponX] 🔄 Spoofing UUIDString with: %@", bootUUID);
                                 return bootUUID;
@@ -338,9 +155,7 @@ static NSString *getSpoofedDyldCacheUUID() {
 
 // Add additional initialization methods beyond what we already hook
 - (instancetype)initWithUUIDBytes:(const uuid_t)bytes {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
         if (isSystemBootUUIDEnabled()) {
             // Create string from bytes to see if it matches the system UUID
             CFUUIDRef cfuuid = CFUUIDCreateFromUUIDBytes(kCFAllocatorDefault, *((CFUUIDBytes *)bytes));
@@ -364,7 +179,7 @@ static NSString *getSpoofedDyldCacheUUID() {
                 if (platformUUID) {
                     NSString *systemUUID = (__bridge_transfer NSString *)platformUUID;
                     if ([originalUUID isEqualToString:systemUUID]) {
-                        NSString *bootUUID = getSpoofedSystemBootUUID();
+                        NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
                         if (bootUUID && bootUUID.length > 0) {
                             NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
                             PXLog(@"[WeaponX] 🔄 Spoofing NSUUID initWithUUIDBytes with: %@", bootUUID);
@@ -386,8 +201,6 @@ static NSString *getSpoofedDyldCacheUUID() {
     NSString *origDescription = %orig;
     
     @try {
-        // Check if we need to spoof
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         if (isSystemBootUUIDEnabled()) {
             // Generally we don't want to modify all descriptions, only ones that might be system UUIDs
             // We'll check if the description matches the UUID pattern first
@@ -408,7 +221,7 @@ static NSString *getSpoofedDyldCacheUUID() {
                     if (platformUUID) {
                         NSString *systemUUID = (__bridge_transfer NSString *)platformUUID;
                         if ([origDescription isEqualToString:systemUUID]) {
-                            NSString *bootUUID = getSpoofedSystemBootUUID();
+                            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
                             if (bootUUID && bootUUID.length > 0) {
                                 PXLog(@"[WeaponX] 🔄 Spoofing NSUUID description from %@ to %@", origDescription, bootUUID);
                                 return bootUUID;
@@ -432,12 +245,10 @@ static NSString *getSpoofedDyldCacheUUID() {
 %hook NSString
 
 + (NSString *)stringWithUUID:(uuid_t)bytes {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
         // Use direct check instead of manager
         if (isSystemBootUUIDEnabled()) {
-            NSString *bootUUID = getSpoofedSystemBootUUID();
+            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
             if (bootUUID && bootUUID.length > 0) {
                 PXLog(@"[WeaponX] 🔄 Spoofing System Boot UUID with: %@", bootUUID);
                 return bootUUID;
@@ -460,12 +271,11 @@ static NSString *getSpoofedDyldCacheUUID() {
 %hookf(CFTypeRef, IORegistryEntryCreateCFProperty, io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
     @try {
         // Check if we're looking for the platform UUID
-        if (key && [(__bridge NSString *)key isEqualToString:@"IOPlatformUUID"]) {
-            NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-            
+        if (key && [(__bridge NSString *)key isEqualToString:@"IOPlatformUUID"]) {            
             // Use direct check instead of manager
             if (isSystemBootUUIDEnabled()) {
-                NSString *bootUUID = getSpoofedSystemBootUUID();
+                
+                NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
                 if (bootUUID && bootUUID.length > 0) {
                     PXLog(@"[WeaponX] 🔄 Spoofing IOPlatformUUID with: %@", bootUUID);
                     return (__bridge_retained CFStringRef)bootUUID;
@@ -486,16 +296,14 @@ static NSString *getSpoofedDyldCacheUUID() {
     
     @try {
         // If successful and we get properties back
-        if (result == kIOReturnSuccess && properties && *properties) {
-            NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-            
+        if (result == kIOReturnSuccess && properties && *properties) {            
             // Use direct check instead of manager
             if (isSystemBootUUIDEnabled()) {
                 NSMutableDictionary *props = (__bridge NSMutableDictionary *)*properties;
                 
                 // Check if the dictionary has IOPlatformUUID
                 if (props[@"IOPlatformUUID"]) {
-                    NSString *bootUUID = getSpoofedSystemBootUUID();
+                    NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
                     if (bootUUID && bootUUID.length > 0) {
                         PXLog(@"[WeaponX] 🔄 Spoofing IOPlatformUUID in properties with: %@", bootUUID);
                         props[@"IOPlatformUUID"] = bootUUID;
@@ -520,7 +328,6 @@ static bool (*orig_dyld_get_shared_cache_uuid)(uuid_t uuid_out) = NULL;
 static bool replaced_dyld_get_shared_cache_uuid(uuid_t uuid_out) {
     @try {
         // First check if we need to spoof at all
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         if ( !isDyldCacheUUIDEnabled() || !uuid_out) {
             // Call original if we're not spoofing
             if (orig_dyld_get_shared_cache_uuid) {
@@ -530,8 +337,7 @@ static bool replaced_dyld_get_shared_cache_uuid(uuid_t uuid_out) {
         }
         
         // Get the UUID from the manager to ensure we're consistent with other hooks
-        DyldCacheUUIDManager *manager = [DyldCacheUUIDManager sharedManager];
-        NSString *dyldUUID = [manager currentDyldCacheUUID];
+        NSString *dyldUUID = CurrentPhoneInfo().dyldCacheUUID;
         
         // If we got a valid UUID, use it
         if (dyldUUID && dyldUUID.length > 0) {
@@ -553,14 +359,11 @@ static bool replaced_dyld_get_shared_cache_uuid(uuid_t uuid_out) {
         }
         
         // Fallback: try to get a new UUID if the manager didn't have one
-        dyldUUID = getSpoofedDyldCacheUUID();
+        dyldUUID = CurrentPhoneInfo().dyldCacheUUID;
         if (dyldUUID && dyldUUID.length > 0) {
             NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:dyldUUID];
             if (uuid) {
                 [uuid getUUIDBytes:uuid_out];
-                
-                // Update the manager with this UUID for future consistency
-                [manager setCurrentDyldCacheUUID:dyldUUID];
                 
                 PXLog(@"[WeaponX] 🔄 Spoofing Dyld Cache UUID (fallback) with: %@", dyldUUID);
                 return true;
@@ -646,13 +449,8 @@ static const struct dyld_all_image_infos* replaced_dyld_get_all_image_infos(void
         // The compiler warns about comparing sharedCacheUUID with NULL because it's an array pointer
         // Instead, we'll check if the version is high enough to safely access this field
         if (isDyldCacheUUIDEnabled() && original->version >= 15) {
-            // Using per-bundle caching to ensure consistent but unique UUIDs across apps
-            DyldCacheUUIDManager *manager = [DyldCacheUUIDManager sharedManager];
-            NSString *dyldUUID = [manager currentDyldCacheUUID];
-            
+            NSString *dyldUUID =  CurrentPhoneInfo().dyldCacheUUID;
             if (!dyldUUID || dyldUUID.length == 0) {
-                // If no UUID is available, try to get one from the manager
-                dyldUUID = getSpoofedDyldCacheUUID();
                 if (!dyldUUID || dyldUUID.length == 0) {
                     // Fall back to original if we can't get a valid UUID
                     return original;
@@ -717,11 +515,9 @@ static const struct dyld_all_image_infos* replaced_dyld_get_all_image_infos(void
 static int (*orig_gethostuuid)(uuid_t id, const struct timespec *wait);
 
 static int replaced_gethostuuid(uuid_t id, const struct timespec *wait) {
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
         if (isSystemBootUUIDEnabled()) {
-            NSString *bootUUID = getSpoofedSystemBootUUID();
+            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
             if (bootUUID && bootUUID.length > 0) {
                 // Convert string UUID to bytes
                 NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
@@ -750,11 +546,9 @@ static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, v
 static int replaced_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     @try {
         // Check if we're looking for kern.uuid
-        if (name && strcmp(name, "kern.uuid") == 0) {
-            NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-            
+        if (name && strcmp(name, "kern.uuid") == 0) {            
             if (isSystemBootUUIDEnabled()) {
-                NSString *bootUUID = getSpoofedSystemBootUUID();
+                NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
                 if (bootUUID && bootUUID.length > 0 && oldp && oldlenp) {
                     // Convert the UUID string to bytes
                     NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
@@ -787,9 +581,7 @@ static CFUUIDRef (*orig_CFUUIDCreate)(CFAllocatorRef alloc);
 static CFUUIDRef replaced_CFUUIDCreate(CFAllocatorRef alloc) {
     CFUUIDRef originalUUID = orig_CFUUIDCreate ? orig_CFUUIDCreate(alloc) : NULL;
     
-    @try {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
+    @try {        
         // Only hook for system UUID if we shouldn't spoof for this app or UUID spoofing is disabled
         if (!isSystemBootUUIDEnabled()) {
             return originalUUID;
@@ -805,7 +597,7 @@ static CFUUIDRef replaced_CFUUIDCreate(CFAllocatorRef alloc) {
         }
         
         // Get spoofed UUID
-        NSString *bootUUID = getSpoofedSystemBootUUID();
+        NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
         if (bootUUID && bootUUID.length > 0) {
             // Create a new UUID from our spoofed string
             CFUUIDRef spoofedUUID = CFUUIDCreateFromString(kCFAllocatorDefault, (__bridge CFStringRef)bootUUID);

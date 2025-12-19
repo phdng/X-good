@@ -2,60 +2,15 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
-#import "PasteboardUUIDManager.h"
 #import "ProfileManager.h"
+#import "DataManager.h"
 
 // Global variables to track state
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSMutableDictionary *customChangeCountMap = nil; // Store custom change counts per app
 static NSMutableDictionary *lastKnownPasteboardData = nil; // Cache pasteboard content hash
 
-// Add function to get spoofed Pasteboard UUID from manager
-static NSString *getSpoofedPasteboardUUID() {
-    // Use the PasteboardUUIDManager for consistent values across the app and hooks
-    PasteboardUUIDManager *manager = [PasteboardUUIDManager sharedManager];
-    NSString *uuid = [manager currentPasteboardUUID];
-    
-    if (uuid && uuid.length > 0) {
-        return uuid;
-    }
-    
-    // Generate a new UUID if none exists
-    uuid = [manager generatePasteboardUUID];
-    if (uuid && uuid.length > 0) {
-        return uuid;
-    }
-    
-    // Try to read directly from plist files
-    // First try to get the profile directory from environment or fallback
-    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
-    
 
-    if (identityDir) {
-        // First try the combined device_ids.plist
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-        NSString *value = deviceIds[@"PasteboardUUID"];
-        
-        if (value) {
-            PXLog(@"[WeaponX] 🔄 Got PasteboardUUID from device_ids.plist: %@", value);
-            return value;
-        }
-        
-        // Try the specific uuid file
-        NSString *uuidPath = [identityDir stringByAppendingPathComponent:@"pasteboard_uuid.plist"];
-        NSDictionary *uuidDict = [NSDictionary dictionaryWithContentsOfFile:uuidPath];
-        if (uuidDict && uuidDict[@"value"]) {
-            PXLog(@"[WeaponX] 🔄 Got PasteboardUUID from pasteboard_uuid.plist: %@", uuidDict[@"value"]);
-            return uuidDict[@"value"];
-        }
-    }
-    
-    // If we still don't have a UUID, generate a new one rather than using zeros
-    uuid = [[NSUUID UUID] UUIDString];
-    PXLog(@"[WeaponX] 🔄 Generated fallback PasteboardUUID: %@", uuid);
-    return uuid;
-}
 
 // Helper for safe change count management
 static NSInteger getCustomChangeCount(NSString *bundleID, NSInteger originalCount) {
@@ -153,7 +108,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
 - (NSUUID *)uniquePasteboardUUID {
     @try {    
         // Get spoofed Pasteboard UUID
-        NSString *uuidString = getSpoofedPasteboardUUID();
+        NSString *uuidString = CurrentPhoneInfo().pasteboardUUID;
         NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:uuidString];
         PXLog(@"[WeaponX] 🔄 Spoofing Pasteboard UUID with: %@", uuidString);
         return uuid;
@@ -174,7 +129,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
         // Only spoof on custom-named pasteboards, not the general one
         if (originalName && ![originalName isEqualToString:@"com.apple.UIKit.pboard.general"]) {
             // Get current pasteboard UUID
-            NSString *uuidString = getSpoofedPasteboardUUID();
+            NSString *uuidString = CurrentPhoneInfo().pasteboardUUID;
             
             // Create a stable, deterministic name based on the spoofed UUID
             // We only replace the last component to maintain compatibility
@@ -227,7 +182,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @try {        
         if (pasteboardName) {
             // Get current pasteboard UUID
-            NSString *uuidString = getSpoofedPasteboardUUID();
+            NSString *uuidString = CurrentPhoneInfo().pasteboardUUID;
             
             // Create a stable, deterministic name based on the spoofed UUID
             // We only replace the last component to maintain compatibility
@@ -281,7 +236,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @try {        
         if (url) {
             // Create a modified URL with our UUID to ensure stable but unique URLs
-            NSString *uuidString = getSpoofedPasteboardUUID();
+            NSString *uuidString = CurrentPhoneInfo().pasteboardUUID;
             NSString *shortUUID = [uuidString componentsSeparatedByString:@"-"].firstObject;
             
             // Create a new URL with our UUID injected to ensure stability
@@ -456,7 +411,7 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
                 
                 // Return nil for sensitive types to prevent fingerprinting
                 if ([pasteboardType isEqualToString:@"com.apple.uikit.pboard-uuid"]) {
-                    NSString *spoofedUUID = getSpoofedPasteboardUUID();
+                    NSString *spoofedUUID = CurrentPhoneInfo().pasteboardUUID;
                     NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:spoofedUUID];
                     
                     // Use modern API with error handling instead of deprecated method

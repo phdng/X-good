@@ -4,6 +4,10 @@
 #import <GCDWebServers/GCDWebServerDataRequest.h>
 #import <GCDWebServers/GCDWebServerErrorResponse.h>
 #import "AppScopeManager.h"
+#import "PhoneInfo.h"
+#import "DaemonApi.h"
+#import "DataGenManager.h"
+#define CURRENT_DATA_PATH @"/private/var/mobile/Media/ProjectX/currentData.json"
 
 NSDictionary* getJsonBody(GCDWebServerDataRequest *request,NSError *jsonError)
 {
@@ -70,7 +74,7 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
 {
     // 保存选中应用
     [webServer addHandlerForMethod:@"POST"
-                              path:@"/saveScopePreferences"
+                              path:SAVE_SCOPE_APPS
                       requestClass:[GCDWebServerDataRequest class] // 必须是 DataRequest 才能读取 Body
                       processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request) {
 
@@ -84,16 +88,50 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
     }];
 
     [webServer addHandlerForMethod:@"GET"
-                              path:@"/loadScopePreferences"
+                              path:GET_SCOPE_APPS
                       requestClass:[GCDWebServerRequest class] 
                       processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
         NSMutableSet *scopeSet = [[AppScopeManager sharedManager] loadPreferences];
 
-        // NSString *res = runCommand(cmd);
         return dataResponse(@{
             @"status": @"success",
             @"data": [scopeSet allObjects]
         });
+    }];
+
+    [webServer addHandlerForMethod:@"GET"
+                              path:GET_PHONE_INFO
+                      requestClass:[GCDWebServerRequest class] 
+                      processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
+        if([[NSFileManager defaultManager] fileExistsAtPath:CURRENT_DATA_PATH]){
+            NSDictionary *phoneInfoDict = [PhoneInfo loadDictionaryFromFile:CURRENT_DATA_PATH];
+            return dataResponse(phoneInfoDict);
+        }
+        // create one
+        PhoneInfo * phoneInfo = [[DataGenManager sharedManager] generatePhoneInfo];
+        [phoneInfo saveToFile:CURRENT_DATA_PATH];
+        return dataResponse([phoneInfo toDictionary]);
+    }];
+
+    [webServer addHandlerForMethod:@"POST"
+                              path:SAVE_PHONE_INFO
+                   requestClass:[GCDWebServerDataRequest class] 
+                      processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request){
+
+        NSError *error;
+        NSDictionary *dict = getJsonBody(request,error);
+        if (error && dict) {
+            return jsonFormatErrorResponse();
+        }
+       
+        BOOL success = [PhoneInfo saveDictionary:dict toFile:CURRENT_DATA_PATH];
+        if(success){
+            return staticSuccessResponse();
+        }else{
+            return dataResponse(@{
+                @"status": @"error"
+            });
+        }
     }];
     
 }

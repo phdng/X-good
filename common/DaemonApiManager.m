@@ -1,5 +1,6 @@
 #import "DaemonApiManager.h"
 #import "HttpRequest.h"
+#import "DaemonApi.h"
 
 @implementation DaemonApiManager
 + (instancetype)sharedManager {
@@ -15,7 +16,7 @@
     // 创建一个 NSMutableSet，用于存储返回的数据
     __block NSMutableSet *scopeApps = [NSMutableSet set];
     dispatch_semaphore_t semaphore = dispatch_semaphore_create(0); // 创建信号量
-    daemonGET(@"loadScopePreferences",^(id jsonResponse, NSError *error) {
+    daemonGET(GET_SCOPE_APPS,^(id jsonResponse, NSError *error) {
         if ([jsonResponse isKindOfClass:[NSDictionary class]]) {
             NSString *status = jsonResponse[@"status"];
             if ([status isEqualToString:@"success"]) {
@@ -43,8 +44,29 @@
 }
 
 - (void) saveScopeApps:(NSMutableSet *)apps{
-    daemonPOST(@"saveScopePreferences", [apps allObjects], ^(id response, NSError *error) {
+    daemonPOST(SAVE_SCOPE_APPS, [apps allObjects], ^(id response, NSError *error) {
         // 处理响应
     });
+}
+
+- (PhoneInfo *) requestPhoneInfo{
+    __block PhoneInfo *phoneInfo;
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0); // 创建信号量
+    daemonGET(GET_PHONE_INFO,^(id jsonResponse, NSError *error) {
+        if ([jsonResponse isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *dict = (NSDictionary *)jsonResponse;
+            phoneInfo = [PhoneInfo fromDictionary:jsonResponse];
+        }
+        dispatch_semaphore_signal(semaphore); 
+    });
+
+    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+    return phoneInfo;
+}
+- (BOOL) savePhoneInfo:(PhoneInfo *)phoneInfo{
+    daemonPOST(SAVE_PHONE_INFO, [phoneInfo toDictionary], ^(id response, NSError *error) {
+        // 处理响应
+    });
+    return YES;
 }
 @end

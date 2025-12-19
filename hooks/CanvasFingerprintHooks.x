@@ -4,10 +4,6 @@
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
 
-// Cache for bundle decisions
-static NSMutableDictionary *cachedBundleDecisions = nil;
-static NSDate *cacheTimestamp = nil;
-static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes in seconds
 
 // Configuration for fingerprint noise
 static CGFloat kNoiseIntensity = 0.02;  // Default noise intensity (2% variation)
@@ -17,44 +13,6 @@ static BOOL kConsistentNoise = YES;     // Whether to use consistent noise per s
 static NSMutableDictionary *noiseSeedCache = nil;
 
 #pragma mark - Helper Functions
-
-// Helper: Always read enablement from profile/plist, not IdentifierManager
-static BOOL isCanvasFingerprintProtectionEnabledForCurrentApp(void) {
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID) return NO;
-    NSArray *possiblePaths = @[@"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
-                               @"/var/jb/private/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
-                               @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist"];
-    NSDictionary *settingsDict = nil;
-    for (NSString *path in possiblePaths) {
-        settingsDict = [NSDictionary dictionaryWithContentsOfFile:path];
-        if (settingsDict) break;
-    }
-    if (!settingsDict) return NO;
-    NSNumber *enabled = settingsDict[@"canvasFingerprintingEnabled"];
-    if (!enabled) enabled = settingsDict[@"CanvasFingerprint"];
-    return enabled ? [enabled boolValue] : NO;
-}
-
-// Update shouldProtectBundle to use only the new function
-static BOOL shouldProtectBundle(NSString *bundleID) {
-    if (!bundleID) return NO;
-    // Check cache first
-    if (!cachedBundleDecisions) {
-        cachedBundleDecisions = [NSMutableDictionary dictionary];
-    } else {
-        NSNumber *cachedDecision = cachedBundleDecisions[bundleID];
-        NSDate *decisionTimestamp = cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]];
-        if (cachedDecision && decisionTimestamp && 
-            [[NSDate date] timeIntervalSinceDate:decisionTimestamp] < kCacheValidityDuration) {
-            return [cachedDecision boolValue];
-        }
-    }
-    BOOL shouldProtect = isCanvasFingerprintProtectionEnabledForCurrentApp();
-    cachedBundleDecisions[bundleID] = @(shouldProtect);
-    cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
-    return shouldProtect;
-}
 
 // Get or create a noise seed for consistent variations
 static NSInteger getNoiseSeedForBundle(NSString *bundleID) {
@@ -105,7 +63,6 @@ static void addNoiseToImageData(NSMutableData *imageData, NSString *bundleID) {
 // Helper: Re-inject JS into all live WKWebViews
 static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID || !shouldProtectBundle(bundleID)) return;
     // The JS string must match the one injected in WKWebView hook
     NSString *canvasProtectionScript =
         @"(function() {"
@@ -249,8 +206,6 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
 
 - (void)setUserContentController:(WKUserContentController *)userContentController {
     %orig;
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID || !shouldProtectBundle(bundleID)) return;
     // Only inject if not already present
     BOOL alreadyInjected = NO;
     for (WKUserScript *script in userContentController.userScripts) {
@@ -391,11 +346,6 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
 - (void)_didFinishLoadForFrame:(WKFrameInfo *)frame {
     %orig;
     
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID || !shouldProtectBundle(bundleID)) {
-        return;
-    }
-    
     // JavaScript to protect against canvas, audio, WebGL, and font fingerprinting
     NSString *canvasProtectionScript = 
         @"(function() {"
@@ -513,7 +463,7 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
         } else {
             static BOOL loggedInjection = NO;
             if (!loggedInjection) {
-                PXLog(@"[CanvasFingerprint] Successfully injected canvas/audio/webgl/font fingerprinting protection for %@", bundleID);
+                PXLog(@"[CanvasFingerprint] Successfully injected canvas/audio/webgl/font fingerprinting protection");
                 loggedInjection = YES;
             }
         }
@@ -529,10 +479,6 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
 
 + (UIImage *)imageWithData:(NSData *)data {
     UIImage *originalImage = %orig;
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID || !shouldProtectBundle(bundleID) || !data) {
-        return originalImage;
-    }
     // Always add noise for protected apps
     @try {
         UIGraphicsBeginImageContextWithOptions(originalImage.size, NO, originalImage.scale);
@@ -548,7 +494,7 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
         UIImage *modifiedImage = UIGraphicsGetImageFromCurrentImageContext();
         UIGraphicsEndImageContext();
         if (modifiedImage) {
-            PXLog(@"[CanvasFingerprint] Noise added to image for %@", bundleID);
+            PXLog(@"[CanvasFingerprint] Noise added to image ");
             return modifiedImage;
         }
     } @catch (NSException *exception) {
@@ -567,9 +513,8 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
 // Method for getting pixel data
 - (NSData *)drawingData {
     NSData *originalData = %orig;
-    
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID || !shouldProtectBundle(bundleID) || !originalData) {
+    if (!bundleID || !originalData) {
         return originalData;
     }
     
@@ -587,81 +532,21 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
 #pragma mark - Notification Handlers
 
 // Refresh settings when profile or settings change
-static void refreshSettings(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    NSString *notificationName = (__bridge NSString *)name;
-    PXLog(@"[CanvasFingerprint] Received settings notification: %@", notificationName);
-    [cachedBundleDecisions removeAllObjects];
-    cacheTimestamp = [NSDate date];
-        [noiseSeedCache removeAllObjects];
-    reinjectFingerprintProtectionScriptToAllWKWebViews();
-}
+// static void refreshSettings(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
+//     NSString *notificationName = (__bridge NSString *)name;
+//     PXLog(@"[CanvasFingerprint] Received settings notification: %@", notificationName);
+//     [cachedBundleDecisions removeAllObjects];
+//     cacheTimestamp = [NSDate date];
+//         [noiseSeedCache removeAllObjects];
+//     reinjectFingerprintProtectionScriptToAllWKWebViews();
+// }
 
 #pragma mark - Constructor
 
 %ctor {
     @autoreleasepool {
         PXLog(@"[CanvasFingerprint] Initializing Canvas Fingerprint Protection hooks");
-        // Initialize caches
-        cachedBundleDecisions = [NSMutableDictionary dictionary];
-        noiseSeedCache = [NSMutableDictionary dictionary];
-        cacheTimestamp = [NSDate date];
-        // Register for notifications about profile or settings changes
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            refreshSettings,
-            CFSTR("com.hydra.projectx.settings.changed"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            refreshSettings,
-            CFSTR("com.hydra.projectx.profileChanged"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            refreshSettings,
-            CFSTR("com.hydra.projectx.toggleCanvasFingerprint"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            refreshSettings,
-            CFSTR("com.hydra.projectx.canvasFingerprintToggleChanged"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            refreshSettings,
-            CFSTR("com.hydra.projectx.enableCanvasFingerprintProtection"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            refreshSettings,
-            CFSTR("com.hydra.projectx.disableCanvasFingerprintProtection"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
-        CFNotificationCenterAddObserver(
-            CFNotificationCenterGetDarwinNotifyCenter(),
-            NULL,
-            refreshSettings,
-            CFSTR("com.hydra.projectx.resetCanvasNoise"),
-            NULL,
-            CFNotificationSuspensionBehaviorDeliverImmediately
-        );
+
         // Initialize hooks
         %init();
     }

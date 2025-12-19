@@ -28,8 +28,8 @@ APPLICATION_NAME = ProjectX
 TOOL_NAME = ProjectXDaemon
 
 # Tweak files
-ProjectXTweak_FILES = $(wildcard hooks/*.x) $(wildcard common/*.m) $(wildcard hooks/*.m)
-ProjectXTweak_CFLAGS = -fobjc-arc -Wno-error=unused-variable -Wno-error=unused-function -I./include -I./common
+ProjectXTweak_FILES = $(wildcard hooks/*.x) $(wildcard common/*.m) $(wildcard hooks/*.m) $(wildcard model/*.m)
+ProjectXTweak_CFLAGS = -fobjc-arc -Wno-error=unused-variable -Wno-error=unused-function -I./include -I./common -I./model
 ProjectXTweak_FRAMEWORKS = UIKit Foundation AdSupport UserNotifications IOKit Security CoreLocation CoreFoundation Network CoreTelephony SystemConfiguration WebKit SafariServices
 ProjectXTweak_PRIVATE_FRAMEWORKS = MobileCoreServices AppSupport SpringBoardServices
 ProjectXTweak_INSTALL_PATH = /Library/MobileSubstrate/DynamicLibraries
@@ -37,21 +37,21 @@ ProjectXTweak_INSTALL_PATH = /Library/MobileSubstrate/DynamicLibraries
 
 
 # App files
-ProjectX_FILES = $(wildcard *.m) $(wildcard common/*.m)
+ProjectX_FILES = $(wildcard *.m) $(wildcard common/*.m) $(wildcard model/*.m)
 ProjectX_RESOURCE_DIRS = Assets.xcassets
 ProjectX_RESOURCE_FILES = Info.plist Icon.png LaunchScreen.storyboard
 ProjectX_PRIVATE_FRAMEWORKS = FrontBoardServices SpringBoardServices BackBoardServices StoreKitUI MobileCoreServices
 # ProjectX_LDFLAGS = -framework CoreData -framework UIKit -framework Foundation 
 ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit IOKit Security CoreLocation CoreLocationUI
 ProjectX_CODESIGN_FLAGS = -Sent.plist
-ProjectX_CFLAGS = -fobjc-arc -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1  -I./common
+ProjectX_CFLAGS = -fobjc-arc -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1  -I./common -I./model
 ProjectX_EXTRA_FRAMEWORKS = AltList
 
 # Ensure app is installed to the correct location with proper permissions
 ProjectX_INSTALL_PATH = /Applications
 
-ProjectXDaemon_FILES = $(wildcard daemon/*.m)
-ProjectXDaemon_CFLAGS = -fobjc-arc
+ProjectXDaemon_FILES = $(wildcard daemon/*.m) $(wildcard model/*.m)
+ProjectXDaemon_CFLAGS = -fobjc-arc -I./model
 ProjectXDaemon_FRAMEWORKS = Foundation IOKit
 ProjectXDaemon_INSTALL_PATH = /usr/local/bin
 ProjectXDaemon_CODESIGN_FLAGS = -Sent.plist

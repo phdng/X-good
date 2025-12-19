@@ -511,8 +511,6 @@ static int hooked_getnameinfo(const struct sockaddr *sa, socklen_t salen, char *
     @autoreleasepool {
         // Initialize cache
         
-        // TEMPORARY DEBUG
-        NSLog(@"[DomainBlocking] Constructor called");
         // OPTIMIZATION: Check if domain blocking is globally enabled before expensive initialization
         DomainBlockingSettings *settings = [DomainBlockingSettings sharedSettings];
         NSLog(@"[DomainBlocking] Settings loaded, enabled: %@", settings.isEnabled ? @"YES" : @"NO");

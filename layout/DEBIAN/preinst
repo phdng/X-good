@@ -6,8 +6,6 @@
 if [ -d "/var/jb" ]; then
     JBPREFIX="/var/jb"
     launchctl bootout system /var/jb/Library/LaunchDaemons/wangmc.projectx.plist
-elif [ -d "/var/LIB" ]; then
-    JBPREFIX="/var/LIB"
 else
     JBPREFIX=""
     launchctl bootout system /Library/LaunchDaemons/wangmc.projectx.plist

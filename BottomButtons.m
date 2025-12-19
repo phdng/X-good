@@ -1,10 +1,7 @@
 #import "BottomButtons.h"
-#import "ProjectX.h"
-#import "IdentifierManager.h"
 #import <spawn.h>
 #import <sys/wait.h>
 #import <objc/runtime.h>
-#import "ActionManager.h"
 
 @interface SBSRelaunchAction : NSObject
 + (id)actionWithReason:(id)arg1 options:(unsigned)arg2 targetURL:(id)arg3;
@@ -16,7 +13,6 @@
 @end
 
 @interface BottomButtons ()
-@property (nonatomic, strong) IdentifierManager *manager;
 @end
 
 @implementation BottomButtons
@@ -31,9 +27,7 @@
 }
 
 - (instancetype)init {
-    if (self = [super init]) {
-        _manager = [IdentifierManager sharedManager];
-    }
+
     return self;
 }
 
@@ -295,7 +289,7 @@
 }
 - (void)newPhoneTap{
     // TODO 弹出加载框
-    [[ActionManager sharedManager] newPhone];
+    // [[ActionManager sharedManager] newPhone];
 
     // TODO 关闭加载框
 }
