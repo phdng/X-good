@@ -103,13 +103,7 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
                               path:GET_PHONE_INFO
                       requestClass:[GCDWebServerRequest class] 
                       processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
-        if([[NSFileManager defaultManager] fileExistsAtPath:CURRENT_DATA_PATH]){
-            NSDictionary *phoneInfoDict = [PhoneInfo loadDictionaryFromFile:CURRENT_DATA_PATH];
-            return dataResponse(phoneInfoDict);
-        }
-        // create one
-        PhoneInfo * phoneInfo = [[DataGenManager sharedManager] generatePhoneInfo];
-        [phoneInfo saveToFile:CURRENT_DATA_PATH];
+        PhoneInfo * phoneInfo = [PhoneInfo loadFromPrefs];
         return dataResponse([phoneInfo toDictionary]);
     }];
 
@@ -124,7 +118,7 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
             return jsonFormatErrorResponse();
         }
        
-        BOOL success = [PhoneInfo saveDictionary:dict toFile:CURRENT_DATA_PATH];
+        BOOL success = [PhoneInfo saveDictionary:dict];
         if(success){
             return staticSuccessResponse();
         }else{
@@ -134,5 +128,13 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
         }
     }];
     
+}
++(void) load{
+    // 检查默认PhoneInf是否存在
+    PhoneInfo * phoneInfo = [PhoneInfo loadFromPrefs];
+    if(!phoneInfo){
+        phoneInfo = [[DataGenManager sharedManager] generatePhoneInfo];
+        [phoneInfo saveToFile];
+    }
 }
 @end

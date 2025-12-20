@@ -6,7 +6,7 @@
 	<dict>
 		<key>Bundles</key>
 		<array>
-			<string>com.apple.mobilesafari</string>
+			<string>io.idb.deviceinfo</string>
 		</array>	
 	</dict>
 </dict>

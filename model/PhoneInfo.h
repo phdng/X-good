@@ -47,11 +47,11 @@
 + (instancetype)fromDictionary:(NSDictionary *)dict;
 
 // 文件存储方法
-- (BOOL)saveToFile:(NSString *)filePath;
-+ (instancetype)loadFromFile:(NSString *)filePath;
+- (BOOL)saveToFile;
++ (instancetype)loadFromPrefs;
 
 // 静态方法：直接保存 NSDictionary 到文件
-+ (BOOL)saveDictionary:(NSDictionary *)dict toFile:(NSString *)filePath;
++ (BOOL)saveDictionary:(NSDictionary *)dict ;
 
 // 静态方法：从文件读取并返回 NSDictionary
 + (NSDictionary *)loadDictionaryFromFile:(NSString *)filePath;

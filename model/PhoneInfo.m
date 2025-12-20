@@ -102,16 +102,31 @@
 
 #pragma mark - 文件存储
 
-- (BOOL)saveToFile:(NSString *)filePath {
+- (BOOL)saveToFile{
     NSDictionary *dict = [self toDictionary];
     
     // 使用新的静态方法保存
-    return [PhoneInfo saveDictionary:dict toFile:filePath];
+    return [PhoneInfo saveDictionary:dict ];
 }
 
-+ (instancetype)loadFromFile:(NSString *)filePath {
-    NSDictionary* dict = [PhoneInfo loadDictionaryFromFile:filePath];
-    return [PhoneInfo fromDictionary:dict];
++ (instancetype)loadFromPrefs{
+    CFPropertyListRef value =
+        CFPreferencesCopyValue(
+            CFSTR("PhoneInfo"),
+            CFSTR("com.projectx.phoneinfo"),
+            kCFPreferencesAnyUser,
+            kCFPreferencesCurrentHost
+        );
+
+    if (!value || CFGetTypeID(value) != CFDictionaryGetTypeID()) {
+        if (value) CFRelease(value);
+        return nil;
+    }
+
+    NSDictionary *dict = (__bridge NSDictionary *)value;
+    PhoneInfo *info = [PhoneInfo fromDictionary:dict];
+    CFRelease(value);
+    return info;
 }
 
 #pragma mark - 直接字典存储和读取
@@ -122,51 +137,26 @@
  * @param filePath 文件路径
  * @return 保存是否成功
  */
-+ (BOOL)saveDictionary:(NSDictionary *)dict toFile:(NSString *)filePath {
++ (BOOL)saveDictionary:(NSDictionary *)dict {
     if (!dict || ![dict isKindOfClass:[NSDictionary class]]) {
         NSLog(@"无效的字典参数");
         return NO;
     }
     
-    if (!filePath || filePath.length == 0) {
-        NSLog(@"无效的文件路径");
-        return NO;
-    }
     
-    // 创建目录（如果不存在）
-    NSString *directory = [filePath stringByDeletingLastPathComponent];
-    if (![[NSFileManager defaultManager] fileExistsAtPath:directory]) {
-        NSError *error = nil;
-        BOOL success = [[NSFileManager defaultManager] createDirectoryAtPath:directory
-                                                  withIntermediateDirectories:YES
-                                                                   attributes:nil
-                                                                        error:&error];
-        if (!success) {
-            NSLog(@"创建目录失败: %@, error: %@", directory, error);
-            return NO;
-        }
-    }
-    
-    NSError *error = nil;
-    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict 
-                                                       options:NSJSONWritingPrettyPrinted 
-                                                         error:&error];
-    
-    if (error) {
-        NSLog(@"JSON 序列化失败: %@", error);
-        return NO;
-    }
-    
-    BOOL success = [jsonData writeToFile:filePath 
-                                 options:NSDataWritingAtomic 
-                                   error:&error];
-    
-    if (!success) {
-        NSLog(@"写入文件失败: %@, error: %@", filePath, error);
-        return NO;
-    }
-    
-    NSLog(@"字典已成功保存到: %@", filePath);
+    CFPreferencesSetValue(
+        CFSTR("PhoneInfo"),
+        (__bridge CFPropertyListRef)dict,
+        CFSTR("com.projectx.phoneinfo"),
+        kCFPreferencesAnyUser,
+        kCFPreferencesCurrentHost
+    );
+
+    CFPreferencesSynchronize(
+        CFSTR("com.projectx.phoneinfo"),
+        kCFPreferencesAnyUser,
+        kCFPreferencesCurrentHost
+    );
     return YES;
 }
 

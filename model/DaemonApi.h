@@ -3,3 +3,6 @@
 
 #define SAVE_PHONE_INFO @"/savePhoneInfo"
 #define GET_PHONE_INFO @"/loadPhoneInfo"
+
+#define NEW_PHONE @"/newPhone"
+#define ACTIVE_BACKUP @"/activeBackUp"

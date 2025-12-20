@@ -22,6 +22,6 @@
     return _phoneInfo;
 }
 - (void) freshCacheData{
-    _phoneInfo = [[DaemonApiManager sharedManager] requestPhoneInfo];
+    _phoneInfo = [PhoneInfo loadFromPrefs];
 }
 @end

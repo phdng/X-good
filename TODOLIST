@@ -19,6 +19,7 @@ NXGetLocalArchInfo 获取CPU架构
 
 safari清理/var/mobile/Library/Safari 不然打开会跳出之前的东西
 
+boottime 卡顿 devicespec iosversion storage 闪退
 
 
 启动时间和开机时间逻辑需要修改

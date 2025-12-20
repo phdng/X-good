@@ -37,7 +37,163 @@
 // Cache for values
 static NSMutableDictionary *valueCache;
 
+// Define hook group for main identifier spoofing
+%group Identifiers
 
+// // MGCopyAnswer hook for various system identifiers
+// %hookf(NSString *, MGCopyAnswer, CFStringRef property) {
+//     PhoneInfo * phoneInfo = CurrentPhoneInfo();
+//     NSString *propertyString = (__bridge NSString *)property;
+//     NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
+    
+//     PXLog(@"MGCopyAnswer requested for property: %@ by app: %@", propertyString, currentBundleID);
+    
+    
+//     // Handle various identifier types
+//     if ([propertyString isEqualToString:@"UniqueDeviceID"] || 
+//         [propertyString isEqualToString:@"UniqueDeviceIDData"]) {
+        
+//         NSString *spoofedUDID = phoneInfo.UDID;
+//         if (spoofedUDID) {
+//             PXLog(@"Spoofing UDID with: %@", spoofedUDID);
+//             return spoofedUDID;
+//         }
+        
+//     } 
+//     else if ([propertyString isEqualToString:@"SerialNumber"]) {
+//         // Special case for Filza and ADManager
+//         if ([currentBundleID isEqualToString:@"com.tigisoftware.Filza"] || 
+//             [currentBundleID isEqualToString:@"com.tigisoftware.ADManager"]) {
+//             NSString *hardcodedSerial = @"FCCC15Q4HG04";
+//             PXLog(@"[WeaponX] 📱 Returning hardcoded serial number for %@: %@", currentBundleID, hardcodedSerial);
+//             return hardcodedSerial;
+//         }
+        
+//         if ([manager isIdentifierEnabled:@"SerialNumber"]) {
+//             NSString *spoofedSerial = [manager getValueForType:@"SerialNumber"];
+//             if (spoofedSerial) {
+//                 PXLog(@"Spoofing Serial Number with: %@", spoofedSerial);
+//                 return spoofedSerial;
+//             }
+//         }
+//     }
+//     else if ([propertyString isEqualToString:@"InternationalMobileEquipmentIdentity"] ||
+//              [propertyString isEqualToString:@"MobileEquipmentIdentifier"]) {
+        
+//         if ([manager isIdentifierEnabled:@"IMEI"]) {
+//             NSString *spoofedIMEI = [manager getValueForType:@"IMEI"];
+//             if (spoofedIMEI) {
+//                 PXLog(@"Spoofing IMEI with: %@", spoofedIMEI);
+//                 return spoofedIMEI;
+//             }
+//         }
+//     }
+    
+//     // Default: return original value
+//     PXLog(@"No spoofing applied, returning original value");
+//     return %orig;
+// }
+
+// IDFA hook
+%hook ASIdentifierManager
+
+- (NSUUID *)advertisingIdentifier {
+    NSString *idfaString = CurrentPhoneInfo().idfa;
+    if (idfaString) {
+        PXLog(@"Spoofing IDFA with: %@", idfaString);
+        return [[NSUUID alloc] initWithUUIDString:idfaString];
+    }
+    
+    
+    PXLog(@"No IDFA spoofing applied, returning original value");
+    return %orig;
+}
+
+%end
+
+// IDFV and device name hooks
+%hook UIDevice
+
+// Hook for identifierForVendor (IDFV)
+- (NSUUID *)identifierForVendor {
+    NSUUID *originalIdentifier = %orig;
+    
+    @try {
+        NSString *idfvString = CurrentPhoneInfo().idfv;
+        if (idfvString) {
+            return [[NSUUID alloc] initWithUUIDString:idfvString];
+        }
+    
+    } @catch (NSException *exception) {
+        PXLog(@"[WeaponX] Exception in identifierForVendor: %@", exception);
+    }
+    
+    return originalIdentifier;
+}
+
+// Hook for device name with improved iOS 15-16 compatibility
+- (NSString *)name {
+    NSString *originalName = %orig;
+    
+    @try {
+        NSString *deviceName = CurrentPhoneInfo().deviceName;
+        if (deviceName && deviceName.length > 0) {
+            // Cache the name for this process to ensure consistency
+            static NSString *cachedHostName = nil;
+            if (!cachedHostName) {
+                cachedHostName = [deviceName copy];
+            }
+            PXLog(@"[WeaponX] Spoofing NSHost name with: %@", cachedHostName);
+            return cachedHostName;
+        }
+        
+    } @catch (NSException *exception) {
+        PXLog(@"[WeaponX] Exception in NSHost name: %@", exception);
+    }
+    
+    return originalName;
+}
+
+%end
+
+// IDFV fallback through ubiquityIdentityToken
+%hook NSFileManager
+
+- (id)ubiquityIdentityToken {
+    return nil;
+}
+
+%end
+
+// NSHost hook for device name
+%hook NSHost
+
+- (NSString *)name {
+    NSString *originalName = %orig;
+    
+    @try {
+        NSString *deviceName = CurrentPhoneInfo().deviceName;
+        if (deviceName && deviceName.length > 0) {
+            // Cache the name for this process to ensure consistency
+            static NSString *cachedHostName = nil;
+            if (!cachedHostName) {
+                cachedHostName = [deviceName copy];
+            }
+            PXLog(@"[WeaponX] Spoofing NSHost name with: %@", cachedHostName);
+            return cachedHostName;
+        }
+    
+    } @catch (NSException *exception) {
+        PXLog(@"[WeaponX] Exception in NSHost name: %@", exception);
+    }
+    
+    return originalName;
+}
+
+%end
+
+
+%end // End of Identifiers group
 
 
 // Define hook group for location spoofing
@@ -1088,17 +1244,8 @@ static char* hook_GSSystemGetSerialNo(void) {
 
     // Detect iOS version
     NSOperatingSystemVersion osVersion = [[NSProcessInfo processInfo] operatingSystemVersion];
-    PXLog(@"Detected iOS version: %ld.%ld.%ld", 
-          (long)osVersion.majorVersion, 
-          (long)osVersion.minorVersion, 
-          (long)osVersion.patchVersion);
-          
-    // Special handling for iOS 16+
-    if (osVersion.majorVersion >= 16) {
-        PXLog(@"iOS 16+ detected, enabling compatibility mode");
-    }
     
-
+    %init(Identifiers);
     
     // Initialize value cache
     valueCache = [NSMutableDictionary dictionary];
