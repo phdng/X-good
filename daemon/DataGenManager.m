@@ -1248,9 +1248,7 @@
     // Determine which naming pattern to use
     uint32_t patternSelector;
     if (SecRandomCopyBytes(kSecRandomDefault, sizeof(patternSelector), (uint8_t *)&patternSelector) != errSecSuccess) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                       code:3001 
-                                   userInfo:@{NSLocalizedDescriptionKey: @"Failed to generate secure random number"}];
+        NSLog(@"Failed to generate secure random number");
         return nil;
     }
     
@@ -1339,10 +1337,7 @@
     if ([self isValidDeviceName:deviceName]) {
         return deviceName;
     }
-    
-    self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                   code:3002 
-                               userInfo:@{NSLocalizedDescriptionKey: @"Generated device name failed validation"}];
+    NSLog(@"Generated device name failed validation");
     return nil;
 }
 
@@ -1417,9 +1412,7 @@
         if (SecRandomCopyBytes(kSecRandomDefault, sizeof(randomValue), (uint8_t *)&randomValue) == errSecSuccess) {
             [serialNumber appendFormat:@"%c", chars[randomValue % strlen(chars)]];
         } else {
-            self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                           code:4001 
-                                       userInfo:@{NSLocalizedDescriptionKey: @"Failed to generate secure random number for serial"}];
+            NSLog(@"Failed to generate secure random number for serial");
             return nil;
         }
     }
@@ -1428,10 +1421,7 @@
     if ([self isValidSerialNumber:serialNumber]) {
         return serialNumber;
     }
-    
-    self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                   code:4002 
-                               userInfo:@{NSLocalizedDescriptionKey: @"Generated serial number failed validation"}];
+    NSLog(@"Generated serial number failed validation");
     return nil;
 }
 
@@ -1613,9 +1603,7 @@
     // Generate a random index within the array bounds
     uint32_t randomIndex;
     if (SecRandomCopyBytes(kSecRandomDefault, sizeof(randomIndex), (uint8_t *)&randomIndex) != errSecSuccess) {
-        self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                         code:5002 
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Failed to generate secure random number"}];
+        NSLog(@"Failed to generate secure random number");
         return nil;
     }
     
@@ -1632,12 +1620,6 @@
 
     return iosVersion;
     
-    
-    self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
-                                     code:5003 
-                                 userInfo:@{NSLocalizedDescriptionKey: @"Generated iOS version info failed validation"}];
-    return nil;
-
 }
 
 

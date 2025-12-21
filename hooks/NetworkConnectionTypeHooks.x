@@ -828,39 +828,6 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
 
 %end
 
-// Notification callback for settings changes
-static void networkSettingsChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    // Clear cache when notification received
-    cacheTimestamp = nil;
-    isoCountryCodeCacheTimestamp = nil; // Also clear ISO country code cache
-    PXLog(@"[NetworkHook] Received settings change notification, cache cleared");
-}
-
-// Notification callback for ISO country code changes
-static void isoCountryCodeChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    // Clear ISO country code cache when notification received
-    isoCountryCodeCacheTimestamp = nil;
-    PXLog(@"[NetworkHook] Received ISO country code change notification, cache cleared");
-}
-
-
-// Notification callback for carrier details changes
-static void carrierDetailsChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    // Clear carrier details cache when notification received
-    carrierDetailsCacheTimestamp = nil;
-    PXLog(@"[NetworkHook] Received carrier details change notification, cache cleared");
-}
-
-// Notification callback for signal strength settings changes
-static void signalStrengthSettingsChanged(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
-    // Clear cache when notification received
-    lastSignalUpdateTime = nil;
-    
-    // Also reset the network type change timer to allow immediate change
-    lastNetworkTypeChangeTime = nil;
-    
-    PXLog(@"[NetworkHook] Received signal strength settings change notification, cache cleared");
-}
 
 // Hook for WiFi signal strength (CNCopyCurrentNetworkInfo)
 static CFDictionaryRef (*original_CNCopyCurrentNetworkInfo)(CFStringRef interfaceName);
@@ -957,41 +924,6 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
             PXLog(@"[NetworkHook] ERROR: Could not find getifaddrs function!");
         }
         
-        // Note: We don't hook CNCopySupportedInterfaces or CNCopyCurrentNetworkInfo
-        // as they are already handled by WiFiHook.x for SSID/BSSID spoofing
-        
-        // Register for notification when settings change
-        CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-        CFNotificationCenterAddObserver(darwinCenter,
-                                        NULL,
-                                        networkSettingsChanged,
-                                        CFSTR("com.hydra.projectx.networkConnectionTypeChanged"),
-                                        NULL,
-                                        CFNotificationSuspensionBehaviorDeliverImmediately);
-        
-        // Register for notification when ISO country code changes
-        CFNotificationCenterAddObserver(darwinCenter,
-                                        NULL,
-                                        isoCountryCodeChanged,
-                                        CFSTR("com.hydra.projectx.networkISOCountryCodeChanged"),
-                                        NULL,
-                                        CFNotificationSuspensionBehaviorDeliverImmediately);
-        
-        // Register for notification when carrier details change
-        CFNotificationCenterAddObserver(darwinCenter,
-                                        NULL,
-                                        carrierDetailsChanged,
-                                        CFSTR("com.hydra.projectx.carrierDetailsChanged"),
-                                        NULL,
-                                        CFNotificationSuspensionBehaviorDeliverImmediately);
-        
-        // Register for notification when signal strength settings change
-        CFNotificationCenterAddObserver(darwinCenter,
-                                        NULL,
-                                        signalStrengthSettingsChanged,
-                                        CFSTR("com.hydra.projectx.signalStrengthSettingsChanged"),
-                                        NULL,
-                                        CFNotificationSuspensionBehaviorDeliverImmediately);
         
         // Log initial state
         NetworkConnectionType initialType = getNetworkConnectionType();

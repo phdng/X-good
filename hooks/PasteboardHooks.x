@@ -5,12 +5,9 @@
 #import "ProfileManager.h"
 #import "DataManager.h"
 
-// Global variables to track state
-static NSMutableDictionary *cachedBundleDecisions = nil;
+
 static NSMutableDictionary *customChangeCountMap = nil; // Store custom change counts per app
 static NSMutableDictionary *lastKnownPasteboardData = nil; // Cache pasteboard content hash
-
-
 
 // Helper for safe change count management
 static NSInteger getCustomChangeCount(NSString *bundleID, NSInteger originalCount) {
@@ -512,7 +509,6 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @autoreleasepool {
         // Skip for system processes
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
         
         PXLog(@"[WeaponX] 📋 Initialized PasteboardHooks for %@", bundleID);
     }

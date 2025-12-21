@@ -31,11 +31,6 @@ static kern_return_t (*orig_host_statistics64)(host_t host, host_flavor_t flavor
 static NXArchInfo* (* orig_nx_get_local_arch_info)();
 
 
-// Caches for device specs
-static NSMutableDictionary *deviceSpecsCache;
-static NSDate *cacheTimestamp;
-static NSString *cachedDeviceModel;
-static NSMutableDictionary *cachedBundleDecisions;
 
 // Cache to track which memory hooks have been called for logging
 static NSMutableSet *hookedMemoryAPIs;
@@ -75,7 +70,7 @@ static CGSize parseResolution(NSString *resolutionString) {
     
     return CGSizeMake(width, height);
 }
-
+/** 这堆修改屏幕大小的功能会导致部分应用闪退 后续作为可选配置打开
 #pragma mark - UIScreen Hooks
 
 
@@ -174,18 +169,44 @@ static CGSize parseResolution(NSString *resolutionString) {
     return pixelRatio;
 }
 
-// Hook for current mode (affects refresh rate)
-- (UIScreenMode *)currentMode {
-    UIScreenMode *originalMode = %orig;
+
+
+%end
+#pragma mark - Screen Density (DPI) Hooks
+
+%hook UIScreen
+
+// For screen density
+- (CGFloat)native_scale {
+    CGFloat originalScale = %orig;
     
-    // We can't create a new UIScreenMode, but we can modify its properties
-    // through associated objects if needed in the future
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
+        return originalScale;
+    }
     
-    return originalMode;
+    // Calculate from screen density (PPI)
+    NSInteger screenDensity = [model.screenDensity integerValue];
+    if (screenDensity <= 0) {
+        return originalScale;
+    }
+    
+    // iPhone reference point is 163 PPI for scale 1.0
+    CGFloat spoofedScale = screenDensity / 163.0;
+    
+    // Log the change the first time
+    static BOOL loggedNativeScale = NO;
+    if (!loggedNativeScale) {
+        PXLog(@"[DeviceSpec] Spoofing native scale from %.2f to %.2f (density: %ld PPI)",
+             originalScale, spoofedScale, (long)screenDensity);
+        loggedNativeScale = YES;
+    }
+    
+    return spoofedScale;
 }
 
 %end
-
+*/
 #pragma mark - NSProcessInfo Hooks
 
 %hook NSProcessInfo
@@ -474,40 +495,6 @@ static CGSize parseResolution(NSString *resolutionString) {
 
 %end
 
-#pragma mark - Screen Density (DPI) Hooks
-
-%hook UIScreen
-
-// For screen density
-- (CGFloat)native_scale {
-    CGFloat originalScale = %orig;
-    
-    DeviceModel *model = CurrentPhoneInfo().deviceModel;
-    if (!model) {
-        return originalScale;
-    }
-    
-    // Calculate from screen density (PPI)
-    NSInteger screenDensity = [model.screenDensity integerValue];
-    if (screenDensity <= 0) {
-        return originalScale;
-    }
-    
-    // iPhone reference point is 163 PPI for scale 1.0
-    CGFloat spoofedScale = screenDensity / 163.0;
-    
-    // Log the change the first time
-    static BOOL loggedNativeScale = NO;
-    if (!loggedNativeScale) {
-        PXLog(@"[DeviceSpec] Spoofing native scale from %.2f to %.2f (density: %ld PPI)",
-             originalScale, spoofedScale, (long)screenDensity);
-        loggedNativeScale = YES;
-    }
-    
-    return spoofedScale;
-}
-
-%end
 
 #pragma mark - JavaScript WebKit Feature Detection Hooks
 
@@ -1546,13 +1533,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     @autoreleasepool {
         @try {
             PXLog(@"[DeviceSpec] Initializing device specifications spoofing hooks");
-            
-            // Always initialize caches
-            deviceSpecsCache = [NSMutableDictionary dictionary];
-            cachedBundleDecisions = [NSMutableDictionary dictionary];
-            
-            PXLog(@"[DeviceSpec] App is scoped, installing device specification hooks");
-            
+                        
             // Initialize memory hook function pointers for scoped apps only
             void *libSystem = dlopen("/usr/lib/libSystem.dylib", RTLD_NOW);
             if (libSystem) {

@@ -18,12 +18,7 @@ hw.physicalcpu_max
 NXGetLocalArchInfo 获取CPU架构
 
 safari清理/var/mobile/Library/Safari 不然打开会跳出之前的东西
-
-boottime 卡顿 devicespec iosversion storage 闪退
+清理 prefernce
 
 
 启动时间和开机时间逻辑需要修改
-
-WebServerManager api读取配置时若发现没有则创建一个默认的 /private/var/mobile/Media/ProjectX/currentData.json
-新机则创建一个备份将 新机出的参数保存到currentData.json中再复制一份到备份目录中 切换备份时先将可能改变的currentData.json拷贝到备份里再将要切的
-新备份内容拷贝出来作为currentData.json

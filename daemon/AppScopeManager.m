@@ -35,10 +35,6 @@
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if (!bundleID) return NO;
     
-    // 是自己直接返回
-    if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
-        return NO;
-    }
     
     // Check each scoped app's extension pattern
     if ([_scopedApps containsObject:bundleID]) {

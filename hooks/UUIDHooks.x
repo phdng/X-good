@@ -15,70 +15,6 @@
 // Macro for iOS version checking
 #define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != NSOrderedAscending)
 
-// Global variables to track state
-static NSMutableDictionary *cachedBundleDecisions = nil;
-static NSTimeInterval kCacheValidityDuration = 600.0; // 10 minutes for better performance
-static dispatch_queue_t cacheQueue = nil; // Queue for thread-safe access to cache
-
-// Direct check for SystemBootUUID being enabled
-static BOOL isSystemBootUUIDEnabled() {
-    // Check settings file directly
-    NSArray *preferencesLocations = @[
-        @"/var/jb/var/mobile/Library/Preferences",
-        @"/var/jb/private/var/mobile/Library/Preferences",
-        @"/var/mobile/Library/Preferences"
-    ];
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    for (NSString *prefsPath in preferencesLocations) {
-        NSString *settingsPath = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-        if ([fileManager fileExistsAtPath:settingsPath]) {
-            NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:settingsPath];
-            NSDictionary *enabledIdentifiers = settingsDict[@"EnabledIdentifiers"];
-            
-            if (enabledIdentifiers) {
-                BOOL isEnabled = [enabledIdentifiers[@"SystemBootUUID"] boolValue];
-                PXLog(@"[WeaponX] 🔍 SystemBootUUID enabled status from plist: %@", isEnabled ? @"YES" : @"NO");
-                return isEnabled;
-            }
-        }
-    }
-    
-    PXLog(@"[WeaponX] ⚠️ Could not find settings.plist file, assuming SystemBootUUID is disabled");
-    return NO;
-}
-
-// Direct check for DyldCacheUUID being enabled
-static BOOL isDyldCacheUUIDEnabled() {
-    // Check settings file directly
-    NSArray *preferencesLocations = @[
-        @"/var/jb/var/mobile/Library/Preferences",
-        @"/var/jb/private/var/mobile/Library/Preferences",
-        @"/var/mobile/Library/Preferences"
-    ];
-    
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    for (NSString *prefsPath in preferencesLocations) {
-        NSString *settingsPath = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-        if ([fileManager fileExistsAtPath:settingsPath]) {
-            NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:settingsPath];
-            NSDictionary *enabledIdentifiers = settingsDict[@"EnabledIdentifiers"];
-            
-            if (enabledIdentifiers) {
-                BOOL isEnabled = [enabledIdentifiers[@"DyldCacheUUID"] boolValue];
-                PXLog(@"[WeaponX] 🔍 DyldCacheUUID enabled status from plist: %@", isEnabled ? @"YES" : @"NO");
-                return isEnabled;
-            }
-        }
-    }
-    
-    PXLog(@"[WeaponX] ⚠️ Could not find settings.plist file, assuming DyldCacheUUID is disabled");
-    return NO;
-}
-
-
 
 #pragma mark - NSUUID Hooks
 
@@ -88,14 +24,12 @@ static BOOL isDyldCacheUUIDEnabled() {
 + (instancetype)UUID {
     @try {
         // Use direct check instead of manager
-        if (isSystemBootUUIDEnabled()) {
-            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
-            if (bootUUID && bootUUID.length > 0) {
-                NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
-                if (uuid) {
-                    PXLog(@"[WeaponX] 🔄 Spoofing NSUUID with: %@", bootUUID);
-                    return uuid;
-                }
+        NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
+        if (bootUUID && bootUUID.length > 0) {
+            NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
+            if (uuid) {
+                PXLog(@"[WeaponX] 🔄 Spoofing NSUUID with: %@", bootUUID);
+                return uuid;
             }
         }
     } @catch (NSException *exception) {
@@ -108,43 +42,41 @@ static BOOL isDyldCacheUUIDEnabled() {
 // Hook UUIDString method to intercept UUID string requests
 - (NSString *)UUIDString {
     @try {        
-            // Use direct check instead of manager
-            if (isSystemBootUUIDEnabled()) {
-                // Only spoof if this is a system UUID (we can check by comparing with the actual system UUID)
-                uuid_t bytes;
-                [self getUUIDBytes:bytes];
-                
-                // Create a string from the original UUID bytes
-                CFUUIDRef cfuuid = CFUUIDCreateFromUUIDBytes(kCFAllocatorDefault, *((CFUUIDBytes *)bytes));
-                if (!cfuuid) {
-                    return %orig;
-                }
-                
-                NSString *originalUUID = (NSString *)CFBridgingRelease(CFUUIDCreateString(kCFAllocatorDefault, cfuuid));
-                CFRelease(cfuuid);
-                
-                // Determine if this is likely a system UUID (can be enhanced with more checks)
-                io_registry_entry_t ioRegistryRoot = IORegistryEntryFromPath(kIOMasterPortDefault, "IOService:/");
-                if (ioRegistryRoot) {
-                    CFStringRef platformUUID = (CFStringRef)IORegistryEntryCreateCFProperty(
-                        ioRegistryRoot, 
-                        CFSTR("IOPlatformUUID"), 
-                        kCFAllocatorDefault, 
-                        0);
-                    IOObjectRelease(ioRegistryRoot);
-                    
-                    if (platformUUID) {
-                        NSString *systemUUID = (__bridge_transfer NSString *)platformUUID;
-                        if ([originalUUID isEqualToString:systemUUID]) {
-                            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
-                            if (bootUUID && bootUUID.length > 0) {
-                                PXLog(@"[WeaponX] 🔄 Spoofing UUIDString with: %@", bootUUID);
-                                return bootUUID;
-                            }
-                        }
+    // Use direct check instead of manager
+        // Only spoof if this is a system UUID (we can check by comparing with the actual system UUID)
+        uuid_t bytes;
+        [self getUUIDBytes:bytes];
+        
+        // Create a string from the original UUID bytes
+        CFUUIDRef cfuuid = CFUUIDCreateFromUUIDBytes(kCFAllocatorDefault, *((CFUUIDBytes *)bytes));
+        if (!cfuuid) {
+            return %orig;
+        }
+        
+        NSString *originalUUID = (NSString *)CFBridgingRelease(CFUUIDCreateString(kCFAllocatorDefault, cfuuid));
+        CFRelease(cfuuid);
+        
+        // Determine if this is likely a system UUID (can be enhanced with more checks)
+        io_registry_entry_t ioRegistryRoot = IORegistryEntryFromPath(kIOMasterPortDefault, "IOService:/");
+        if (ioRegistryRoot) {
+            CFStringRef platformUUID = (CFStringRef)IORegistryEntryCreateCFProperty(
+                ioRegistryRoot, 
+                CFSTR("IOPlatformUUID"), 
+                kCFAllocatorDefault, 
+                0);
+            IOObjectRelease(ioRegistryRoot);
+            
+            if (platformUUID) {
+                NSString *systemUUID = (__bridge_transfer NSString *)platformUUID;
+                if ([originalUUID isEqualToString:systemUUID]) {
+                    NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
+                    if (bootUUID && bootUUID.length > 0) {
+                        PXLog(@"[WeaponX] 🔄 Spoofing UUIDString with: %@", bootUUID);
+                        return bootUUID;
                     }
                 }
             }
+        }
         
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in UUIDString: %@", exception);
@@ -156,39 +88,38 @@ static BOOL isDyldCacheUUIDEnabled() {
 // Add additional initialization methods beyond what we already hook
 - (instancetype)initWithUUIDBytes:(const uuid_t)bytes {
     @try {        
-        if (isSystemBootUUIDEnabled()) {
-            // Create string from bytes to see if it matches the system UUID
-            CFUUIDRef cfuuid = CFUUIDCreateFromUUIDBytes(kCFAllocatorDefault, *((CFUUIDBytes *)bytes));
-            if (!cfuuid) {
-                return %orig;
-            }
+        // Create string from bytes to see if it matches the system UUID
+        CFUUIDRef cfuuid = CFUUIDCreateFromUUIDBytes(kCFAllocatorDefault, *((CFUUIDBytes *)bytes));
+        if (!cfuuid) {
+            return %orig;
+        }
+        
+        NSString *originalUUID = (NSString *)CFBridgingRelease(CFUUIDCreateString(kCFAllocatorDefault, cfuuid));
+        CFRelease(cfuuid);
+        
+        // Check if this might be system UUID
+        io_registry_entry_t ioRegistryRoot = IORegistryEntryFromPath(kIOMasterPortDefault, "IOService:/");
+        if (ioRegistryRoot) {
+            CFStringRef platformUUID = (CFStringRef)IORegistryEntryCreateCFProperty(
+                ioRegistryRoot, 
+                CFSTR("IOPlatformUUID"), 
+                kCFAllocatorDefault, 
+                0);
+            IOObjectRelease(ioRegistryRoot);
             
-            NSString *originalUUID = (NSString *)CFBridgingRelease(CFUUIDCreateString(kCFAllocatorDefault, cfuuid));
-            CFRelease(cfuuid);
-            
-            // Check if this might be system UUID
-            io_registry_entry_t ioRegistryRoot = IORegistryEntryFromPath(kIOMasterPortDefault, "IOService:/");
-            if (ioRegistryRoot) {
-                CFStringRef platformUUID = (CFStringRef)IORegistryEntryCreateCFProperty(
-                    ioRegistryRoot, 
-                    CFSTR("IOPlatformUUID"), 
-                    kCFAllocatorDefault, 
-                    0);
-                IOObjectRelease(ioRegistryRoot);
-                
-                if (platformUUID) {
-                    NSString *systemUUID = (__bridge_transfer NSString *)platformUUID;
-                    if ([originalUUID isEqualToString:systemUUID]) {
-                        NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
-                        if (bootUUID && bootUUID.length > 0) {
-                            NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
-                            PXLog(@"[WeaponX] 🔄 Spoofing NSUUID initWithUUIDBytes with: %@", bootUUID);
-                            return uuid ?: %orig;
-                        }
+            if (platformUUID) {
+                NSString *systemUUID = (__bridge_transfer NSString *)platformUUID;
+                if ([originalUUID isEqualToString:systemUUID]) {
+                    NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
+                    if (bootUUID && bootUUID.length > 0) {
+                        NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
+                        PXLog(@"[WeaponX] 🔄 Spoofing NSUUID initWithUUIDBytes with: %@", bootUUID);
+                        return uuid ?: %orig;
                     }
                 }
             }
         }
+    
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in NSUUID initWithUUIDBytes: %@", exception);
     }
@@ -201,36 +132,35 @@ static BOOL isDyldCacheUUIDEnabled() {
     NSString *origDescription = %orig;
     
     @try {
-        if (isSystemBootUUIDEnabled()) {
-            // Generally we don't want to modify all descriptions, only ones that might be system UUIDs
-            // We'll check if the description matches the UUID pattern first
-            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
-                                                                                  options:NSRegularExpressionCaseInsensitive 
-                                                                                    error:nil];
-            if ([regex numberOfMatchesInString:origDescription options:0 range:NSMakeRange(0, origDescription.length)] > 0) {
-                // It's a UUID string, now check if it's the system UUID
-                io_registry_entry_t ioRegistryRoot = IORegistryEntryFromPath(kIOMasterPortDefault, "IOService:/");
-                if (ioRegistryRoot) {
-                    CFStringRef platformUUID = (CFStringRef)IORegistryEntryCreateCFProperty(
-                        ioRegistryRoot, 
-                        CFSTR("IOPlatformUUID"), 
-                        kCFAllocatorDefault, 
-                        0);
-                    IOObjectRelease(ioRegistryRoot);
-                    
-                    if (platformUUID) {
-                        NSString *systemUUID = (__bridge_transfer NSString *)platformUUID;
-                        if ([origDescription isEqualToString:systemUUID]) {
-                            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
-                            if (bootUUID && bootUUID.length > 0) {
-                                PXLog(@"[WeaponX] 🔄 Spoofing NSUUID description from %@ to %@", origDescription, bootUUID);
-                                return bootUUID;
-                            }
+        // Generally we don't want to modify all descriptions, only ones that might be system UUIDs
+        // We'll check if the description matches the UUID pattern first
+        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$" 
+                                                                                options:NSRegularExpressionCaseInsensitive 
+                                                                                error:nil];
+        if ([regex numberOfMatchesInString:origDescription options:0 range:NSMakeRange(0, origDescription.length)] > 0) {
+            // It's a UUID string, now check if it's the system UUID
+            io_registry_entry_t ioRegistryRoot = IORegistryEntryFromPath(kIOMasterPortDefault, "IOService:/");
+            if (ioRegistryRoot) {
+                CFStringRef platformUUID = (CFStringRef)IORegistryEntryCreateCFProperty(
+                    ioRegistryRoot, 
+                    CFSTR("IOPlatformUUID"), 
+                    kCFAllocatorDefault, 
+                    0);
+                IOObjectRelease(ioRegistryRoot);
+                
+                if (platformUUID) {
+                    NSString *systemUUID = (__bridge_transfer NSString *)platformUUID;
+                    if ([origDescription isEqualToString:systemUUID]) {
+                        NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
+                        if (bootUUID && bootUUID.length > 0) {
+                            PXLog(@"[WeaponX] 🔄 Spoofing NSUUID description from %@ to %@", origDescription, bootUUID);
+                            return bootUUID;
                         }
                     }
                 }
             }
         }
+    
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in NSUUID description: %@", exception);
     }
@@ -246,14 +176,12 @@ static BOOL isDyldCacheUUIDEnabled() {
 
 + (NSString *)stringWithUUID:(uuid_t)bytes {
     @try {        
-        // Use direct check instead of manager
-        if (isSystemBootUUIDEnabled()) {
-            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
-            if (bootUUID && bootUUID.length > 0) {
-                PXLog(@"[WeaponX] 🔄 Spoofing System Boot UUID with: %@", bootUUID);
-                return bootUUID;
-            }
+        NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
+        if (bootUUID && bootUUID.length > 0) {
+            PXLog(@"[WeaponX] 🔄 Spoofing System Boot UUID with: %@", bootUUID);
+            return bootUUID;
         }
+        
     
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in stringWithUUID: %@", exception);
@@ -273,14 +201,12 @@ static BOOL isDyldCacheUUIDEnabled() {
         // Check if we're looking for the platform UUID
         if (key && [(__bridge NSString *)key isEqualToString:@"IOPlatformUUID"]) {            
             // Use direct check instead of manager
-            if (isSystemBootUUIDEnabled()) {
-                
-                NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
-                if (bootUUID && bootUUID.length > 0) {
-                    PXLog(@"[WeaponX] 🔄 Spoofing IOPlatformUUID with: %@", bootUUID);
-                    return (__bridge_retained CFStringRef)bootUUID;
-                }
+            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
+            if (bootUUID && bootUUID.length > 0) {
+                PXLog(@"[WeaponX] 🔄 Spoofing IOPlatformUUID with: %@", bootUUID);
+                return (__bridge_retained CFStringRef)bootUUID;
             }
+            
         }
         
     } @catch (NSException *exception) {
@@ -298,16 +224,14 @@ static BOOL isDyldCacheUUIDEnabled() {
         // If successful and we get properties back
         if (result == kIOReturnSuccess && properties && *properties) {            
             // Use direct check instead of manager
-            if (isSystemBootUUIDEnabled()) {
-                NSMutableDictionary *props = (__bridge NSMutableDictionary *)*properties;
-                
-                // Check if the dictionary has IOPlatformUUID
-                if (props[@"IOPlatformUUID"]) {
-                    NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
-                    if (bootUUID && bootUUID.length > 0) {
-                        PXLog(@"[WeaponX] 🔄 Spoofing IOPlatformUUID in properties with: %@", bootUUID);
-                        props[@"IOPlatformUUID"] = bootUUID;
-                    }
+            NSMutableDictionary *props = (__bridge NSMutableDictionary *)*properties;
+            
+            // Check if the dictionary has IOPlatformUUID
+            if (props[@"IOPlatformUUID"]) {
+                NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
+                if (bootUUID && bootUUID.length > 0) {
+                    PXLog(@"[WeaponX] 🔄 Spoofing IOPlatformUUID in properties with: %@", bootUUID);
+                    props[@"IOPlatformUUID"] = bootUUID;
                 }
             }
             
@@ -328,7 +252,7 @@ static bool (*orig_dyld_get_shared_cache_uuid)(uuid_t uuid_out) = NULL;
 static bool replaced_dyld_get_shared_cache_uuid(uuid_t uuid_out) {
     @try {
         // First check if we need to spoof at all
-        if ( !isDyldCacheUUIDEnabled() || !uuid_out) {
+        if ( !uuid_out) {
             // Call original if we're not spoofing
             if (orig_dyld_get_shared_cache_uuid) {
                 return orig_dyld_get_shared_cache_uuid(uuid_out);
@@ -448,7 +372,7 @@ static const struct dyld_all_image_infos* replaced_dyld_get_all_image_infos(void
         // Use direct check instead of manager
         // The compiler warns about comparing sharedCacheUUID with NULL because it's an array pointer
         // Instead, we'll check if the version is high enough to safely access this field
-        if (isDyldCacheUUIDEnabled() && original->version >= 15) {
+        if (original->version >= 15) {
             NSString *dyldUUID =  CurrentPhoneInfo().dyldCacheUUID;
             if (!dyldUUID || dyldUUID.length == 0) {
                 if (!dyldUUID || dyldUUID.length == 0) {
@@ -516,18 +440,17 @@ static int (*orig_gethostuuid)(uuid_t id, const struct timespec *wait);
 
 static int replaced_gethostuuid(uuid_t id, const struct timespec *wait) {
     @try {        
-        if (isSystemBootUUIDEnabled()) {
-            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
-            if (bootUUID && bootUUID.length > 0) {
-                // Convert string UUID to bytes
-                NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
-                if (uuid) {
-                    [uuid getUUIDBytes:id];
-                    PXLog(@"[WeaponX] 🔄 Spoofing gethostuuid with: %@", bootUUID);
-                    return 0; // Success
-                }
+        NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
+        if (bootUUID && bootUUID.length > 0) {
+            // Convert string UUID to bytes
+            NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
+            if (uuid) {
+                [uuid getUUIDBytes:id];
+                PXLog(@"[WeaponX] 🔄 Spoofing gethostuuid with: %@", bootUUID);
+                return 0; // Success
             }
         }
+        
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in replaced_gethostuuid: %@", exception);
     }
@@ -547,25 +470,24 @@ static int replaced_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, 
     @try {
         // Check if we're looking for kern.uuid
         if (name && strcmp(name, "kern.uuid") == 0) {            
-            if (isSystemBootUUIDEnabled()) {
-                NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
-                if (bootUUID && bootUUID.length > 0 && oldp && oldlenp) {
-                    // Convert the UUID string to bytes
-                    NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
-                    if (uuid) {
-                        uuid_t bytes;
-                        [uuid getUUIDBytes:bytes];
-                        
-                        // Copy as much as will fit
-                        size_t toCopy = MIN(*oldlenp, sizeof(uuid_t));
-                        memcpy(oldp, bytes, toCopy);
-                        *oldlenp = toCopy;
-                        
-                        PXLog(@"[WeaponX] 🔄 Spoofing sysctlbyname(kern.uuid) with: %@", bootUUID);
-                        return 0; // Success
-                    }
+            NSString *bootUUID = CurrentPhoneInfo().systemBootUUID;
+            if (bootUUID && bootUUID.length > 0 && oldp && oldlenp) {
+                // Convert the UUID string to bytes
+                NSUUID *uuid = [[NSUUID alloc] initWithUUIDString:bootUUID];
+                if (uuid) {
+                    uuid_t bytes;
+                    [uuid getUUIDBytes:bytes];
+                    
+                    // Copy as much as will fit
+                    size_t toCopy = MIN(*oldlenp, sizeof(uuid_t));
+                    memcpy(oldp, bytes, toCopy);
+                    *oldlenp = toCopy;
+                    
+                    PXLog(@"[WeaponX] 🔄 Spoofing sysctlbyname(kern.uuid) with: %@", bootUUID);
+                    return 0; // Success
                 }
             }
+            
         }
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in replaced_sysctlbyname: %@", exception);
@@ -582,10 +504,6 @@ static CFUUIDRef replaced_CFUUIDCreate(CFAllocatorRef alloc) {
     CFUUIDRef originalUUID = orig_CFUUIDCreate ? orig_CFUUIDCreate(alloc) : NULL;
     
     @try {        
-        // Only hook for system UUID if we shouldn't spoof for this app or UUID spoofing is disabled
-        if (!isSystemBootUUIDEnabled()) {
-            return originalUUID;
-        }
         
         // Convert UUID to string for logging and comparison
         NSString *originalUUIDString = nil;
@@ -690,45 +608,7 @@ static void setupAdditionalSystemUUIDHooks() {
             
             // Perform a more thorough check for iPad-specific processes that might be causing issues
             UIDevice *device = [UIDevice currentDevice];
-            BOOL isIPad = [device userInterfaceIdiom] == UIUserInterfaceIdiomPad;
-            
-            if (isIPad) {
-                // Additional processes to skip on iPad to prevent crashes
-                if ([processName isEqualToString:@"sharingd"] ||
-                    [processName isEqualToString:@"mediaserverd"] ||
-                    [processName isEqualToString:@"searchd"] ||
-                    [processName isEqualToString:@"identityservicesd"] ||
-                    [processName isEqualToString:@"coreduetd"] ||
-                    [processName isEqualToString:@"mobiletimerd"] ||
-                    [processName containsString:@"app"] ||
-                    [processName containsString:@"ctid"] ||
-                    [processName containsString:@"trust"] ||
-                    [processName containsString:@"xctest"]) {
-                    PXLog(@"[WeaponX] 🚫 Skipping UUID hooks for iPad-specific process: %@", processName);
-                    return;
-                }
-            }
-            
-            
-            // If we get here, the app is configured for spoofing, so we can initialize the hooks
-            
-            // Check iOS version to apply different handling for iOS 18+
-            NSOperatingSystemVersion ios18 = {18, 0, 0};
-            BOOL isIOS18OrNewer = [[NSProcessInfo processInfo] isOperatingSystemAtLeastVersion:ios18];
-            
-            if (isIOS18OrNewer) {
-                // Adjust cache validity duration for better performance on newer iOS
-                kCacheValidityDuration = 300.0; // 5 minutes for iOS 18+
-                PXLog(@"[WeaponX] ⚙️ Using adjusted cache settings for iOS 18+");
-            }
-            
-            // Initialize cache queue with better naming for debugging
-            cacheQueue = dispatch_queue_create("com.hydra.projectx.uuidcache", DISPATCH_QUEUE_SERIAL);
-            
-            // Initialize cache dictionary
-            cachedBundleDecisions = [NSMutableDictionary dictionary];
-            
-            PXLog(@"[WeaponX] 🚀 Initializing UUID hooks for app: %@ (%@)", bundleID, processName);
+                        
             
             // Create a separate try-catch block for each hook to prevent one failure from affecting others
             @try {

@@ -890,14 +890,7 @@
                                                           userInfo:userInfo];
     });
     
-    // Send Darwin notification with enhanced information
-    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-    NSString *notificationName = enabled ? @"com.hydra.projectx.enableNetworkDataSpoof" : @"com.hydra.projectx.disableNetworkDataSpoof";
-    CFNotificationCenterPostNotification(darwinCenter, (__bridge CFStringRef)notificationName, NULL, NULL, YES);
-    
-    // Also send a generic change notification
-    CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.networkDataSpoofChanged"), NULL, NULL, YES);
-    
+
     // Add haptic feedback
     UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [generator prepare];
@@ -972,10 +965,6 @@
     // Log the change
     PXLog(@"[SecurityTab] ISO Country Code changed to: %@ (index: %ld)", selectedISO, (long)sender.selectedSegmentIndex);
     
-    // Send notification for updates
-    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-    CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.networkISOCountryCodeChanged"), NULL, NULL, YES);
-    
     // Haptic feedback
     UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
     [generator prepare];
@@ -994,11 +983,7 @@
     NSString *typeName = typeNames[selectedType];
     
     PXLog(@"[SecurityTab] Network connection type changed to: %@ (index: %ld)", typeName, (long)selectedType);
-    
-    // Post Darwin notification to update all processes
-    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-    CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.networkConnectionTypeChanged"), NULL, NULL, YES);
-    
+
     // Add message explaining the change
     NSString *message = @"";
     switch (selectedType) {
@@ -1226,10 +1211,7 @@
             // Log the change
             PXLog(@"[SecurityTab] ISO Country Code changed to custom value: %@", isoCode);
             
-            // Send notification for updates
-            CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-            CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.networkISOCountryCodeChanged"), NULL, NULL, YES);
-            
+
             // Add haptic feedback
             UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
             [generator prepare];

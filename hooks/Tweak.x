@@ -34,8 +34,6 @@
 - (UIImage *)weaponx_removeNavigationBar;
 @end
 
-// Cache for values
-static NSMutableDictionary *valueCache;
 
 // Define hook group for main identifier spoofing
 %group Identifiers
@@ -1242,13 +1240,9 @@ static char* hook_GSSystemGetSerialNo(void) {
 %ctor {    
     PXLog(@"ProjectX tweak initializing...");
 
-    // Detect iOS version
-    NSOperatingSystemVersion osVersion = [[NSProcessInfo processInfo] operatingSystemVersion];
     
     %init(Identifiers);
     
-    // Initialize value cache
-    valueCache = [NSMutableDictionary dictionary];
     
     // Load saved settings and ensure synchronization
     [[NSUserDefaults standardUserDefaults] synchronize];
