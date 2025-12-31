@@ -52,8 +52,8 @@ ProjectX_EXTRA_FRAMEWORKS = AltList
 # Ensure app is installed to the correct location with proper permissions
 ProjectX_INSTALL_PATH = /Applications
 
-ProjectXDaemon_FILES = $(wildcard daemon/*.m) $(wildcard model/*.m)
-ProjectXDaemon_CFLAGS = -fobjc-arc -I./model
+ProjectXDaemon_FILES = $(wildcard daemon/*.m) $(wildcard model/*.m) ./common/ProfileManager.m
+ProjectXDaemon_CFLAGS = -fobjc-arc -I./model -I./common
 ProjectXDaemon_FRAMEWORKS = Foundation IOKit
 ProjectXDaemon_INSTALL_PATH = /usr/local/bin
 ProjectXDaemon_CODESIGN_FLAGS = -Sent.plist

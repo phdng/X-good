@@ -5,4 +5,7 @@
 #define GET_PHONE_INFO @"/loadPhoneInfo"
 
 #define NEW_PHONE @"/newPhone"
-#define ACTIVE_BACKUP @"/activeBackUp"
+#define ACTIVE_BACKUP @"/activeBackup"
+#define REMOVE_BACKUP @"/removeBackup"
+#define RENAME_BACKUP @"/renameBackup"
+#define SWITCH_BACKUP @"/switchBackup"

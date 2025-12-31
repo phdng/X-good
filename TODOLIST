@@ -22,3 +22,14 @@ safari清理/var/mobile/Library/Safari 不然打开会跳出之前的东西
 
 
 启动时间和开机时间逻辑需要修改
+loadProfilesFromDisk刷新页面
+
+
+ProfileManager初始化读取所以备份到缓存 修改删除等都改缓存然后调用save方法将新缓存写入本地
+
+"/var/mobile/Library/Cookies/"
+"/var/mobile/Library/Safari/"
+"/var/root/Library/Caches/"
+"/var/root/Library/Cookies/"
+
+仅保留 Documents tmp Library Library/Caches Library/Preferences

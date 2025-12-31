@@ -1,5 +1,6 @@
 #import <Foundation/Foundation.h>
 #import "PhoneInfo.h"
+#import "ProfileManager.h"
 
 @interface DaemonApiManager:NSObject
 
@@ -9,4 +10,7 @@
 - (void) saveScopeApps:(NSMutableSet *)apps;
 - (PhoneInfo *) requestPhoneInfo;
 - (BOOL) savePhoneInfo:(PhoneInfo *)phoneInfo;
+- (void) newPhone:(void(^)(id response, NSError *error))completion;
+- (void) removeBackup:(Profile *)profile comp:(void(^)(id response, NSError *error))completion;
+- (void) renameBackup:(Profile *)profile comp:(void(^)(id response, NSError *error))completion;
 @end

@@ -2,7 +2,8 @@
 #import <spawn.h>
 #import <sys/wait.h>
 #import <objc/runtime.h>
-
+#import "LoadingView.h"
+#import "DaemonApiManager.h"
 @interface SBSRelaunchAction : NSObject
 + (id)actionWithReason:(id)arg1 options:(unsigned)arg2 targetURL:(id)arg3;
 @end
@@ -287,11 +288,26 @@
     
     [topController presentViewController:alert animated:YES completion:nil];
 }
-- (void)newPhoneTap{
-    // TODO 弹出加载框
-    // [[ActionManager sharedManager] newPhone];
-
-    // TODO 关闭加载框
+- (void)newPhoneTap {
+    // 显示在窗口上
+    [[LoadingView sharedInstance] showWithMessage:@"正在处理..."];
+    
+    // 延时关闭
+     [[DaemonApiManager sharedManager] newPhone:^(id response, NSError *error) {
+        // 回到主线程关闭加载框
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [[LoadingView sharedInstance] hide];
+            
+            // 处理结果 可改为弹窗
+            // if (error) {
+            //     NSLog(@"请求失败: %@", error);
+            //     [self showErrorMessage:error.localizedDescription];
+            // } else {
+            //     NSLog(@"请求成功: %@", response);
+            //     [self handleSuccessResponse:response];
+            // }
+        });
+    }];
 }
 - (void)performRespring {
     NSLog(@"[BottomButtons] 🔄 Attempting to respring device");

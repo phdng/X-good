@@ -1,5 +1,6 @@
 #import "ProfileTabViewController.h"
 #import "ProfileManager.h"
+#import "DaemonApiManager.h"
 
 // Custom ProfileTableViewCell class
 @interface ProfileTableViewCell : UITableViewCell
@@ -11,8 +12,6 @@
 @property (nonatomic, strong) UILabel *idLabel;
 @property (nonatomic, strong) UIButton *renameButton;
 @property (nonatomic, strong) UIButton *infoButton;
-@property (nonatomic, strong) UIButton *timeButton;
-@property (nonatomic, strong) UIButton *exportButton;
 @property (nonatomic, strong) UIButton *switchButton;
 @property (nonatomic, strong) UIButton *deleteButton;
 @property (nonatomic, assign) BOOL isCurrentProfile;
@@ -80,30 +79,8 @@
 
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
-    
-    // First check central profile info to ensure we have the latest active profile ID
-    ProfileManager *manager = [ProfileManager sharedManager];
-    NSDictionary *centralInfo = [manager loadCentralProfileInfo];
-    
-    if (centralInfo && centralInfo[@"ProfileId"]) {
-        NSString *activeProfileId = centralInfo[@"ProfileId"];
-        
-        // Check if manager's currentProfile is aligned with central store
-        if (manager.currentProfile && ![manager.currentProfile.profileId isEqualToString:activeProfileId]) {
-            // Find profile with ID from central store
-            for (Profile *profile in self.allProfiles) {
-                if ([profile.profileId isEqualToString:activeProfileId]) {
-                    // Update manager's currentProfile
-                    [manager updateCurrentProfileInfoWithProfile:profile];
-                    break;
-                }
-            }
-        }
-    }
-    
     // Load profiles directly from disk
     [self loadProfilesFromDisk];
-    
     // Update storage info
     [self updateStorageInfo];
 }
@@ -137,267 +114,19 @@
 
 - (void)loadProfilesFromDisk {
     // Get active profile ID directly from central info store first
-    ProfileManager *manager = [ProfileManager sharedManager];
-    NSDictionary *centralInfo = [manager loadCentralProfileInfo];
-    NSString *activeProfileId = nil;
-    
-    if (centralInfo && centralInfo[@"ProfileId"]) {
-        activeProfileId = centralInfo[@"ProfileId"];
-    } else if (manager.currentProfile) {
-        activeProfileId = manager.currentProfile.profileId;
-    }
-    
-    // Get profiles directory path
-    NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-    
-    // Get file manager
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    // Check if directory exists
-    if (![fileManager fileExistsAtPath:profilesDirectory]) {
-        self.profiles = [NSMutableArray array];
-        self.allProfiles = [NSMutableArray array];
-        self.displayedProfilesCount = 0;
-        [self.tableView reloadData];
-        [self updateProfileCount];
-        return;
-    }
-    
-    // First try to load from profiles.plist
-    NSString *profilesPath = [profilesDirectory stringByAppendingPathComponent:@"profiles.plist"];
-    if ([fileManager fileExistsAtPath:profilesPath]) {
-        NSData *data = [NSData dataWithContentsOfFile:profilesPath];
-        if (data) {
-            NSError *error = nil;
-            
-            // Use the modern non-deprecated API for iOS 15+
-            NSKeyedUnarchiver *unarchiver = [[NSKeyedUnarchiver alloc] initForReadingFromData:data error:&error];
-            if (error) {
-                // Handle error silently
-            } else {
-                unarchiver.requiresSecureCoding = YES;
-                NSArray *loadedProfiles = [unarchiver decodeObjectOfClass:[NSArray class] forKey:NSKeyedArchiveRootObjectKey];
-                
-                if (loadedProfiles) {
-                    // Filter out profiles with ID 0
-                    NSMutableArray *filteredProfiles = [NSMutableArray array];
-                    for (Profile *profile in loadedProfiles) {
-                        // Skip profiles with ID 0, "0", "profile_0", or missing profileId
-                        if (!profile.profileId || 
-                            [profile.profileId isEqualToString:@"0"] || 
-                            [profile.profileId isEqualToString:@"profile_0"] ||
-                            [profile.profileId intValue] == 0) {
-                            NSLog(@"[WeaponX] Filtering out profile with ID 0: %@", profile.name);
-                            continue;
-                        }
-                        [filteredProfiles addObject:profile];
-                    }
-                    
-                    self.allProfiles = filteredProfiles;
-                    
-                    // Get first 10 profiles or all if less than 10
-                    NSInteger initialCount = MIN(10, self.allProfiles.count);
-                    NSRange initialRange = NSMakeRange(0, initialCount);
-                    self.profiles = [[self.allProfiles subarrayWithRange:initialRange] mutableCopy];
-                    self.displayedProfilesCount = initialCount;
-                    
-                    self.filteredProfiles = [self.profiles mutableCopy];
-                    
-                    // Make sure each profile has a proper display name and ensure shortDescription is set
-                    [self enrichProfilesWithAdditionalInfo];
-                    
-                    [self.tableView reloadData];
-                    [self updateProfileCount];
-                    return;
-                } else {
-                    // Failed to decode profiles: nil result
-                }
-            }
-        }
-    }
-    
-    // If profiles.plist couldn't be loaded, scan directory for profile folders
-    NSError *error = nil;
-    NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDirectory error:&error];
-    
-    if (error) {
-        self.profiles = [NSMutableArray array];
-        self.allProfiles = [NSMutableArray array];
-        self.displayedProfilesCount = 0;
-        [self.tableView reloadData];
-        [self updateProfileCount];
-        return;
-    }
-    
-    NSMutableArray *allProfilesFound = [NSMutableArray array];
-    for (NSString *item in contents) {
-        NSString *itemPath = [profilesDirectory stringByAppendingPathComponent:item];
-        BOOL isDirectory = NO;
-        
-        // Skip non-directories, the profiles.plist file, profiles with ID 0 or profile_0
-        if (![fileManager fileExistsAtPath:itemPath isDirectory:&isDirectory] || 
-            !isDirectory || 
-            [item isEqualToString:@"profiles.plist"] ||
-            [item isEqualToString:@"0"] ||
-            [item isEqualToString:@"profile_0"] ||
-            [item intValue] == 0) {
-            continue;
-        }
-        
-        // Extract additional profile info from plists within the profile directory
-        NSString *displayName = [self extractProfileDisplayNameFromDirectory:itemPath withFolderName:item];
-        NSString *shortDesc = [self extractProfileShortDescriptionFromDirectory:itemPath withFolderName:item];
-        
-        // Create a profile object with the discovered information
-        Profile *profile = [[Profile alloc] initWithName:displayName ? displayName : item 
-                                        shortDescription:shortDesc ? shortDesc : @""
-                                               iconName:@"default_profile"];
-        
-        // Make sure the profileId is set to the folder name for accuracy
-        [profile setValue:item forKey:@"profileId"];
-        
-        // Set timestamps
-        NSDate *creationDate = nil;
-        NSDate *modificationDate = nil;
-        NSDictionary *attributes = [fileManager attributesOfItemAtPath:itemPath error:nil];
-        if (attributes) {
-            creationDate = attributes[NSFileCreationDate];
-            modificationDate = attributes[NSFileModificationDate];
-        }
-        
-        if (creationDate) {
-            [profile setValue:creationDate forKey:@"createdAt"];
-        }
-        
-        if (modificationDate) {
-            [profile setValue:modificationDate forKey:@"lastUsed"];
-        }
-        
-        [allProfilesFound addObject:profile];
-    }
-    
-    self.allProfiles = allProfilesFound;
-    
-    // Get first 10 profiles or all if less than 10
-    NSInteger initialCount = MIN(10, self.allProfiles.count);
-    if (initialCount > 0) {
-        NSRange initialRange = NSMakeRange(0, initialCount);
-        self.profiles = [[self.allProfiles subarrayWithRange:initialRange] mutableCopy];
-    } else {
-        self.profiles = [NSMutableArray array];
-    }
-    self.displayedProfilesCount = initialCount;
-    
-    self.filteredProfiles = [self.profiles mutableCopy];
-    
-    // If we have an active profile ID, ensure it's correctly updated
-    if (activeProfileId) {
-        for (Profile *profile in self.allProfiles) {
-            if ([profile.profileId isEqualToString:activeProfileId]) {
-                [manager updateCurrentProfileInfoWithProfile:profile];
-                
-                // If active profile isn't in the first set of displayed profiles,
-                // make sure it's included by adding it to the beginning
-                if (![self.profiles containsObject:profile]) {
-                    [self.profiles insertObject:profile atIndex:0];
-                    self.displayedProfilesCount = MIN(self.allProfiles.count, self.displayedProfilesCount + 1);
-                }
-                break;
-            }
-        }
-    }
-    
+    [[ProfileManager sharedManager] loadData];
+    self.profiles = [ProfileManager sharedManager].mutableProfiles;
+    self.allProfiles = [ProfileManager sharedManager].mutableProfiles;
+    self.displayedProfilesCount = MIN(10, self.allProfiles.count);
     [self.tableView reloadData];
     [self updateProfileCount];
 }
 
-// New method to extract the display name from profile directory plists
-- (NSString *)extractProfileDisplayNameFromDirectory:(NSString *)directoryPath withFolderName:(NSString *)folderName {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    // First check for identifiers.plist as it might contain display information
-    NSString *identifiersPath = [directoryPath stringByAppendingPathComponent:@"identifiers.plist"];
-    if ([fileManager fileExistsAtPath:identifiersPath]) {
-        NSDictionary *identifiers = [NSDictionary dictionaryWithContentsOfFile:identifiersPath];
-        if (identifiers && identifiers[@"DisplayName"]) {
-            return identifiers[@"DisplayName"];
-        }
-    }
-    
-    // Check for scoped-apps.plist which might have a friendly name
-    NSString *scopedAppsPath = [directoryPath stringByAppendingPathComponent:@"scoped-apps.plist"];
-    if ([fileManager fileExistsAtPath:scopedAppsPath]) {
-        NSDictionary *scopedApps = [NSDictionary dictionaryWithContentsOfFile:scopedAppsPath];
-        if (scopedApps && scopedApps[@"ProfileName"]) {
-            return scopedApps[@"ProfileName"];
-        }
-    }
-    
-    // Check for Info.plist which might have a profile name
-    NSString *infoPath = [directoryPath stringByAppendingPathComponent:@"Info.plist"];
-    if ([fileManager fileExistsAtPath:infoPath]) {
-        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
-        if (info && info[@"Name"]) {
-            return info[@"Name"];
-        }
-    }
-    
-    // Check for appdata/Info.plist 
-    NSString *appDataPath = [directoryPath stringByAppendingPathComponent:@"appdata/Info.plist"];
-    if ([fileManager fileExistsAtPath:appDataPath]) {
-        NSDictionary *appInfo = [NSDictionary dictionaryWithContentsOfFile:appDataPath];
-        if (appInfo && appInfo[@"ProfileName"]) {
-            return appInfo[@"ProfileName"];
-        }
-    }
-    
-    // If nothing is found, just return the folder name with proper formatting
-    // Convert profile_123 to "Profile 123"
-    if ([folderName hasPrefix:@"profile_"]) {
-        NSString *numberPart = [folderName substringFromIndex:8]; // Skip "profile_"
-        return [NSString stringWithFormat:@"Profile %@", numberPart];
-    }
-    
-    return folderName; // Default fallback
-}
-
-// New method to extract the short description from profile directory plists
-- (NSString *)extractProfileShortDescriptionFromDirectory:(NSString *)directoryPath withFolderName:(NSString *)folderName {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    // Check various plists for description information
-    NSArray *potentialPaths = @[
-        [directoryPath stringByAppendingPathComponent:@"identifiers.plist"],
-        [directoryPath stringByAppendingPathComponent:@"scoped-apps.plist"],
-        [directoryPath stringByAppendingPathComponent:@"Info.plist"],
-        [directoryPath stringByAppendingPathComponent:@"appdata/Info.plist"]
-    ];
-    
-    NSArray *potentialKeys = @[@"Description", @"ShortDescription", @"ProfileDescription"];
-    
-    for (NSString *path in potentialPaths) {
-        if ([fileManager fileExistsAtPath:path]) {
-            NSDictionary *plistDict = [NSDictionary dictionaryWithContentsOfFile:path];
-            
-            if (plistDict) {
-                for (NSString *key in potentialKeys) {
-                    if (plistDict[key] && [plistDict[key] isKindOfClass:[NSString class]]) {
-                        return plistDict[key];
-                    }
-                }
-            }
-        }
-    }
-    
-    // If we couldn't find a description, use a default based on ID
-    return [NSString stringWithFormat:@"Profile ID: %@", folderName];
-}
 
 - (void)updateProfileCount {
     if (self.profileCountLabel) {
         // Use the count from all profiles array 
         NSInteger profileCount = self.allProfiles.count;
-        
         NSString *countText = [NSString stringWithFormat:@"%ld", (long)profileCount];
         self.profileCountLabel.text = countText;
     }
@@ -413,24 +142,11 @@
         
         // Get the current profile info from ProfileManager
         ProfileManager *manager = [ProfileManager sharedManager];
-        NSDictionary *centralInfo = [manager loadCentralProfileInfo];
         
-        if (centralInfo && centralInfo[@"ProfileId"]) {
-            // Use the profile ID from central store (most reliable source)
-            currentProfileId = centralInfo[@"ProfileId"];
-        } else {
-            // Fallback: check if manager has a current profile
-            Profile *currentProfile = manager.currentProfile;
-            if (currentProfile) {
-                currentProfileId = currentProfile.profileId;
-                
-                // Since we found a profile but the central store didn't have it,
-                // update the central store for future use
-                [manager updateCurrentProfileInfoWithProfile:currentProfile];
-            }
+        if (manager.currentId) {
+            // Update the label with current profile ID
+            currentProfileId = manager.currentId;
         }
-        
-        // Update the label with current profile ID
         self.currentProfileIdLabel.text = currentProfileId;
     }
 }
@@ -455,14 +171,14 @@
     
     // "Profiles" text - centered in the title view
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(50, 0, 100, 44)];
-    titleLabel.text = @"备份id";
+    titleLabel.text = @"备份";
     titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
     titleLabel.textColor = [UIColor labelColor];
     titleLabel.textAlignment = NSTextAlignmentCenter;
     [titleView addSubview:titleLabel];
     
     // Current profile ID pill - positioned on the right side
-    UIView *rightContainer = [[UIView alloc] initWithFrame:CGRectMake(titleView.bounds.size.width - 70, 6, 70, 32)];
+    UIView *rightContainer = [[UIView alloc] initWithFrame:CGRectMake(titleView.bounds.size.width - 70, 6, 200, 32)];
     rightContainer.backgroundColor = [UIColor secondarySystemBackgroundColor];
     rightContainer.layer.cornerRadius = 16;
     rightContainer.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
@@ -485,7 +201,7 @@
     
     // "Profile" text (bottom line)
     UILabel *profileSubLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 16, 40, 14)];
-    profileSubLabel.text = @"Profile";
+    profileSubLabel.text = @"备份";
     profileSubLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightRegular];
     profileSubLabel.textColor = [UIColor secondaryLabelColor];
     profileSubLabel.textAlignment = NSTextAlignmentRight;
@@ -493,7 +209,7 @@
     profileSubLabel.minimumScaleFactor = 0.8;
     [labelContainer addSubview:profileSubLabel];
     
-    UILabel *idLabel = [[UILabel alloc] initWithFrame:CGRectMake(5, 4, 60, 24)];
+    UILabel *idLabel = [[UILabel alloc] initWithFrame:CGRectMake(5, 4, 110, 24)];
     idLabel.text = @"—"; // Will update after profiles are loaded
     idLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
     idLabel.textColor = [UIColor systemGreenColor];
@@ -559,20 +275,11 @@
         NSString *lowercaseSearchText = [searchText lowercaseString];
         
         // Search through ALL profiles, not just loaded ones
-        for (Profile *profile in self.allProfiles) {
-            // Skip profiles with ID 0 from search results
-            if (!profile.profileId || 
-                [profile.profileId isEqualToString:@"0"] || 
-                [profile.profileId isEqualToString:@"profile_0"] ||
-                [profile.profileId intValue] == 0) {
-                NSLog(@"[WeaponX] Excluding profile with ID 0 from search results: %@", profile.name);
-                continue;
-            }
+        for (Profile *profile in self.allProfiles) {    
             
             // Search across all available profile information fields
             NSString *lowercaseName = profile.name ? [profile.name lowercaseString] : @"";
-            NSString *lowercaseId = profile.profileId ? [profile.profileId lowercaseString] : @"";
-            NSString *lowercaseDesc = profile.shortDescription ? [profile.shortDescription lowercaseString] : @"";
+            NSString *lowercaseId = profile.id ? [profile.id lowercaseString] : @"";
             
             // Extract just the number part of the profile ID for easier searching
             NSString *numberPart = @"";
@@ -582,7 +289,6 @@
             
             if ([lowercaseName containsString:lowercaseSearchText] || 
                 [lowercaseId containsString:lowercaseSearchText] ||
-                [lowercaseDesc containsString:lowercaseSearchText] ||
                 [numberPart containsString:lowercaseSearchText]) {
                 
                 [self.filteredProfiles addObject:profile];
@@ -719,7 +425,7 @@
         
         // Create the label
         UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 8, 150, 30)];
-        titleLabel.text = @"SEARCH PROFILES";
+        titleLabel.text = @"搜索备份";
         titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         titleLabel.textColor = [UIColor secondaryLabelColor];
         [headerView addSubview:titleLabel];
@@ -879,7 +585,7 @@
             
             // "AVAILABLE" text positioned below the primary storage label
             UILabel *availableLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 45, 100, 16)];
-            availableLabel.text = @"AVAILABLE";
+            availableLabel.text = @"可用";
             availableLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
             availableLabel.textColor = [UIColor secondaryLabelColor];
             [cardView addSubview:availableLabel];
@@ -982,7 +688,7 @@
         
         // Create a modern search text field
         UITextField *searchField = [[UITextField alloc] initWithFrame:CGRectMake(15, 10, searchContainer.bounds.size.width - 80, 40)];
-        searchField.placeholder = @"Search by name or ID";
+        searchField.placeholder = @"通过备份名或ID搜索";
         searchField.font = [UIFont systemFontOfSize:16];
         searchField.backgroundColor = [UIColor tertiarySystemBackgroundColor];
         searchField.layer.cornerRadius = 10;
@@ -1101,7 +807,7 @@
         
         // Configure button with icon and text - smaller text
         UIImage *trashIcon = [UIImage systemImageNamed:@"trash"];
-        NSString *trashTitle = @"ALL PROFILES";
+        NSString *trashTitle = @"清空备份";
         
         // Create configuration for button with smaller text
         UIButtonConfiguration *trashConfig = [UIButtonConfiguration filledButtonConfiguration];
@@ -1242,8 +948,6 @@
             // Set up button targets
             [cell.renameButton addTarget:self action:@selector(renameTapped:) forControlEvents:UIControlEventTouchUpInside];
             [cell.infoButton addTarget:self action:@selector(infoTapped:) forControlEvents:UIControlEventTouchUpInside];
-            [cell.timeButton addTarget:self action:@selector(timeTapped:) forControlEvents:UIControlEventTouchUpInside];
-            [cell.exportButton addTarget:self action:@selector(exportTapped:) forControlEvents:UIControlEventTouchUpInside];
             [cell.switchButton addTarget:self action:@selector(switchTapped:) forControlEvents:UIControlEventTouchUpInside];
             [cell.deleteButton addTarget:self action:@selector(deleteTapped:) forControlEvents:UIControlEventTouchUpInside];
         }
@@ -1251,41 +955,21 @@
         Profile *profile = self.isSearchActive ? self.filteredProfiles[indexPath.row] : self.profiles[indexPath.row];
         
         // Skip profiles with ID 0 to ensure they are never displayed
-        if (!profile.profileId || 
-            [profile.profileId isEqualToString:@"0"] || 
-            [profile.profileId isEqualToString:@"profile_0"] ||
-            [profile.profileId intValue] == 0) {
+        // if (!profile.profileId || 
+        //     [profile.profileId isEqualToString:@"0"] || 
+        //     [profile.profileId isEqualToString:@"profile_0"] ||
+        //     [profile.profileId intValue] == 0) {
             
-            // Create a blank cell instead
-            UITableViewCell *blankCell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"BlankCell"];
-            blankCell.hidden = YES;
-            blankCell.userInteractionEnabled = NO;
-            blankCell.contentView.hidden = YES;
-            return blankCell;
-        }
+        //     // Create a blank cell instead
+        //     UITableViewCell *blankCell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"BlankCell"];
+        //     blankCell.hidden = YES;
+        //     blankCell.userInteractionEnabled = NO;
+        //     blankCell.contentView.hidden = YES;
+        //     return blankCell;
+        // }
         
         // Check if this is the current profile using direct access to central profile info
-        BOOL isCurrentProfile = NO;
-        ProfileManager *manager = [ProfileManager sharedManager];
-        
-        // First check the central profile info store (most reliable source)
-        NSDictionary *centralInfo = [manager loadCentralProfileInfo];
-        if (centralInfo && centralInfo[@"ProfileId"] && 
-            [centralInfo[@"ProfileId"] isEqualToString:profile.profileId]) {
-            isCurrentProfile = YES;
-        } 
-        // Fallback to checking manager's currentProfile if central store doesn't match
-        else if ([manager.currentProfile.profileId isEqualToString:profile.profileId]) {
-            isCurrentProfile = YES;
-            
-            // If central store doesn't match but manager does, update central store
-            if (centralInfo && centralInfo[@"ProfileId"] && 
-                ![centralInfo[@"ProfileId"] isEqualToString:profile.profileId]) {
-                // Detected mismatch between central store and manager, updating central store
-                [manager updateCurrentProfileInfoWithProfile:profile];
-            }
-        }
-        
+        BOOL isCurrentProfile = [[ProfileManager sharedManager] isCurrent:profile];
         // Configure the cell with the profile
         [cell configureWithProfile:profile isCurrentProfile:isCurrentProfile tableWidth:tableView.bounds.size.width];
         
@@ -1293,24 +977,18 @@
         // (not just during cell creation) to prevent issues with reused cells
         cell.renameButton.tag = indexPath.row;
         cell.infoButton.tag = indexPath.row;
-        cell.timeButton.tag = indexPath.row;
-        cell.exportButton.tag = indexPath.row;
         cell.switchButton.tag = indexPath.row;
         cell.deleteButton.tag = indexPath.row;
         
         // Remove existing targets first to avoid duplicate actions
         [cell.renameButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
         [cell.infoButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
-        [cell.timeButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
-        [cell.exportButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
         [cell.switchButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
         [cell.deleteButton removeTarget:nil action:NULL forControlEvents:UIControlEventTouchUpInside];
         
         // Re-add targets every time to ensure they work for reused cells
         [cell.renameButton addTarget:self action:@selector(renameTapped:) forControlEvents:UIControlEventTouchUpInside];
         [cell.infoButton addTarget:self action:@selector(infoTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [cell.timeButton addTarget:self action:@selector(timeTapped:) forControlEvents:UIControlEventTouchUpInside];
-        [cell.exportButton addTarget:self action:@selector(exportTapped:) forControlEvents:UIControlEventTouchUpInside];
         [cell.switchButton addTarget:self action:@selector(switchTapped:) forControlEvents:UIControlEventTouchUpInside];
         [cell.deleteButton addTarget:self action:@selector(deleteTapped:) forControlEvents:UIControlEventTouchUpInside];
         
@@ -1357,7 +1035,7 @@
     // Check if this is the current profile
     BOOL isCurrentProfile = NO;
     ProfileManager *manager = [ProfileManager sharedManager];
-    if ([manager.currentProfile.profileId isEqualToString:profile.profileId]) {
+    if ([manager isCurrent:profile]) {
         isCurrentProfile = YES;
     }
     
@@ -1399,7 +1077,7 @@
     // Check if this is the current profile
     BOOL isCurrentProfile = NO;
     ProfileManager *manager = [ProfileManager sharedManager];
-    if ([manager.currentProfile.profileId isEqualToString:profile.profileId]) {
+    if ([manager isCurrent:profile]) {
         isCurrentProfile = YES;
     }
     
@@ -1447,16 +1125,9 @@
         [confirmAlert addAction:[UIAlertAction actionWithTitle:@"Delete"
                                                     style:UIAlertActionStyleDestructive
                                                     handler:^(UIAlertAction * _Nonnull action) {
-            // Direct approach: Delete the profile folder from the filesystem
-            NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-            NSString *profilePath = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
             
-            NSFileManager *fileManager = [NSFileManager defaultManager];
-            NSError *error = nil;
-            BOOL success = [fileManager removeItemAtPath:profilePath error:&error];
-            
+            BOOL success = [[ProfileManager sharedManager] remove:profile];
             if (success) {
-                NSLog(@"[WeaponX] Successfully deleted profile folder: %@", profilePath);
                 
                 // Update local arrays and table view
                 if (self.isSearchActive) {
@@ -1479,11 +1150,10 @@
                     [self.delegate ProfileTabViewController:self didUpdateProfiles:self.profiles];
                 }
             } else {
-                NSLog(@"[WeaponX] Failed to delete profile folder: %@, Error: %@", profilePath, error);
                 
                 // Show error alert
                 UIAlertController *errorAlert = [UIAlertController alertControllerWithTitle:@"Error"
-                                                                           message:[NSString stringWithFormat:@"Failed to delete profile: %@", error.localizedDescription ?: @"Unknown error"]
+                                                                           message:[NSString stringWithFormat:@"Failed to delete profile"]
                                                                     preferredStyle:UIAlertControllerStyleAlert];
                 [errorAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
                 [self presentViewController:errorAlert animated:YES completion:nil];
@@ -1582,7 +1252,7 @@
     
     [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.text = profile.name;
-        textField.placeholder = @"Profile Name";
+        textField.placeholder = @"备份名";
     }];
     
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
@@ -1600,126 +1270,36 @@
             loadingIndicator.hidesWhenStopped = YES;
             [self.view addSubview:loadingIndicator];
             [loadingIndicator startAnimating];
-            
-            // Get profile directory
-            NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-            NSString *profilePath = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
-            
-            // Update profile name in memory
             profile.name = newName;
-            
-            // Direct file updates - update name in all possible plist files
-            BOOL didUpdateAnyFile = NO;
-            NSFileManager *fileManager = [NSFileManager defaultManager];
-            
-            // 1. Update identifiers.plist if it exists
-            NSString *identifiersPath = [profilePath stringByAppendingPathComponent:@"identifiers.plist"];
-            if ([fileManager fileExistsAtPath:identifiersPath]) {
-                NSMutableDictionary *identifiers = [NSMutableDictionary dictionaryWithContentsOfFile:identifiersPath];
-                if (identifiers) {
-                    identifiers[@"DisplayName"] = newName;
-                    BOOL success = [identifiers writeToFile:identifiersPath atomically:YES];
-                    if (success) {
-                        NSLog(@"[WeaponX] Updated display name in identifiers.plist: %@", identifiersPath);
-                        didUpdateAnyFile = YES;
-                    } else {
-                        NSLog(@"[WeaponX] Failed to write updated identifiers.plist: %@", identifiersPath);
-                    }
-                }
-            }
-            
-            // 2. Update scoped-apps.plist if it exists
-            NSString *scopedAppsPath = [profilePath stringByAppendingPathComponent:@"scoped-apps.plist"];
-            if ([fileManager fileExistsAtPath:scopedAppsPath]) {
-                NSMutableDictionary *scopedApps = [NSMutableDictionary dictionaryWithContentsOfFile:scopedAppsPath];
-                if (scopedApps) {
-                    scopedApps[@"ProfileName"] = newName;
-                    BOOL success = [scopedApps writeToFile:scopedAppsPath atomically:YES];
-                    if (success) {
-                        NSLog(@"[WeaponX] Updated profile name in scoped-apps.plist: %@", scopedAppsPath);
-                        didUpdateAnyFile = YES;
-                    } else {
-                        NSLog(@"[WeaponX] Failed to write updated scoped-apps.plist: %@", scopedAppsPath);
-                    }
-                }
-            }
-            
-            // 3. Update Info.plist if it exists
-            NSString *infoPath = [profilePath stringByAppendingPathComponent:@"Info.plist"];
-            if ([fileManager fileExistsAtPath:infoPath]) {
-                NSMutableDictionary *info = [NSMutableDictionary dictionaryWithContentsOfFile:infoPath];
-                if (info) {
-                    info[@"Name"] = newName;
-                    BOOL success = [info writeToFile:infoPath atomically:YES];
-                    if (success) {
-                        NSLog(@"[WeaponX] Updated name in Info.plist: %@", infoPath);
-                        didUpdateAnyFile = YES;
-                    } else {
-                        NSLog(@"[WeaponX] Failed to write updated Info.plist: %@", infoPath);
-                    }
-                }
-            }
-            
-            // 4. Update appdata/Info.plist if it exists
-            NSString *appDataPath = [profilePath stringByAppendingPathComponent:@"appdata/Info.plist"];
-            if ([fileManager fileExistsAtPath:appDataPath]) {
-                NSMutableDictionary *appInfo = [NSMutableDictionary dictionaryWithContentsOfFile:appDataPath];
-                if (appInfo) {
-                    appInfo[@"ProfileName"] = newName;
-                    BOOL success = [appInfo writeToFile:appDataPath atomically:YES];
-                    if (success) {
-                        NSLog(@"[WeaponX] Updated profile name in appdata/Info.plist: %@", appDataPath);
-                        didUpdateAnyFile = YES;
-                    } else {
-                        NSLog(@"[WeaponX] Failed to write updated appdata/Info.plist: %@", appDataPath);
-                    }
-                }
-            }
-            
-            // 5. Update the current profile info if this is the current profile
-            ProfileManager *manager = [ProfileManager sharedManager];
-            if ([manager.currentProfile.profileId isEqualToString:profile.profileId]) {
-                // Update central profile info
-                [manager updateCurrentProfileInfoWithProfile:profile];
-                NSLog(@"[WeaponX] Updated current profile info with new name");
-                didUpdateAnyFile = YES;
-            }
-            
-            // Use the ProfileManager to ensure any in-memory caches are updated
-            [[ProfileManager sharedManager] renameProfile:profile.name to:newName];
-            
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [loadingIndicator stopAnimating];
-                [loadingIndicator removeFromSuperview];
+            // profile 修改为newName
+            [[DaemonApiManager sharedManager] renameBackup:profile comp:^(id response, NSError *error) {
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [loadingIndicator stopAnimating];
+                    [loadingIndicator removeFromSuperview];
+                    
                 
-                if (didUpdateAnyFile) {
                     // Show success message
                     UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Profile Renamed"
-                                                                                      message:[NSString stringWithFormat:@"Profile successfully renamed to '%@'", newName]
-                                                                               preferredStyle:UIAlertControllerStyleAlert];
+                                                                                        message:[NSString stringWithFormat:@"Profile successfully renamed to '%@'", newName]
+                                                                                preferredStyle:UIAlertControllerStyleAlert];
                     [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
                     [self presentViewController:successAlert animated:YES completion:nil];
-                } else {
-                    // Show warning message - changes may not persist
-                    UIAlertController *warningAlert = [UIAlertController alertControllerWithTitle:@"Warning"
-                                                                                      message:@"Profile was renamed in memory but changes may not persist between restarts. No profile files could be updated."
-                                                                               preferredStyle:UIAlertControllerStyleAlert];
-                    [warningAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                    [self presentViewController:warningAlert animated:YES completion:nil];
-                }
-                
-                // Load profiles from disk to ensure UI is in sync
-                [self loadProfilesFromDisk];
-                
-                // Notify delegate
-                if ([self.delegate respondsToSelector:@selector(ProfileTabViewController:didUpdateProfiles:)]) {
-                    if (self.isSearchActive) {
-                        [self.delegate ProfileTabViewController:self didUpdateProfiles:self.filteredProfiles];
-                    } else {
-                        [self.delegate ProfileTabViewController:self didUpdateProfiles:self.profiles];
+        
+                    
+                    // Load profiles from disk to ensure UI is in sync
+                    [self loadProfilesFromDisk];
+                    
+                    // Notify delegate
+                    if ([self.delegate respondsToSelector:@selector(ProfileTabViewController:didUpdateProfiles:)]) {
+                        if (self.isSearchActive) {
+                            [self.delegate ProfileTabViewController:self didUpdateProfiles:self.filteredProfiles];
+                        } else {
+                            [self.delegate ProfileTabViewController:self didUpdateProfiles:self.profiles];
+                        }
                     }
-                }
-            });
+                });
+            }];
+        
         }
     }]];
     
@@ -1741,7 +1321,7 @@
     
     // Check if this is the current active profile
     ProfileManager *manager = [ProfileManager sharedManager];
-    if ([manager.currentProfile.profileId isEqualToString:profile.profileId]) {
+    if ([manager isCurrent:profile]) {
         // Show error - can't delete current profile
         UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Cannot Delete"
                                                                      message:@"You cannot delete the currently active profile. Please switch to another profile first."
@@ -1770,33 +1350,11 @@
         [self.view addSubview:loadingIndicator];
         [loadingIndicator startAnimating];
         
-        // Direct approach: Delete the profile folder from the filesystem
-        NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        NSString *profilePath = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
-        
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSError *error = nil;
-        BOOL success = [fileManager removeItemAtPath:profilePath error:&error];
-        
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [loadingIndicator stopAnimating];
-            [loadingIndicator removeFromSuperview];
-            
-            if (success) {
-                NSLog(@"[WeaponX] Successfully deleted profile folder: %@", profilePath);
-                
-                // Remove profile from local array
-                NSInteger index = [self.profiles indexOfObject:profile];
-                if (index != NSNotFound) {
-                    [self.profiles removeObjectAtIndex:index];
-                }
-                
-                if (self.isSearchActive) {
-                    NSInteger searchIndex = [self.filteredProfiles indexOfObject:profile];
-                    if (searchIndex != NSNotFound) {
-                        [self.filteredProfiles removeObjectAtIndex:searchIndex];
-                    }
-                }
+        [manager remove:profile];
+        [[DaemonApiManager sharedManager] removeBackup:profile comp:^(id response, NSError *error){
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [loadingIndicator stopAnimating];
+                [loadingIndicator removeFromSuperview];
                 
                 // Reload the table view
                 [self.tableView reloadData];
@@ -1813,20 +1371,13 @@
                                                                             preferredStyle:UIAlertControllerStyleAlert];
                 [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
                 [self presentViewController:successAlert animated:YES completion:nil];
-            } else {
-                NSLog(@"[WeaponX] Failed to delete profile folder: %@, Error: %@", profilePath, error);
-                
-                // Show error alert
-                UIAlertController *errorAlert = [UIAlertController alertControllerWithTitle:@"Error"
-                                                                                   message:[NSString stringWithFormat:@"Failed to delete profile: %@", error.localizedDescription ?: @"Unknown error"]
-                                                                            preferredStyle:UIAlertControllerStyleAlert];
-                [errorAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:errorAlert animated:YES completion:nil];
-            }
             
-            // Reload profiles from disk to ensure UI is in sync
-            [self loadProfilesFromDisk];
-        });
+            
+                // Reload profiles from disk to ensure UI is in sync
+                [self loadProfilesFromDisk];
+            });
+        }];
+        // dispatch_async(dispatch_get_main_queue(), );
     }]];
     
     [self presentViewController:alert animated:YES completion:nil];
@@ -1843,7 +1394,7 @@
     
     [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.placeholder = @"Description";
-        textField.text = profile.shortDescription;
+        textField.text = profile.id;
         textField.clearButtonMode = UITextFieldViewModeWhileEditing;
     }];
     
@@ -1851,133 +1402,6 @@
                                              style:UIAlertActionStyleCancel 
                                            handler:nil]];
     
-    [alert addAction:[UIAlertAction actionWithTitle:@"Update" 
-                                             style:UIAlertActionStyleDefault 
-                                           handler:^(UIAlertAction * _Nonnull action) {
-        NSString *newDescription = alert.textFields.firstObject.text;
-        if (newDescription && ![newDescription isEqualToString:profile.shortDescription]) {
-            // Show loading indicator
-            UIActivityIndicatorView *loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-            loadingIndicator.center = self.view.center;
-            loadingIndicator.hidesWhenStopped = YES;
-            [self.view addSubview:loadingIndicator];
-            [loadingIndicator startAnimating];
-            
-            // Update profile description in memory
-            profile.shortDescription = newDescription;
-            
-            // Get profile directory
-            NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-            NSString *profilePath = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
-            
-            // Direct file updates - update description in all possible plist files
-            BOOL didUpdateAnyFile = NO;
-            NSFileManager *fileManager = [NSFileManager defaultManager];
-            
-            // 1. Update identifiers.plist if it exists
-            NSString *identifiersPath = [profilePath stringByAppendingPathComponent:@"identifiers.plist"];
-            if ([fileManager fileExistsAtPath:identifiersPath]) {
-                NSMutableDictionary *identifiers = [NSMutableDictionary dictionaryWithContentsOfFile:identifiersPath];
-                if (identifiers) {
-                    identifiers[@"Description"] = newDescription;
-                    BOOL success = [identifiers writeToFile:identifiersPath atomically:YES];
-                    if (success) {
-                        NSLog(@"[WeaponX] Updated description in identifiers.plist: %@", identifiersPath);
-                        didUpdateAnyFile = YES;
-                    } else {
-                        NSLog(@"[WeaponX] Failed to write updated identifiers.plist: %@", identifiersPath);
-                    }
-                }
-            }
-            
-            // 2. Update scoped-apps.plist if it exists
-            NSString *scopedAppsPath = [profilePath stringByAppendingPathComponent:@"scoped-apps.plist"];
-            if ([fileManager fileExistsAtPath:scopedAppsPath]) {
-                NSMutableDictionary *scopedApps = [NSMutableDictionary dictionaryWithContentsOfFile:scopedAppsPath];
-                if (scopedApps) {
-                    scopedApps[@"Description"] = newDescription;
-                    scopedApps[@"ProfileDescription"] = newDescription;
-                    BOOL success = [scopedApps writeToFile:scopedAppsPath atomically:YES];
-                    if (success) {
-                        NSLog(@"[WeaponX] Updated description in scoped-apps.plist: %@", scopedAppsPath);
-                        didUpdateAnyFile = YES;
-                    } else {
-                        NSLog(@"[WeaponX] Failed to write updated scoped-apps.plist: %@", scopedAppsPath);
-                    }
-                }
-            }
-            
-            // 3. Update Info.plist if it exists
-            NSString *infoPath = [profilePath stringByAppendingPathComponent:@"Info.plist"];
-            if ([fileManager fileExistsAtPath:infoPath]) {
-                NSMutableDictionary *info = [NSMutableDictionary dictionaryWithContentsOfFile:infoPath];
-                if (info) {
-                    info[@"Description"] = newDescription;
-                    info[@"ShortDescription"] = newDescription;
-                    BOOL success = [info writeToFile:infoPath atomically:YES];
-                    if (success) {
-                        NSLog(@"[WeaponX] Updated description in Info.plist: %@", infoPath);
-                        didUpdateAnyFile = YES;
-                    } else {
-                        NSLog(@"[WeaponX] Failed to write updated Info.plist: %@", infoPath);
-                    }
-                }
-            }
-            
-            // 4. Update appdata/Info.plist if it exists
-            NSString *appDataPath = [profilePath stringByAppendingPathComponent:@"appdata/Info.plist"];
-            if ([fileManager fileExistsAtPath:appDataPath]) {
-                NSMutableDictionary *appInfo = [NSMutableDictionary dictionaryWithContentsOfFile:appDataPath];
-                if (appInfo) {
-                    appInfo[@"ProfileDescription"] = newDescription;
-                    appInfo[@"Description"] = newDescription;
-                    BOOL success = [appInfo writeToFile:appDataPath atomically:YES];
-                    if (success) {
-                        NSLog(@"[WeaponX] Updated description in appdata/Info.plist: %@", appDataPath);
-                        didUpdateAnyFile = YES;
-                    } else {
-                        NSLog(@"[WeaponX] Failed to write updated appdata/Info.plist: %@", appDataPath);
-                    }
-                }
-            }
-            
-            // 5. Update the current profile info if this is the current profile
-            ProfileManager *manager = [ProfileManager sharedManager];
-            if ([manager.currentProfile.profileId isEqualToString:profile.profileId]) {
-                // Update central profile info
-                [manager updateCurrentProfileInfoWithProfile:profile];
-                NSLog(@"[WeaponX] Updated current profile info with new description");
-                didUpdateAnyFile = YES;
-            }
-            
-            // Use the ProfileManager to ensure any in-memory caches are updated
-            [manager updateProfile:profile completion:^(BOOL success, NSError * _Nullable error) {
-                dispatch_async(dispatch_get_main_queue(), ^{
-                    [loadingIndicator stopAnimating];
-                    [loadingIndicator removeFromSuperview];
-                    
-                    if (didUpdateAnyFile) {
-                        // Show success message
-                        UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Description Updated"
-                                                                                          message:@"Profile description successfully updated"
-                                                                                   preferredStyle:UIAlertControllerStyleAlert];
-                        [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                        [self presentViewController:successAlert animated:YES completion:nil];
-                    } else {
-                        // Show warning message - changes may not persist
-                        UIAlertController *warningAlert = [UIAlertController alertControllerWithTitle:@"Warning"
-                                                                                          message:@"Description was updated in memory but changes may not persist between restarts. No profile files could be updated."
-                                                                                   preferredStyle:UIAlertControllerStyleAlert];
-                        [warningAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                        [self presentViewController:warningAlert animated:YES completion:nil];
-                    }
-                    
-                    // Reload profiles to update UI
-                    [self loadProfilesFromDisk];
-                });
-            }];
-        }
-    }]];
     
     [self presentViewController:alert animated:YES completion:nil];
 }
@@ -2008,37 +1432,7 @@
     [view.layer addSublayer:shimmerLayer];
 }
 
-// Enrich existing profiles with additional information from plists if available
-- (void)enrichProfilesWithAdditionalInfo {
-    NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-    
-    for (Profile *profile in self.profiles) {
-        // If profile already has a proper name and description, skip it
-        if (profile.name && profile.name.length > 0 && 
-            ![profile.name isEqualToString:profile.profileId] &&
-            profile.shortDescription && profile.shortDescription.length > 0) {
-            continue;
-        }
-        
-        NSString *profileDir = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
-        
-        // Try to get a better display name if it's missing or same as ID
-        if (!profile.name || [profile.name isEqualToString:profile.profileId]) {
-            NSString *betterName = [self extractProfileDisplayNameFromDirectory:profileDir withFolderName:profile.profileId];
-            if (betterName && betterName.length > 0) {
-                profile.name = betterName;
-            }
-        }
-        
-        // Try to get a short description if it's missing
-        if (!profile.shortDescription || profile.shortDescription.length == 0) {
-            NSString *desc = [self extractProfileShortDescriptionFromDirectory:profileDir withFolderName:profile.profileId];
-            if (desc && desc.length > 0) {
-                profile.shortDescription = desc;
-            }
-        }
-    }
-}
+
 
 - (void)cancelSearch {
     // Clear the search field
@@ -2087,118 +1481,7 @@
     [self showRenameDialogForProfile:profile];
 }
 
-- (void)timeTapped:(UIButton *)sender {
-    NSInteger index = sender.tag;
-    Profile *profile = self.isSearchActive ? self.filteredProfiles[index] : self.profiles[index];
-    
-    // Get file metadata directly from the filesystem for the most up-to-date information
-    NSString *profileDirectory = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profile.profileId];
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    NSDate *creationDate = nil;
-    NSDate *lastAccessDate = nil;
-    NSError *attributesError = nil;
-    
-    // Try to get actual file attributes first
-    NSDictionary *attributes = [fileManager attributesOfItemAtPath:profileDirectory error:&attributesError];
-    if (!attributesError && attributes) {
-        // Get creation date from file attributes
-        creationDate = [attributes fileCreationDate];
-        // Get last modification date as a proxy for last access
-        lastAccessDate = [attributes fileModificationDate];
-    }
-    
-    // Fall back to profile object dates if file attributes unavailable
-    if (!creationDate) {
-        creationDate = profile.createdAt;
-    }
-    
-    if (!lastAccessDate) {
-        lastAccessDate = profile.lastUsed;
-    }
-    
-    // Current date for time ago calculations
-    NSDate *now = [NSDate date];
-    
-    // Create date formatter for readable date display
-    NSDateFormatter *dateFormatter = [[NSDateFormatter alloc] init];
-    dateFormatter.dateStyle = NSDateFormatterMediumStyle;
-    dateFormatter.timeStyle = NSDateFormatterMediumStyle;
-    
-    // Format date strings
-    NSString *createdDateStr = @"Created: Unknown";
-    NSString *createdTimeAgoStr = @"";
-    if (creationDate) {
-        createdDateStr = [NSString stringWithFormat:@"Created: %@", [dateFormatter stringFromDate:creationDate]];
-        
-        // Calculate "time ago" for creation date
-        createdTimeAgoStr = [self timeAgoStringFromDate:creationDate toDate:now];
-    }
-    
-    NSString *lastUsedStr = @"Last used: Never";
-    NSString *lastUsedTimeAgoStr = @"";
-    if (lastAccessDate) {
-        lastUsedStr = [NSString stringWithFormat:@"Last used: %@", [dateFormatter stringFromDate:lastAccessDate]];
-        
-        // Calculate "time ago" for last used date
-        lastUsedTimeAgoStr = [self timeAgoStringFromDate:lastAccessDate toDate:now];
-    }
-    
-    // Combine the formatted strings with "time ago" information
-    NSString *message;
-    if (createdTimeAgoStr.length > 0) {
-        createdDateStr = [NSString stringWithFormat:@"%@\n(%@)", createdDateStr, createdTimeAgoStr];
-    }
-    
-    if (lastUsedTimeAgoStr.length > 0) {
-        lastUsedStr = [NSString stringWithFormat:@"%@\n(%@)", lastUsedStr, lastUsedTimeAgoStr];
-    }
-    
-    message = [NSString stringWithFormat:@"%@\n\n%@", createdDateStr, lastUsedStr];
-    
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Profile Timestamps"
-                                                                   message:message
-                                                            preferredStyle:UIAlertControllerStyleAlert];
-    
-    [alert addAction:[UIAlertAction actionWithTitle:@"OK" 
-                                             style:UIAlertActionStyleDefault 
-                                           handler:nil]];
-    
-    [self presentViewController:alert animated:YES completion:nil];
-}
 
-// Helper method to calculate "time ago" string
-- (NSString *)timeAgoStringFromDate:(NSDate *)fromDate toDate:(NSDate *)toDate {
-    if (!fromDate || !toDate) {
-        return @"";
-    }
-    
-    NSTimeInterval timeInterval = [toDate timeIntervalSinceDate:fromDate];
-    
-    // Convert to minutes, hours, days
-    NSInteger minutes = (NSInteger)(timeInterval / 60);
-    NSInteger hours = minutes / 60;
-    NSInteger days = hours / 24;
-    
-    if (minutes < 1) {
-        return @"just now";
-    } else if (minutes < 60) {
-        return minutes == 1 ? @"1 minute ago" : [NSString stringWithFormat:@"%ld minutes ago", (long)minutes];
-    } else if (hours < 24) {
-        return hours == 1 ? @"1 hour ago" : [NSString stringWithFormat:@"%ld hours ago", (long)hours];
-    } else if (days < 7) {
-        return days == 1 ? @"1 day ago" : [NSString stringWithFormat:@"%ld days ago", (long)days];
-    } else if (days < 30) {
-        NSInteger weeks = days / 7;
-        return weeks == 1 ? @"1 week ago" : [NSString stringWithFormat:@"%ld weeks ago", (long)weeks];
-    } else if (days < 365) {
-        NSInteger months = days / 30;
-        return months == 1 ? @"1 month ago" : [NSString stringWithFormat:@"%ld months ago", (long)months];
-    } else {
-        NSInteger years = days / 365;
-        return years == 1 ? @"1 year ago" : [NSString stringWithFormat:@"%ld years ago", (long)years];
-    }
-}
 
 - (void)switchTapped:(UIButton *)sender {
     NSInteger index = sender.tag;
@@ -2266,7 +1549,7 @@
 
 - (void)importExportButtonTapped:(UIButton *)sender {
     // To be implemented later
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import/Export"
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"导入/导出"
                                                                message:@"Import/Export functionality will be configured later."
                                                         preferredStyle:UIAlertControllerStyleAlert];
     
@@ -2296,35 +1579,10 @@
     loadingIndicator.hidesWhenStopped = YES;
     [self.view addSubview:loadingIndicator];
     [loadingIndicator startAnimating];
-    
-    // Get the profiles directory
-    NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    // Get current profile ID to preserve it - use the central profile info which is more reliable
-    ProfileManager *manager = [ProfileManager sharedManager];
-    NSDictionary *centralInfo = [manager loadCentralProfileInfo];
-    NSString *currentProfileId = nil;
-    
-    // First try to get the profile ID from central info
-    if (centralInfo && centralInfo[@"ProfileId"]) {
-        currentProfileId = centralInfo[@"ProfileId"];
-        NSLog(@"[WeaponX] Using central profile info ID for preservation: %@", currentProfileId);
-    } 
-    // Fallback to manager's currentProfile if central info doesn't exist
-    else if (manager.currentProfile) {
-        currentProfileId = manager.currentProfile.profileId;
-        NSLog(@"[WeaponX] Using manager's current profile ID for preservation: %@", currentProfileId);
-    }
-    
-    // If we still don't have a profile ID, log the issue
-    if (!currentProfileId) {
-        NSLog(@"[WeaponX] Warning: No current profile ID found for preservation");
-    }
+
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSError *error = nil;
-        NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDirectory error:&error];
         
         if (error) {
             dispatch_async(dispatch_get_main_queue(), ^{
@@ -2340,67 +1598,18 @@
             return;
         }
         
-        NSInteger deletedCount = 0;
-        NSMutableArray *failedItems = [NSMutableArray array];
-        NSMutableArray *skippedItems = [NSMutableArray array];
-        
-        for (NSString *item in contents) {
-            // Skip profiles.plist file and folder named "0" or "profile_0"
-            if ([item isEqualToString:@"profiles.plist"] || 
-                [item isEqualToString:@"0"] || 
-                [item isEqualToString:@"profile_0"]) {
-                [skippedItems addObject:item];
-                NSLog(@"[WeaponX] Skipping system profile: %@", item);
-                continue;
-            }
-            
-            // Skip the current profile
-            if (currentProfileId && [item isEqualToString:currentProfileId]) {
-                [skippedItems addObject:item];
-                NSLog(@"[WeaponX] Skipping current profile: %@", item);
-                continue;
-            }
-            
-            NSString *itemPath = [profilesDirectory stringByAppendingPathComponent:item];
-            BOOL isDirectory = NO;
-            
-            // Skip non-directories
-            if (![fileManager fileExistsAtPath:itemPath isDirectory:&isDirectory] || !isDirectory) {
-                NSLog(@"[WeaponX] Skipping non-directory: %@", item);
-                continue;
-            }
-            
-            // Try to delete the folder
-            NSError *deleteError = nil;
-            BOOL success = [fileManager removeItemAtPath:itemPath error:&deleteError];
-            
-            if (success) {
-                deletedCount++;
-                NSLog(@"[WeaponX] Successfully deleted profile: %@", item);
-            } else {
-                [failedItems addObject:item];
-                NSLog(@"[WeaponX] Failed to delete profile %@: %@", item, deleteError.localizedDescription);
-            }
-        }
-        
+
         dispatch_async(dispatch_get_main_queue(), ^{
             [loadingIndicator stopAnimating];
             [loadingIndicator removeFromSuperview];
-            
+            // TODO clearAll
+
             // Reload profiles from disk
             [self loadProfilesFromDisk];
             
             // Show results
             NSString *resultMessage;
-            if (failedItems.count == 0) {
-                resultMessage = [NSString stringWithFormat:@"Successfully deleted %ld profiles. Current active profile was preserved.", (long)deletedCount];
-            } else {
-                resultMessage = [NSString stringWithFormat:@"Deleted %ld profiles. Failed to delete %ld profiles. Current active profile was preserved.", (long)deletedCount, (long)failedItems.count];
-            }
-            
-            // Log skipped profiles
-            NSLog(@"[WeaponX] Profiles skipped during delete all: %@", skippedItems);
-            
+                        
             UIAlertController *resultAlert = [UIAlertController alertControllerWithTitle:@"Delete Complete"
                                                                               message:resultMessage
                                                                        preferredStyle:UIAlertControllerStyleAlert];
@@ -2410,97 +1619,6 @@
     });
 }
 
-- (void)exportTapped:(UIButton *)sender {
-    NSInteger index = sender.tag;
-    Profile *profile = self.isSearchActive ? self.filteredProfiles[index] : self.profiles[index];
-    
-    // Get the profile directory path
-    NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-    NSString *profilePath = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
-    
-    // Check if the profile directory exists
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    BOOL isDirectory = NO;
-    
-    if (![fileManager fileExistsAtPath:profilePath isDirectory:&isDirectory] || !isDirectory) {
-        // Show error if directory doesn't exist
-        UIAlertController *errorAlert = [UIAlertController alertControllerWithTitle:@"Export Error"
-                                                                            message:@"The profile directory could not be found."
-                                                                     preferredStyle:UIAlertControllerStyleAlert];
-        [errorAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-        [self presentViewController:errorAlert animated:YES completion:nil];
-        return;
-    }
-    
-    // Show loading indicator
-    UIActivityIndicatorView *loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    loadingIndicator.center = self.view.center;
-    loadingIndicator.hidesWhenStopped = YES;
-    [self.view addSubview:loadingIndicator];
-    [loadingIndicator startAnimating];
-    
-    // Perform file operation in background to avoid UI blocking
-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        // Create a simple JSON file with profile information in the temp directory for sharing
-        NSString *tempDir = NSTemporaryDirectory();
-        NSString *infoFileName = [NSString stringWithFormat:@"%@_info.json", profile.profileId];
-        NSString *infoFilePath = [tempDir stringByAppendingPathComponent:infoFileName];
-        
-        // Create a JSON file with profile details
-        NSDictionary *profileInfo = @{
-            @"profileId": profile.profileId ?: @"",
-            @"name": profile.name ?: @"",
-            @"description": profile.shortDescription ?: @"",
-            @"exportDate": [NSDate date].description,
-            @"path": profilePath
-        };
-        
-        NSError *jsonError = nil;
-        NSData *jsonData = [NSJSONSerialization dataWithJSONObject:profileInfo options:NSJSONWritingPrettyPrinted error:&jsonError];
-        
-        if (jsonData) {
-            [jsonData writeToFile:infoFilePath atomically:YES];
-        }
-        
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [loadingIndicator stopAnimating];
-            [loadingIndicator removeFromSuperview];
-            
-            // Get the cell or button that was tapped to use as source view
-            UITableViewCell *cell = [self.tableView cellForRowAtIndexPath:[NSIndexPath indexPathForRow:index inSection:3]];
-            UIView *sourceView = sender;
-            if (!sourceView) {
-                sourceView = cell;
-            }
-            
-            // Create a URL for sharing (either directory or info file)
-            NSURL *shareURL = [NSURL fileURLWithPath:profilePath isDirectory:YES];
-            
-            // Use UIDocumentInteractionController for sharing the directory
-            self.documentInteractionController = [UIDocumentInteractionController interactionControllerWithURL:shareURL];
-            self.documentInteractionController.delegate = self;
-            
-            // Present options
-            BOOL presented = [self.documentInteractionController presentOptionsMenuFromRect:sourceView.bounds inView:sourceView animated:YES];
-            
-            if (!presented) {
-                // Fallback to sharing the info file if directory sharing isn't supported
-                NSURL *infoURL = [NSURL fileURLWithPath:infoFilePath];
-                
-                // Create activity view controller for sharing the info file
-                UIActivityViewController *activityVC = [[UIActivityViewController alloc] initWithActivityItems:@[infoURL] applicationActivities:nil];
-                
-                // Configure for iPad
-                if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-                    activityVC.popoverPresentationController.sourceView = sourceView;
-                    activityVC.popoverPresentationController.sourceRect = sourceView.bounds;
-                }
-                
-                [self presentViewController:activityVC animated:YES completion:nil];
-            }
-        });
-    });
-}
 
 #pragma mark - UIDocumentInteractionControllerDelegate
 
@@ -2569,18 +1687,18 @@
     [self.cardView addSubview:self.innerCard];
     
     // Profile ID Badge
-    UIView *idBadge = [[UIView alloc] initWithFrame:CGRectMake(15, 15, 40, 40)];
-    idBadge.backgroundColor = [[UIColor systemGrayColor] colorWithAlphaComponent:0.15];
-    idBadge.layer.cornerRadius = 20;
-    [self.innerCard addSubview:idBadge];
+    // UIView *idBadge = [[UIView alloc] initWithFrame:CGRectMake(15, 15, 40, 40)];
+    // idBadge.backgroundColor = [[UIColor systemGrayColor] colorWithAlphaComponent:0.15];
+    // idBadge.layer.cornerRadius = 20;
+    // [self.innerCard addSubview:idBadge];
     
     // ID Label
-    self.idLabel = [[UILabel alloc] initWithFrame:idBadge.bounds];
-    self.idLabel.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightSemibold];
-    self.idLabel.textAlignment = NSTextAlignmentCenter;
-    self.idLabel.adjustsFontSizeToFitWidth = YES;
-    self.idLabel.minimumScaleFactor = 0.7;
-    [idBadge addSubview:self.idLabel];
+    // self.idLabel = [[UILabel alloc] initWithFrame:idBadge.bounds];
+    // self.idLabel.font = [UIFont monospacedDigitSystemFontOfSize:15 weight:UIFontWeightSemibold];
+    // self.idLabel.textAlignment = NSTextAlignmentCenter;
+    // self.idLabel.adjustsFontSizeToFitWidth = YES;
+    // self.idLabel.minimumScaleFactor = 0.7;
+    // [idBadge addSubview:self.idLabel];
     
     // Profile Name Label
     self.nameLabel = [[UILabel alloc] initWithFrame:CGRectMake(70, 22, self.innerCard.bounds.size.width - 130, 28)];
@@ -2638,38 +1756,10 @@
     CGFloat availableWidth = actionContainer.bounds.size.width - 30; // Total width minus margins
     CGFloat buttonSpacing = (availableWidth - (4 * buttonSize)) / 3; // Space between 4 buttons
     
-    // Time button - enhanced for better touch
-    self.timeButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.timeButton.frame = CGRectMake(15, 5, buttonSize, buttonSize);
-    
-    // Use modern UIButtonConfiguration API for iOS 15+
-    UIButtonConfiguration *timeConfig = [UIButtonConfiguration plainButtonConfiguration];
-    timeConfig.image = [UIImage systemImageNamed:@"clock"];
-    timeConfig.baseForegroundColor = [UIColor systemGrayColor];
-    timeConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-    self.timeButton.configuration = timeConfig;
-    
-    self.timeButton.userInteractionEnabled = YES;
-    [actionContainer addSubview:self.timeButton];
-    
-    // Export button (new) - add to the right of time button
-    self.exportButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    CGFloat exportX = 15 + buttonSize + buttonSpacing;
-    self.exportButton.frame = CGRectMake(exportX, 5, buttonSize, buttonSize);
-    
-    // Use modern UIButtonConfiguration API for iOS 15+
-    UIButtonConfiguration *exportConfig = [UIButtonConfiguration plainButtonConfiguration];
-    exportConfig.image = [UIImage systemImageNamed:@"square.and.arrow.up.on.square"];
-    exportConfig.baseForegroundColor = [UIColor systemBlueColor];
-    exportConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-    self.exportButton.configuration = exportConfig;
-    
-    self.exportButton.userInteractionEnabled = YES;
-    [actionContainer addSubview:self.exportButton];
     
     // Switch button - enhanced for better touch - position after export button
     self.switchButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    CGFloat switchX = exportX + buttonSize + buttonSpacing;
+    CGFloat switchX = buttonSize + buttonSpacing;
     self.switchButton.frame = CGRectMake(switchX, 5, buttonSize, buttonSize);
     
     // Use modern UIButtonConfiguration API for iOS 15+
@@ -2701,8 +1791,6 @@
     // Add button highlights for visual feedback
     [self addButtonHighlightEffects:self.renameButton];
     [self addButtonHighlightEffects:self.infoButton];
-    [self addButtonHighlightEffects:self.timeButton];
-    [self addButtonHighlightEffects:self.exportButton]; // Add highlight effect to export button
     [self addButtonHighlightEffects:self.switchButton];
     [self addButtonHighlightEffects:self.deleteButton];
     
@@ -2783,8 +1871,6 @@
     // Reset button visual states
     self.renameButton.backgroundColor = nil;
     self.infoButton.backgroundColor = nil;
-    self.timeButton.backgroundColor = nil;
-    self.exportButton.backgroundColor = nil;
     self.switchButton.backgroundColor = nil;
     self.deleteButton.backgroundColor = nil;
     
@@ -2830,7 +1916,7 @@
     }
     
     // Set ID label
-    self.idLabel.text = profile.profileId;
+    self.idLabel.text = profile.id;
     
     // Set name label with truncation if needed
     NSString *displayName = profile.name;

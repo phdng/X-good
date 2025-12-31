@@ -159,6 +159,59 @@
     );
     return YES;
 }
+/**
+ * 静态方法：将 NSDictionary 直接保存为 JSON 文件
+ * @param dict 要保存的字典
+ * @param filePath 文件路径
+ * @return 保存是否成功
+ */
++ (BOOL)saveDictionaryToFile:(NSDictionary *)dict toFile:(NSString *)filePath {
+    if (!dict || ![dict isKindOfClass:[NSDictionary class]]) {
+        NSLog(@"无效的字典参数");
+        return NO;
+    }
+    
+    if (!filePath || filePath.length == 0) {
+        NSLog(@"无效的文件路径");
+        return NO;
+    }
+    
+    // 创建目录（如果不存在）
+    NSString *directory = [filePath stringByDeletingLastPathComponent];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:directory]) {
+        NSError *error = nil;
+        BOOL success = [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                                  withIntermediateDirectories:YES
+                                                                   attributes:nil
+                                                                        error:&error];
+        if (!success) {
+            NSLog(@"创建目录失败: %@, error: %@", directory, error);
+            return NO;
+        }
+    }
+    
+    NSError *error = nil;
+    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict 
+                                                       options:NSJSONWritingPrettyPrinted 
+                                                         error:&error];
+    
+    if (error) {
+        NSLog(@"JSON 序列化失败: %@", error);
+        return NO;
+    }
+    
+    BOOL success = [jsonData writeToFile:filePath 
+                                 options:NSDataWritingAtomic 
+                                   error:&error];
+    
+    if (!success) {
+        NSLog(@"写入文件失败: %@, error: %@", filePath, error);
+        return NO;
+    }
+    
+    NSLog(@"字典已成功保存到: %@", filePath);
+    return YES;
+}
 
 /**
  * 静态方法：从 JSON 文件读取并返回 NSDictionary

@@ -52,6 +52,7 @@
 
 // 静态方法：直接保存 NSDictionary 到文件
 + (BOOL)saveDictionary:(NSDictionary *)dict ;
++ (BOOL)saveDictionaryToFile:(NSDictionary *)dict toFile:(NSString *)filePath;
 
 // 静态方法：从文件读取并返回 NSDictionary
 + (NSDictionary *)loadDictionaryFromFile:(NSString *)filePath;

@@ -69,4 +69,32 @@
     });
     return YES;
 }
+
+- (void) newPhone:(void(^)(id response, NSError *error))completion{
+    daemonGET(NEW_PHONE, ^(id response, NSError *error) {
+        // 如果有回调，执行回调
+        if (completion) {
+            completion(response, error);
+        }
+    });
+}
+
+- (void) removeBackup:(Profile *)profile comp:(void(^)(id response, NSError *error))completion{
+    daemonPOST(REMOVE_BACKUP,[profile toDictionary], ^(id response, NSError *error) {
+        // 如果有回调，执行回调
+        if (completion) {
+            completion(response, error);
+        }
+    });
+}
+
+- (void) renameBackup:(Profile *)profile comp:(void(^)(id response, NSError *error))completion{
+    daemonPOST(RENAME_BACKUP,[profile toDictionary], ^(id response, NSError *error) {
+        // 如果有回调，执行回调
+        if (completion) {
+            completion(response, error);
+        }
+    });
+}
+
 @end

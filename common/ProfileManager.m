@@ -1,8 +1,9 @@
 #import "ProfileManager.h"
 #import <UIKit/UIKit.h>
-#import "ContainerManager.h"
 #import <spawn.h>
 #import <sys/wait.h>
+
+#define profileDataPath @"/private/var/mobile/Media/ProjectX/profiles.json"
 
 // Forward declaration for app termination
 @interface BottomButtons : NSObject
@@ -31,136 +32,74 @@
 + (void)saveLocalIPAddress:(NSString *)localIP;
 @end
 
-@interface ProfileManager ()
-
-@property (nonatomic, strong) NSMutableArray<Profile *> *mutableProfiles;
-@property (nonatomic, strong) Profile *mutableCurrentProfile;
-@property (nonatomic, strong) NSFileManager *fileManager;
-@property (nonatomic, strong) NSString *profilesDirectory;
-
-@end
-
 @implementation Profile
-
-@synthesize profileId = _profileId;
-
-- (instancetype)initWithName:(NSString *)name iconName:(NSString *)iconName {
-    self = [super init];
-    if (self) {
-        // UUID is no longer used, but will be set by ProfileManager via setter
-        _profileId = [[NSUUID UUID] UUIDString];
-        _name = name;
-        _iconName = iconName;
-        _createdAt = [NSDate date];
-        _lastUsed = [NSDate date];
-        _settings = @{};
-    }
-    return self;
-}
-
-- (instancetype)initWithName:(NSString *)name shortDescription:(NSString *)shortDescription iconName:(NSString *)iconName {
-    self = [super init];
-    if (self) {
-        // UUID is no longer used, but will be set by ProfileManager via setter
-        _profileId = [[NSUUID UUID] UUIDString];
-        _name = name;
-        _shortDescription = shortDescription;
-        _iconName = iconName;
-        _createdAt = [NSDate date];
-        _lastUsed = [NSDate date];
-        _settings = @{};
-    }
-    return self;
-}
-
-- (instancetype)initWithDictionary:(NSDictionary *)dictionary {
-    self = [super init];
-    if (self) {
-        _profileId = dictionary[@"profileId"];
-        _name = dictionary[@"name"];
-        _shortDescription = dictionary[@"shortDescription"];
-        _iconName = dictionary[@"iconName"];
-        _createdAt = dictionary[@"createdAt"];
-        _lastUsed = dictionary[@"lastUsed"];
-        _settings = dictionary[@"settings"] ?: @{};
-        
-        // If timestamps are missing, set them to current time
-        NSDate *now = [NSDate date];
-        if (!_createdAt) {
-            NSLog(@"[WeaponX] Setting missing createdAt timestamp for profile: %@", _name);
-            _createdAt = now;
-        }
-        if (!_lastUsed) {
-            NSLog(@"[WeaponX] Setting missing lastUsed timestamp for profile: %@", _name);
-            _lastUsed = now;
-        }
-    }
-    return self;
-}
-
-- (NSDictionary *)toDictionary {
-    NSMutableDictionary *dict = [NSMutableDictionary dictionaryWithDictionary:@{
-        @"profileId": self.profileId,
-        @"name": self.name,
-        @"iconName": self.iconName,
-        @"createdAt": self.createdAt,
-        @"lastUsed": self.lastUsed,
-        @"settings": self.settings
-    }];
-    
-    if (self.shortDescription) {
-        dict[@"shortDescription"] = self.shortDescription;
-    }
-    
-    return dict;
-}
-
-#pragma mark - NSSecureCoding
 
 + (BOOL)supportsSecureCoding {
     return YES;
 }
 
-- (void)encodeWithCoder:(NSCoder *)coder {
-    [coder encodeObject:self.profileId forKey:@"profileId"];
-    [coder encodeObject:self.name forKey:@"name"];
-    [coder encodeObject:self.shortDescription forKey:@"shortDescription"];
-    [coder encodeObject:self.iconName forKey:@"iconName"];
-    [coder encodeObject:self.createdAt forKey:@"createdAt"];
-    [coder encodeObject:self.lastUsed forKey:@"lastUsed"];
-    [coder encodeObject:self.settings forKey:@"settings"];
-}
-
 - (instancetype)initWithCoder:(NSCoder *)coder {
     self = [super init];
     if (self) {
-        _profileId = [coder decodeObjectOfClass:[NSString class] forKey:@"profileId"];
+        _id = [coder decodeObjectOfClass:[NSString class] forKey:@"id"];
         _name = [coder decodeObjectOfClass:[NSString class] forKey:@"name"];
-        _shortDescription = [coder decodeObjectOfClass:[NSString class] forKey:@"shortDescription"];
-        _iconName = [coder decodeObjectOfClass:[NSString class] forKey:@"iconName"];
-        _createdAt = [coder decodeObjectOfClass:[NSDate class] forKey:@"createdAt"];
-        _lastUsed = [coder decodeObjectOfClass:[NSDate class] forKey:@"lastUsed"];
-        _settings = [coder decodeObjectOfClass:[NSDictionary class] forKey:@"settings"];
-        
-        // If timestamps are missing, set them to current time
-        if (!_createdAt) {
-            NSLog(@"[WeaponX] Setting missing createdAt timestamp for profile: %@", _name);
-            _createdAt = [NSDate date];
-        }
-        if (!_lastUsed) {
-            NSLog(@"[WeaponX] Setting missing lastUsed timestamp for profile: %@", _name);
-            _lastUsed = [NSDate date];
-        }
-        
-        // Ensure settings exists
-        if (!_settings) {
-            _settings = @{};
-        }
+        _createdDate = [coder decodeObjectOfClass:[NSDate class] forKey:@"createdDate"];
     }
     return self;
 }
 
+- (void)encodeWithCoder:(NSCoder *)coder {
+    [coder encodeObject:_id forKey:@"id"];
+    [coder encodeObject:_name forKey:@"name"];
+    [coder encodeObject:_createdDate forKey:@"createdDate"];
+}
+- (NSDictionary *)toDictionary {
+    NSNumber *timestamp = @0;
+    if (self.createdDate) {
+        timestamp = @([self.createdDate timeIntervalSince1970]);
+    }
+    
+    return @{
+        @"id": self.id ?: @"",
+        @"name": self.name ?: @"",
+        @"createdDate": timestamp
+    };
+}
+
++ (Profile *)fromDictionary:(NSDictionary *)dict {
+    Profile *profile = [[Profile alloc] init];
+    
+    // 设置 id 和 name
+    profile.id = dict[@"id"];
+    profile.name = dict[@"name"];
+    
+    // 处理 createdDate
+    id dateValue = dict[@"createdDate"];
+    if (dateValue) {
+        // 如果是 NSNumber（时间戳格式）
+        NSTimeInterval timestamp = [dateValue doubleValue];
+        if (timestamp > 0) {
+            profile.createdDate = [NSDate dateWithTimeIntervalSince1970:timestamp];
+        } else {
+            profile.createdDate = nil;
+        }
+        
+    } else {
+        profile.createdDate = nil;
+    }
+    
+    return profile;
+}
+
 @end
+
+@interface ProfileManager ()
+
+@property (nonatomic, strong) NSFileManager *fileManager;
+@property (nonatomic, strong) NSString *profilesDirectory;
+
+@end
+
 
 @implementation ProfileManager
 
@@ -172,6 +111,138 @@
     });
     return sharedManager;
 }
+#pragma mark - 保存数据（使用字典，避免归档问题）
+
+- (BOOL)saveData {
+    @synchronized (self) {
+        @try {
+            
+            NSMutableDictionary *dataDict = [NSMutableDictionary dictionary];
+            
+            // 1. 保存 currentId
+            if (self.currentId) {
+                dataDict[@"currentId"] = self.currentId;
+            } else {
+                dataDict[@"currentId"] = @"";
+            }
+            
+            // 2. 保存 mutableProfiles 转为字典数组
+            NSMutableArray *profilesArray = [NSMutableArray array];
+            for (Profile *profile in self.mutableProfiles) {
+                // 方法1: 使用自定义的toDictionary方法
+                NSDictionary *profileDict = [profile toDictionary];
+                [profilesArray addObject:profileDict];
+            }
+            
+            if (profilesArray.count > 0) {
+                dataDict[@"mutableProfiles"] = profilesArray;
+            } else {
+                dataDict[@"mutableProfiles"] = @[];
+            }
+            NSError *error = nil;
+            // 4. 将字典写入文件
+            // 使用writeToURL:atomically:方法，它自动处理序列化
+            NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dataDict 
+                                                    options:NSJSONWritingPrettyPrinted 
+                                                        error:&error];
+            BOOL success = [jsonData writeToFile:profileDataPath
+                                 options:NSDataWritingAtomic 
+                                   error:&error];
+            if (success) {
+                NSLog(@"save success %lu profile", (unsigned long)self.mutableProfiles.count);
+            } else {
+                NSLog(@"error");
+            }
+            
+            return success;
+            
+        } @catch (NSException *exception) {
+            NSLog(@"exception: %@", exception.reason);
+            return NO;
+        } 
+    }
+}
+
+#pragma mark - 加载数据
+
+- (BOOL)loadData {
+    @try {
+        if(![[NSFileManager defaultManager] fileExistsAtPath:profileDataPath]){
+            return NO;
+        }
+        NSError *readError = nil;
+        // 1. 从plist文件读取字典
+        NSData *jsonData = [NSData dataWithContentsOfFile:profileDataPath  options:NSDataReadingMappedIfSafe 
+                                                error:&readError];
+        NSError *jsonError = nil;
+        NSDictionary *dataDict = (NSDictionary *)[NSJSONSerialization JSONObjectWithData:jsonData 
+                                                options:kNilOptions 
+                                                    error:&jsonError];    
+
+        if (!dataDict) {
+            return NO;
+        }
+            
+        // 3. 恢复 mutableProfiles
+        NSArray *profilesArray = dataDict[@"mutableProfiles"];        
+        if (profilesArray && [profilesArray isKindOfClass:[NSArray class]]) {
+            [self.mutableProfiles removeAllObjects];
+            
+            for (id profileItem in profilesArray) {
+                if ([profileItem isKindOfClass:[NSDictionary class]]) {
+                    // 方法1: 从字典创建Profile对象
+                    Profile *profile = [Profile fromDictionary:(NSDictionary *)profileItem];
+                    [self.mutableProfiles addObject:profile];
+                    
+                }
+            }
+                        
+        } else {
+            self.mutableProfiles = [NSMutableArray array];
+        }
+
+        // 2. 恢复 currentId
+        NSString *savedCurrentId = dataDict[@"currentId"];
+        if (savedCurrentId && ![savedCurrentId isEqualToString:@""]) {
+            self.currentId = savedCurrentId;
+        } else if(_mutableProfiles.count > 0){
+            self.currentId = _mutableProfiles[0].id;
+        }
+        
+        
+        return YES;
+        
+    } @catch (NSException *exception) {
+        NSLog(@"error: %@", exception.reason);
+        NSLog(@"异常调用栈: %@", exception.callStackSymbols);
+        return NO;
+    }
+    
+}
+#pragma mark - 清空数据
+
+- (BOOL)clearData {
+    @try {
+        self.currentId = nil;
+        [self.mutableProfiles removeAllObjects];
+        
+        // 删除文件
+        NSError *error = nil;
+        if ([[NSFileManager defaultManager] fileExistsAtPath:profileDataPath]) {
+            [[NSFileManager defaultManager] removeItemAtURL:profileDataPath error:&error];
+        }
+        
+        if (error) {
+            NSLog(@"删除数据文件失败: %@", error.localizedDescription);
+            return NO;
+        }
+        
+        return YES;
+    } @catch (NSException *exception) {
+        NSLog(@"清空数据异常: %@", exception.reason);
+        return NO;
+    }
+}
 
 - (instancetype)init {
     self = [super init];
@@ -179,68 +250,17 @@
         _mutableProfiles = [NSMutableArray array];
         _fileManager = [NSFileManager defaultManager];
         
-        // Use the specified jailbreak directory structure
-        _profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        
-        NSLog(@"[WeaponX] 📁 Using profiles directory: %@", _profilesDirectory);
-        
         // Create main WeaponX directory if it doesn't exist
-        NSString *weaponXDirectory = @"/var/jb/var/mobile/Library/WeaponX";
-        [self createDirectoryIfNeeded:weaponXDirectory];
+        NSString *projectXDirectory = @"/private/var/mobile/Media/ProjectX";
+        [self createDirectoryIfNeeded:projectXDirectory];
         
-        // Create profiles directory if it doesn't exist
-        [self createDirectoryIfNeeded:_profilesDirectory];
-        
-        // Check if current_profile_info.plist exists, create with profile "0" if not
-        NSString *centralInfoPath = [_profilesDirectory stringByAppendingPathComponent:@"current_profile_info.plist"];
-        BOOL centralInfoExists = [_fileManager fileExistsAtPath:centralInfoPath];
-        
-        // Check if profile "0" directory exists
-        // NSString *profileZeroPath = [_profilesDirectory stringByAppendingPathComponent:@"0"];
-        // BOOL profileZeroExists = [_fileManager fileExistsAtPath:profileZeroPath isDirectory:NULL];
-        
-        // If current_profile_info.plist doesn't exist or profile "0" doesn't exist, we need to create them
-        // if (!centralInfoExists || !profileZeroExists) {
-        //     NSLog(@"[WeaponX] ⚠️ No current profile info or profile '0' found, creating...");
-        //     // We'll create profile "0" immediately rather than waiting for loadProfiles completion
-        //     [self createProfileZeroImmediately];
-            
-        //     // Create current_profile_info.plist pointing to profile "0"
-        //     NSDate *now = [NSDate date];
-        //     NSDictionary *profileInfo = @{
-        //         @"ProfileId": @"0",
-        //         @"ProfileName": @"Default",
-        //         @"Description": @"Default Profile",
-        //         @"LastSelected": now
-        //     };
-        //     [profileInfo writeToFile:centralInfoPath atomically:YES];
-        //     [_fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:centralInfoPath error:nil];
-            
-        //     // Also write to active_profile_info.plist as a backup/legacy support
-        //     NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-        //     [profileInfo writeToFile:activeInfoPath atomically:YES];
-        //     [_fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:activeInfoPath error:nil];
-            
-        //     NSLog(@"[WeaponX] ✅ Created current_profile_info.plist with profile '0'");
-        // }
-        
-        // Load profiles
-        [self loadProfilesWithCompletion:^(BOOL success, NSError * _Nullable error) {
-            if (!success) {
-                NSLog(@"[WeaponX] ❌ Failed to load profiles: %@", error);
-            }
-            
-            // Double-check if no profiles exist after loading (in case createProfileZeroImmediately wasn't sufficient)
-            if (self.mutableProfiles.count == 0) {
-                NSLog(@"[WeaponX] 📝 No profiles found after initialization, creating profile '0'");
-                [self createProfileZero];
-            }
-        }];
+        // 可选：启动时自动加载数据
+        [self loadData];
     }
     return self;
 }
 
-- (void)createDirectoryIfNeeded:(NSString *)directory {
+- (BOOL)createDirectoryIfNeeded:(NSString *)directory {
     if (![_fileManager fileExistsAtPath:directory]) {
         NSError *error = nil;
         NSDictionary *attributes = @{
@@ -262,921 +282,96 @@
                               error:&error];
             if (error) {
                 NSLog(@"[WeaponX] ⚠️ Failed to set directory permissions: %@", error);
+                return NO;
             }
             NSLog(@"[WeaponX] ✅ Created directory: %@", directory);
+            return YES;
         }
     }
+    return NO;
 }
 
-#pragma mark - Public Properties
-
-- (NSArray<Profile *> *)profiles {
-    return [self.mutableProfiles copy];
-}
-
-- (Profile *)currentProfile {
-    // If we already have a current profile set, return it
-    if (self.mutableCurrentProfile) {
-        return self.mutableCurrentProfile;
-    }
-    
-    // Try to load from central store
-    Profile *storedProfile = [self loadCurrentProfileInfoFromCentralStore];
-    if (storedProfile) {
-        // Update our current profile property
-        self.mutableCurrentProfile = storedProfile;
-        return storedProfile;
-    }
-    
-    // Fallback: return the first profile in the array if available
-    if (self.mutableProfiles.count > 0) {
-        self.mutableCurrentProfile = self.mutableProfiles[0];
-        // Update the central store with this profile
-        [self updateCurrentProfileInfoWithProfile:self.mutableCurrentProfile];
-        return self.mutableCurrentProfile;
-    }
-    
-    return nil;
-}
 
 #pragma mark - Public Methods
-
-- (void)createProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion {
-
-
-}
-
-- (void)updateProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion {
-
-}
-
-- (void)deleteProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion {
-
-}
-// TODO 切换备份关闭应用
-- (void)terminateEnabledScopedApps {
-    // NSLog(@"[WeaponX] 🔄 Terminating enabled scoped apps for profile switch");
+- (NSString *)genBackupDirectory{
     
-    // // Get the BottomButtons instance directly
-    // id bottomButtons = [NSClassFromString(@"BottomButtons") sharedInstance];
-    // if (!bottomButtons) {
-    //     NSLog(@"[WeaponX] ⚠️ Could not get BottomButtons instance for app termination");
-    //     return;
-    // }
+    // 目标父目录路径
+    NSString *basePath = @"/private/var/mobile/Media/ProjectX";
     
-    // // Since the killEnabledApps method in BottomButtons works correctly,
-    // // directly invoke it to kill all enabled apps
-    // SEL killEnabledAppsSel = NSSelectorFromString(@"killEnabledApps");
-    // if ([bottomButtons respondsToSelector:killEnabledAppsSel]) {
-    //     NSLog(@"[WeaponX] 🔪 Directly calling BottomButtons.killEnabledApps to terminate enabled apps");
+    // 创建目录名
+    NSString *directoryName = [self generateProfileID];
+    NSString *fullPath = [basePath stringByAppendingPathComponent:directoryName];
+    
+    // 创建NSFileManager实例
+    NSFileManager *fileManager = [NSFileManager defaultManager];
         
-    //     // Use NSInvocation to avoid ARC issues with performSelector
-    //     NSMethodSignature *signature = [bottomButtons methodSignatureForSelector:killEnabledAppsSel];
-    //     NSInvocation *invocation = [NSInvocation invocationWithMethodSignature:signature];
-    //     [invocation setTarget:bottomButtons];
-    //     [invocation setSelector:killEnabledAppsSel];
-    //     [invocation invoke];
-        
-    //     NSLog(@"[WeaponX] ✅ Successfully called killEnabledApps method");
-    // } else {
-    //     NSLog(@"[WeaponX] ❌ BottomButtons does not respond to killEnabledApps");
-        
-    //     // Fallback to using killAppViaExecutableName directly with all enabled apps
-    //     id identifierManager = [NSClassFromString(@"IdentifierManager") sharedManager];
-    //     if (!identifierManager) {
-    //         NSLog(@"[WeaponX] ⚠️ Could not get IdentifierManager instance for app termination");
-    //         return;
-    //     }
-        
-    //     // Get all apps and filter by enabled
-    //     NSDictionary *allApps = [identifierManager getApplicationInfo:nil];
-    //     if (!allApps) {
-    //         NSLog(@"[WeaponX] ⚠️ Could not retrieve app information");
-    //         return;
-    //     }
-        
-    //     NSLog(@"[WeaponX] Found %lu total apps to check", (unsigned long)allApps.count);
-        
-    //     // Create a safelist of apps that should NEVER be terminated
-    //     NSArray *safeApps = @[
-    //         @"com.hydra.projectx",      // The tweak itself
-    //         @"com.apple.springboard",   // SpringBoard
-    //         @"com.apple.backboardd",    // BackBoard
-    //         @"com.apple.preferences",   // Settings
-    //         @"com.apple.mobilephone",   // Phone
-    //         @"com.apple.MobileSMS"      // Messages
-    //     ];
-        
-    //     int terminatedCount = 0;
-    //     for (NSString *bundleID in allApps) {
-    //         // Skip apps in the safelist
-    //         if ([safeApps containsObject:bundleID]) {
-    //             NSLog(@"[WeaponX] 🛡️ Skipping termination of protected app: %@", bundleID);
-    //             continue;
-    //         }
-            
-    //         // Check if app is enabled
-    //         if (IsScope()) {
-    //             NSLog(@"[WeaponX] 🔄 Terminating enabled app: %@", bundleID);
-                
-    //             // Use killAppViaExecutableName method directly
-    //             [bottomButtons killAppViaExecutableName:bundleID];
-    //             terminatedCount++;
-    //         }
-    //     }
-        
-    //     NSLog(@"[WeaponX] ✅ Terminated %d enabled apps using fallback method", terminatedCount);
-    // }
+    // 创建时间戳目录
+    BOOL success = [self createDirectoryIfNeeded:fullPath];
+    
+    if (success) {
+        NSLog(@"目录创建成功: %@", fullPath);
+        Profile * profile = [[Profile alloc] init];
+        profile.id = directoryName;
+        profile.name = directoryName;
+        profile.createdDate = [NSDate date];
+        [_mutableProfiles addObject:profile];
+        _currentId = profile.id;
+        [self saveData];
+        return fullPath;
+    } else {
+        return nil;
+    }
 }
 
 - (void)switchToProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion {
     NSLog(@"[WeaponX] 🔄 Switching to profile: %@", profile.name);
     
-    // Don't switch to the same profile
-    if ([self.mutableCurrentProfile.profileId isEqualToString:profile.profileId]) {
-        NSLog(@"[WeaponX] Already using profile: %@, updating last used time", profile.name);
-        
-        // Even if not switching, update the last used time
-        NSDate *now = [NSDate date];
-        profile.lastUsed = now;
-        
-        // Update the central profile info store
-        [self updateCurrentProfileInfoWithProfile:profile];
-        
-        // Save to disk
-        [self saveProfilesWithCompletion:completion];
-        return;
-    }
-    
-    // Terminate all enabled scoped apps before switching profiles
-    [self terminateEnabledScopedApps];
-    
-    // Update last used time
-    NSDate *now = [NSDate date];
-    profile.lastUsed = now;
-    
     // Set as current profile
-    self.mutableCurrentProfile = profile;
-    
-    // Update the central profile info store
-    [self updateCurrentProfileInfoWithProfile:profile];
-    
-    // Update file modification time directly
-    NSString *profileDirectory = [NSString stringWithFormat:@"%@/%@", self.profilesDirectory, profile.profileId];
-    NSError *touchError = nil;
-    
-    // Use setAttributes to directly update the modification date
-    NSDictionary *attributes = @{NSFileModificationDate: now};
-    BOOL touchSuccess = [self.fileManager setAttributes:attributes ofItemAtPath:profileDirectory error:&touchError];
-    
-    if (!touchSuccess) {
-        NSLog(@"[WeaponX] ⚠️ Failed to update profile directory modification time: %@", touchError);
-    }
-    
-    // Randomize app versions for the new profile
-    [self randomizeAppVersionsForProfile:profile.profileId];
+    self.currentId = profile.id;
     
     // Save to disk
-    [self saveProfilesWithCompletion:^(BOOL success, NSError * _Nullable error) {
-        if (success) {
-            // Post notification that profile has changed - UI components should refresh
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [[NSNotificationCenter defaultCenter] postNotificationName:@"com.hydra.projectx.profileChanged" object:nil];
-            });
-        }
-        if (completion) completion(success, error);
-    }];
+    BOOL success = [self saveData];
+    if(success && completion){
+        completion(success,nil);
+    }
 }
 
-// New method to randomize app versions for a profile
-- (void)randomizeAppVersionsForProfile:(NSString *)profileId {
-    NSLog(@"[WeaponX] 🎲 Randomizing app versions for profile: %@", profileId);
-    
-    // Try rootless path first for multi-version data
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
-    NSString *multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
-    
-    // Fallback to standard path if rootless path doesn't exist
-    if (![self.fileManager fileExistsAtPath:prefsPath]) {
-        // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-        multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
-        
-        // Fallback to standard path if needed
-        if (![self.fileManager fileExistsAtPath:prefsPath]) {
-            prefsPath = @"/var/mobile/Library/Preferences";
-            multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
-        }
-    }
-    
-    // Load multi-version data
-    NSDictionary *multiVersionDict = [NSDictionary dictionaryWithContentsOfFile:multiVersionFile];
-    NSDictionary *multiVersions = multiVersionDict[@"MultiVersions"];
-    
-    if (!multiVersions || multiVersions.count == 0) {
-        NSLog(@"[WeaponX] ℹ️ No multi-version data found, skipping randomization");
-        return;
-    }
-    
-    // Load scoped apps info to get app names
-    NSDictionary *scopedAppsInfo = [self loadScopedAppsInfo];
-    
-    // Create app_versions directory in the profile directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
-    NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
-    
-    if (![self.fileManager fileExistsAtPath:appVersionsDir]) {
-        NSError *dirError = nil;
-        NSDictionary *attributes = @{NSFilePosixPermissions: @0755, NSFileOwnerAccountName: @"mobile"};
-        if (![self.fileManager createDirectoryAtPath:appVersionsDir 
-                           withIntermediateDirectories:YES 
-                                            attributes:attributes 
-                                                 error:&dirError]) {
-            NSLog(@"[WeaponX] ❌ Failed to create app_versions directory: %@", dirError);
-            return;
-        }
-    }
-    
-    // Process each app with multiple versions
-    NSInteger randomizedCount = 0;
-    for (NSString *bundleID in multiVersions) {
-        NSArray *versions = multiVersions[bundleID];
-        if (versions.count < 2) {
-            // Skip apps with only one or zero versions
-            continue; 
-        }
-        
-        // Randomly select a version
-        NSInteger randomIndex = arc4random_uniform((uint32_t)versions.count);
-        NSDictionary *selectedVersion = versions[randomIndex];
-        
-        NSString *appName = scopedAppsInfo[bundleID][@"name"] ?: bundleID;
-        NSString *spoofedVersion = selectedVersion[@"version"];
-        NSString *spoofedBuild = selectedVersion[@"build"];
-        NSString *displayName = selectedVersion[@"displayName"] ?: [NSString stringWithFormat:@"v%@", spoofedVersion];
-        
-        NSLog(@"[WeaponX] 🎲 Randomly selected version for %@: %@ (index %ld)", appName, displayName, (long)randomIndex);
-        
-        // Create and save the app version file
-        NSString *safeFilename = [bundleID stringByReplacingOccurrencesOfString:@"." withString:@"_"];
-        safeFilename = [safeFilename stringByAppendingString:@"_version.plist"];
-        NSString *appVersionFile = [appVersionsDir stringByAppendingPathComponent:safeFilename];
-        
-        NSMutableDictionary *appVersionData = [NSMutableDictionary dictionary];
-        appVersionData[@"bundleID"] = bundleID;
-        appVersionData[@"name"] = appName;
-        appVersionData[@"spoofedVersion"] = spoofedVersion;
-        if (spoofedBuild) {
-            appVersionData[@"spoofedBuild"] = spoofedBuild;
-        }
-        appVersionData[@"activeVersionIndex"] = @(randomIndex);
-        appVersionData[@"spoofingEnabled"] = @YES;  // Enable spoofing by default for randomized versions
-        appVersionData[@"lastUpdated"] = [NSDate date];
-        
-        BOOL success = [appVersionData writeToFile:appVersionFile atomically:YES];
-        if (success) {
-            randomizedCount++;
-        } else {
-            NSLog(@"[WeaponX] ❌ Failed to save randomized version for %@", appName);
-        }
-    }
-    
-    NSLog(@"[WeaponX] ✅ Randomized versions for %ld apps", (long)randomizedCount);
-}
 
-- (NSDictionary *)loadScopedAppsInfo {
-    // Try to load scoped apps info from global scope file
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-    
-    // Fallback to standard path if rootless path doesn't exist
-    if (![self.fileManager fileExistsAtPath:prefsPath]) {
-        // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to standard path if needed
-        if (![self.fileManager fileExistsAtPath:prefsPath]) {
-            prefsPath = @"/var/mobile/Library/Preferences";
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        }
-    }
-    
-    // Load scoped apps
-    NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFile];
-    return scopedAppsDict[@"ScopedApps"] ?: @{};
+- (BOOL)isCurrent:(Profile *)profile{
+    return self.currentId && [self.currentId isEqualToString:profile.id];
 }
-
-- (void)loadProfilesWithCompletion:(void (^)(BOOL success, NSError * _Nullable error))completion {
-    NSLog(@"[WeaponX] 📂 Loading profiles from disk");
-    
-    // Get profiles file path
-    NSString *profilesPath = [self.profilesDirectory stringByAppendingPathComponent:@"profiles.plist"];
-    
-    // Check if profiles file exists
-    if ([self.fileManager fileExistsAtPath:profilesPath]) {
-        NSError *error = nil;
-        NSData *data = [NSData dataWithContentsOfFile:profilesPath];
-        
-        // Try to decode profiles
-        if (data) {
-            // Use modern, non-deprecated API
-            NSKeyedUnarchiver *unarchiver = [[NSKeyedUnarchiver alloc] initForReadingFromData:data error:&error];
-            if (error) {
-                NSLog(@"[WeaponX] ❌ Error initializing unarchiver: %@", error);
-                [self createDefaultProfile];
-                if (completion) completion(NO, error);
-                return;
-            }
-            
-            unarchiver.requiresSecureCoding = YES;
-            NSArray *profilesArray = [unarchiver decodeObjectOfClass:[NSArray class] forKey:NSKeyedArchiveRootObjectKey];
-            
-            if (!profilesArray) {
-                NSLog(@"[WeaponX] ⚠️ Failed to decode profiles, creating default profile");
-                [self createDefaultProfile];
-                if (completion) completion(NO, [NSError errorWithDomain:@"WeaponXProfileError" code:1 userInfo:@{NSLocalizedDescriptionKey: @"Failed to decode profiles"}]);
-                return;
-            }
-            
-            // Get user defaults for current profile ID
-            NSUserDefaults *sharedDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.hydra.projectx.shared"];
-            NSString *currentProfileID = [sharedDefaults objectForKey:@"CurrentProfileID"];
-            
-            // Update profiles array
-            self.mutableProfiles = [profilesArray mutableCopy];
-            
-            // Find profile with the saved current profile ID, or use last used as fallback
-            if (currentProfileID && currentProfileID.length > 0) {
-                // Try to find profile with the saved ID
-                Profile *currentProfile = nil;
-                for (Profile *profile in self.mutableProfiles) {
-                    if ([profile.profileId isEqualToString:currentProfileID]) {
-                        currentProfile = profile;
-                        break;
-                    }
-                }
-                
-                // If found, set as current
-                if (currentProfile) {
-                    self.mutableCurrentProfile = currentProfile;
-                    NSLog(@"[WeaponX] ✅ Restored current profile from shared defaults: %@", currentProfile.name);
-                } else {
-                    // If not found, use last used
-                    [self setCurrentProfileToLastUsed];
-                }
-            } else {
-                // No saved ID, use last used
-                [self setCurrentProfileToLastUsed];
-            }
-            
-            NSLog(@"[WeaponX] ✅ Loaded %lu profiles", (unsigned long)self.mutableProfiles.count);
-            if (completion) completion(YES, nil);
-            return;
-        }
+- (BOOL)remove:(Profile *)profile{
+    if (profile && ![self isCurrent:profile]) {
+        return [self removeProfileById:profile.id];
     }
-    
-    // If we reached here, either the file doesn't exist or failed to read
-    NSLog(@"[WeaponX] ⚠️ No profiles file found, creating default profile");
-    [self createDefaultProfile];
-    if (completion) completion(YES, nil);
-}
-
-- (void)setCurrentProfileToLastUsed {
-    // Find the most recently used profile
-    Profile *lastUsedProfile = [self.mutableProfiles sortedArrayUsingComparator:^NSComparisonResult(Profile *obj1, Profile *obj2) {
-        return [obj2.lastUsed compare:obj1.lastUsed];
-    }].firstObject;
-    
-    if (lastUsedProfile) {
-        self.mutableCurrentProfile = lastUsedProfile;
-        NSLog(@"[WeaponX] ✅ Set current profile to last used: %@", lastUsedProfile.name);
-        
-        // Update shared defaults with the current profile ID
-        NSUserDefaults *sharedDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.hydra.projectx.shared"];
-        [sharedDefaults setObject:lastUsedProfile.profileId forKey:@"CurrentProfileID"];
-        [sharedDefaults synchronize];
-    } else if (self.mutableProfiles.count > 0) {
-        // Fallback to first profile if no last used found
-        self.mutableCurrentProfile = self.mutableProfiles.firstObject;
-        NSLog(@"[WeaponX] ✅ Set current profile to first available: %@", self.mutableCurrentProfile.name);
-        
-        // Update shared defaults with the current profile ID
-        NSUserDefaults *sharedDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.hydra.projectx.shared"];
-        [sharedDefaults setObject:self.mutableCurrentProfile.profileId forKey:@"CurrentProfileID"];
-        [sharedDefaults synchronize];
-    }
+    return NO;
 }
 
 #pragma mark - Private Methods
 
-// Generates profile IDs in the sequence: 1, 2, ... 99, 100, ..., 999, A01, A02, ... A99, B01, ...
 - (NSString *)generateProfileID {
-    @try {
-        // Get all existing profile IDs directly from the file system
-        NSMutableArray *existingIDs = [NSMutableArray array];
-        
-        // Get profiles directory path
-        NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        
-        // Get file manager
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        
-        // Check if directory exists
-        if (![fileManager fileExistsAtPath:profilesDirectory]) {
-            NSLog(@"[WeaponX] ⚠️ Profiles directory does not exist for ID generation!");
-            return @"1";
-        }
-        
-        // First try to get all profile IDs from profiles.plist
-        NSString *profilesPath = [profilesDirectory stringByAppendingPathComponent:@"profiles.plist"];
-        if ([fileManager fileExistsAtPath:profilesPath]) {
-            NSLog(@"[WeaponX] Found profiles.plist at: %@ for ID generation", profilesPath);
-            NSData *data = [NSData dataWithContentsOfFile:profilesPath];
-            if (data) {
-                NSError *error = nil;
-                
-                // Use the modern non-deprecated API for iOS 15+
-                NSKeyedUnarchiver *unarchiver = [[NSKeyedUnarchiver alloc] initForReadingFromData:data error:&error];
-                if (error) {
-                    NSLog(@"[WeaponX] ❌ Failed to initialize unarchiver for ID generation: %@", error);
-                } else {
-                    unarchiver.requiresSecureCoding = YES;
-                    NSArray *loadedProfiles = [unarchiver decodeObjectOfClass:[NSArray class] forKey:NSKeyedArchiveRootObjectKey];
-                    
-                    if (loadedProfiles) {
-                        for (Profile *profile in loadedProfiles) {
-                            if (profile.profileId) {
-                                [existingIDs addObject:profile.profileId];
-                            }
-                        }
-                        NSLog(@"[WeaponX] ✅ Successfully loaded %lu profile IDs from plist", (unsigned long)existingIDs.count);
-                    }
-                }
-            }
-        }
-        
-        // If loading from plist failed or we got no IDs, scan directory for profile folders
-        if (existingIDs.count == 0) {
-            NSError *error = nil;
-            NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDirectory error:&error];
-            
-            if (error) {
-                NSLog(@"[WeaponX] ❌ Failed to read profiles directory for ID generation: %@", error);
-                return @"1";
-            }
-            
-            for (NSString *item in contents) {
-                NSString *itemPath = [profilesDirectory stringByAppendingPathComponent:item];
-                BOOL isDirectory = NO;
-                
-                // Skip non-directories and the profiles.plist file
-                if (![fileManager fileExistsAtPath:itemPath isDirectory:&isDirectory] || !isDirectory || [item isEqualToString:@"profiles.plist"]) {
-                    continue;
-                }
-                
-                // Add profile ID to the list
-                [existingIDs addObject:item];
-            }
-            
-            NSLog(@"[WeaponX] ✅ Found %lu profile IDs from directory scan", (unsigned long)existingIDs.count);
-        }
-        
-        // If no existing IDs, start with "1"
-        if (existingIDs.count == 0) {
-            return @"1";
-        }
-        
-        // Find the highest numeric ID (for IDs that are just numbers)
-        NSMutableArray *numericIDs = [NSMutableArray array];
-        NSMutableArray *alphaIDs = [NSMutableArray array];
-        
-        for (NSString *profileId in existingIDs) {
-            if (!profileId) continue; // Skip nil values
-            
-            if ([self isNumericString:profileId]) {
-                [numericIDs addObject:profileId];
-            } else if (profileId.length > 0) { // Make sure the string is not empty
-                [alphaIDs addObject:profileId];
-            }
-        }
-        
-        // If we have numeric IDs and haven't reached 999 yet, increment the highest one
-        if (numericIDs.count > 0) {
-            NSArray *sortedNumericIDs = [numericIDs sortedArrayUsingComparator:^NSComparisonResult(NSString *id1, NSString *id2) {
-                return [@([id1 intValue]) compare:@([id2 intValue])];
-            }];
-            
-            NSString *highestID = [sortedNumericIDs lastObject];
-            if (!highestID) return @"1"; // Safeguard
-            
-            int highestValue = [highestID intValue];
-            
-            // If we haven't reached 999 yet, increment
-            if (highestValue < 999) {
-                return [NSString stringWithFormat:@"%d", highestValue + 1];
-            }
-            // Otherwise we'll move to alpha IDs below
-        }
-        
-        // If we've reached 999 or have no numeric IDs but have alpha IDs, find the highest alpha ID
-        if (alphaIDs.count > 0) {
-            // Sort alphabetically
-            NSArray *sortedAlphaIDs = [alphaIDs sortedArrayUsingSelector:@selector(compare:)];
-            NSString *highestID = [sortedAlphaIDs lastObject];
-            if (!highestID || highestID.length < 3) return @"A01"; // Safeguard
-            
-            // Parse letter and number parts from the ID (e.g., "A01" -> "A" and 01)
-            unichar letter = [highestID characterAtIndex:0];
-            
-            // Extract the number part safely
-            NSString *numberPart = [highestID substringFromIndex:1];
-            if (![self isNumericString:numberPart]) return @"A01"; // If not a valid format, reset
-            
-            int number = [numberPart intValue];
-            
-            // Increment (max 2 digits to keep total length at 3 chars)
-            if (number < 99) {
-                number++;
-                return [NSString stringWithFormat:@"%c%02d", letter, number];
-            } else {
-                // Move to next letter and reset number to 01
-                unichar nextLetter = letter + 1;
-                return [NSString stringWithFormat:@"%c01", nextLetter];
-            }
-        }
-        
-        // If we've reached 999 and have no alpha IDs yet, start with "A01"
-        return @"A01";
-    }
-    @catch (NSException *exception) {
-        NSLog(@"[WeaponX] ❌ Exception in generateProfileID: %@", exception);
-        return @"1"; // Safe fallback
-    }
+    NSTimeInterval timeInterval = [[NSDate date] timeIntervalSince1970];
+    // 毫秒级时间戳（13位）
+    long long milliseconds = (long long)(timeInterval * 1000);
+    return [NSString stringWithFormat:@"%lld", milliseconds];
 }
 
-// Helper method to check if a string is numeric
-- (BOOL)isNumericString:(NSString *)string {
-    if (!string) return NO;
-    NSCharacterSet *nonNumericSet = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
-    return [string rangeOfCharacterFromSet:nonNumericSet].location == NSNotFound;
-}
-
-- (void)createDefaultProfile {
-    Profile *defaultProfile = [[Profile alloc] initWithName:@"Default" iconName:@"default_profile"];
-    
-    // Use our ID generation system
-    NSString *profileID = [self generateProfileID];
-    [defaultProfile setValue:profileID forKey:@"profileId"];
-    
-    [self.mutableProfiles addObject:defaultProfile];
-    self.mutableCurrentProfile = defaultProfile;
-    [self saveProfilesWithCompletion:nil];
-}
-
-- (void)saveProfilesWithCompletion:(void (^)(BOOL success, NSError * _Nullable error))completion {
-    NSLog(@"[WeaponX] 💾 Saving profiles to disk");
-    
-    // Ensure profiles directory exists
-    [self createDirectoryIfNeeded:self.profilesDirectory];
-    
-    // Get the profiles file path
-    NSString *profilesPath = [self.profilesDirectory stringByAppendingPathComponent:@"profiles.plist"];
-    
-    // Encode profiles
-    NSError *error = nil;
-    NSData *data = [NSKeyedArchiver archivedDataWithRootObject:self.mutableProfiles requiringSecureCoding:YES error:&error];
-    if (error) {
-        NSLog(@"[WeaponX] ❌ Failed to encode profiles: %@", error);
-        if (completion) completion(NO, error);
-        return;
-    }
-    
-    // Try to write with standard API first
-    BOOL success = [data writeToFile:profilesPath options:NSDataWritingAtomic error:&error];
-    
-    if (!success) {
-        // If standard API fails, try writing to temp and then moving
-        NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"temp_profiles.plist"];
-        success = [data writeToFile:tempPath options:NSDataWritingAtomic error:&error];
-        
-        if (success) {
-            // Remove existing file if it exists
-            if ([self.fileManager fileExistsAtPath:profilesPath]) {
-                [self.fileManager removeItemAtPath:profilesPath error:nil];
-            }
-            
-            // Move temp file to final location
-            success = [self.fileManager moveItemAtPath:tempPath toPath:profilesPath error:&error];
-            if (success) {
-                [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644}
-                                 ofItemAtPath:profilesPath
-                                      error:nil];
-            }
-        }
-    } else {
-        // Set permissions if standard write succeeded
-        [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644}
-                         ofItemAtPath:profilesPath
-                              error:nil];
-    }
-    
-    if (success) {
-        NSLog(@"[WeaponX] ✅ Saved %lu profiles to %@", (unsigned long)self.mutableProfiles.count, profilesPath);
-    } else {
-        NSLog(@"[WeaponX] ❌ Failed to write profiles file: %@", error);
-    }
-    
-    if (completion) completion(success, error);
-}
-
-- (void)saveSettings:(NSDictionary *)settings {
-    NSString *settingsPath = [@"/var/jb/var/mobile/Library/WeaponX" stringByAppendingPathComponent:@"settings.plist"];
-    
-    BOOL success = [settings writeToFile:settingsPath atomically:YES];
-    if (success) {
-        [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644}
-                         ofItemAtPath:settingsPath
-                              error:nil];
-        NSLog(@"[WeaponX] ✅ Saved settings to %@", settingsPath);
-    } else {
-        NSLog(@"[WeaponX] ❌ Failed to write settings file");
-    }
-}
-
-#pragma mark - Convenience Methods
-
-- (void)removeProfile:(NSString *)profileName {
-    // Find profile with matching name
-    Profile *profileToDelete = nil;
-    for (Profile *profile in self.mutableProfiles) {
-        if ([profile.name isEqualToString:profileName]) {
-            profileToDelete = profile;
-            break;
-        }
-    }
-    
-    if (profileToDelete) {
-        [self deleteProfile:profileToDelete completion:^(BOOL success, NSError * _Nullable error) {
-            if (!success) {
-                NSLog(@"[WeaponX] ❌ Failed to delete profile %@: %@", profileName, error);
-            }
-        }];
-    }
-}
-
-- (void)renameProfile:(NSString *)oldName to:(NSString *)newName {
-    // Find profile with matching name
-    Profile *profileToRename = nil;
-    for (Profile *profile in self.mutableProfiles) {
-        if ([profile.name isEqualToString:oldName]) {
-            profileToRename = profile;
-            break;
-        }
-    }
-    
-    if (profileToRename) {
-        profileToRename.name = newName;
-        [self updateProfile:profileToRename completion:^(BOOL success, NSError * _Nullable error) {
-            if (!success) {
-                NSLog(@"[WeaponX] ❌ Failed to rename profile from %@ to %@: %@", oldName, newName, error);
-            }
-        }];
-    }
-}
-
-- (void)addProfile:(NSString *)profileName {
-    Profile *newProfile = [[Profile alloc] initWithName:profileName iconName:@"default_profile"];
-    [self createProfile:newProfile completion:^(BOOL success, NSError * _Nullable error) {
-        if (!success) {
-            NSLog(@"[WeaponX] ❌ Failed to add profile %@: %@", profileName, error);
-        }
-    }];
-}
-
-- (void)addProfileWithName:(NSString *)profileName shortDescription:(NSString *)shortDescription {
-    Profile *newProfile = [[Profile alloc] initWithName:profileName shortDescription:shortDescription iconName:@"default_profile"];
-    [self createProfile:newProfile completion:^(BOOL success, NSError * _Nullable error) {
-        if (!success) {
-            NSLog(@"[WeaponX] ❌ Failed to add profile %@: %@", profileName, error);
-        }
-    }];
-}
 
 #pragma mark - Current Profile Central Management
 
-- (NSString *)centralProfileInfoPath {
-    return [self.profilesDirectory stringByAppendingPathComponent:@"current_profile_info.plist"];
-}
-
-- (BOOL)saveCentralProfileInfo:(NSDictionary *)infoDict {
-    NSString *infoPath = [self centralProfileInfoPath];
-    
-    BOOL success = [infoDict writeToFile:infoPath atomically:YES];
-    if (success) {
-        NSLog(@"[WeaponX] Successfully saved current profile info to central store: %@", infoPath);
-    } else {
-        NSLog(@"[WeaponX] Failed to save current profile info to central store: %@", infoPath);
-    }
-    
-    return success;
-}
-
-- (NSDictionary *)loadCentralProfileInfo {
-    NSString *infoPath = [self centralProfileInfoPath];
-    
-    // Check if the file exists
-    if (![self.fileManager fileExistsAtPath:infoPath]) {
-        NSLog(@"[WeaponX] Central profile info file doesn't exist: %@", infoPath);
-        return nil;
-    }
-    
-    // Load the dictionary
-    NSDictionary *infoDict = [NSDictionary dictionaryWithContentsOfFile:infoPath];
-    if (!infoDict) {
-        NSLog(@"[WeaponX] Failed to load central profile info from: %@", infoPath);
-        return nil;
-    }
-    
-    NSLog(@"[WeaponX] Successfully loaded central profile info: %@", infoDict);
-    return infoDict;
-}
-
-- (void)updateCurrentProfileInfoWithProfile:(Profile *)profile {
-    if (!profile) {
-        NSLog(@"[WeaponX] Cannot update central profile info with nil profile");
-        return;
-    }
-    
-    // Create info dictionary with all relevant profile information
-    NSMutableDictionary *infoDict = [NSMutableDictionary dictionary];
-    infoDict[@"ProfileId"] = profile.profileId;
-    infoDict[@"ProfileName"] = profile.name;
-    infoDict[@"Description"] = profile.shortDescription ?: @"";
-    infoDict[@"LastSelected"] = [NSDate date];
-    
-    // Save to central store
-    [self saveCentralProfileInfo:infoDict];
-    
-    // Also update the shared NSUserDefaults for compatibility with existing code
-    NSUserDefaults *sharedDefaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.hydra.projectx.shared"];
-    [sharedDefaults setObject:profile.profileId forKey:@"CurrentProfileID"];
-    [sharedDefaults synchronize];
-    
-    NSLog(@"[WeaponX] Updated central profile info for profile: %@ (ID: %@)", profile.name, profile.profileId);
-}
-
-- (Profile *)loadCurrentProfileInfoFromCentralStore {
-    // Load info from central store
-    NSDictionary *infoDict = [self loadCentralProfileInfo];
-    
-    if (!infoDict || !infoDict[@"ProfileId"]) {
-        NSLog(@"[WeaponX] No valid current profile info found in central store");
-        return nil;
-    }
-    
-    // Try to find the profile in our profiles array
-    NSString *profileId = infoDict[@"ProfileId"];
-    
-    for (Profile *profile in self.mutableProfiles) {
-        if ([profile.profileId isEqualToString:profileId]) {
-            NSLog(@"[WeaponX] Found current profile from central store: %@ (ID: %@)", profile.name, profile.profileId);
-            return profile;
-        }
-    }
-    
-    // If we couldn't find the profile in our array, create a temporary one
-    // This could happen if the profiles haven't been fully loaded yet
-    NSLog(@"[WeaponX] Profile from central store not found in profiles array, creating temporary");
-    
-    Profile *tempProfile = [[Profile alloc] initWithName:infoDict[@"ProfileName"] 
-                                        shortDescription:infoDict[@"Description"] 
-                                               iconName:@"default_profile"];
-    [tempProfile setValue:profileId forKey:@"profileId"];
-    
-    return tempProfile;
-}
-
-// New method to create profile "0"
-- (void)createProfileZero {
-    // Create profile directory
-    NSString *profileDir = [self.profilesDirectory stringByAppendingPathComponent:@"0"];
-    [self createDirectoryIfNeeded:profileDir];
-    
-    // Create profile object
-    Profile *defaultProfile = [[Profile alloc] initWithName:@"Default" iconName:@"default_profile"];
-    [defaultProfile setValue:@"0" forKey:@"profileId"];
-    
-    NSDate *now = [NSDate date];
-    defaultProfile.createdAt = now;
-    defaultProfile.lastUsed = now;
-    
-    // Create identity directory for device IDs
-    NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
-    [self createDirectoryIfNeeded:identityDir];
-    [self.fileManager setAttributes:@{NSFilePosixPermissions: @0755} ofItemAtPath:identityDir error:nil];
-    
-    // Create appdata.plist
-    NSString *appDataInfoPath = [profileDir stringByAppendingPathComponent:@"appdata.plist"];
-    NSDictionary *appDataInfoDict = @{
-        @"ProfileName": defaultProfile.name,
-        @"ProfileID": @"0",
-        @"ShortDescription": @"Default Profile",
-        @"Creation": now,
-        @"LastUsed": now
-    };
-    [appDataInfoDict writeToFile:appDataInfoPath atomically:YES];
-    [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:appDataInfoPath error:nil];
-    
-    // Create identifiers.plist
-    NSString *identifiersPath = [profileDir stringByAppendingPathComponent:@"identifiers.plist"];
-    NSDictionary *identifiersDict = @{
-        @"DisplayName": defaultProfile.name,
-        @"Description": @"Default Profile",
-        @"Identifier": @"0"
-    };
-    [identifiersDict writeToFile:identifiersPath atomically:YES];
-    [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:identifiersPath error:nil];
-    
-    // Create scoped-apps.plist
-    NSString *scopedAppsPath = [profileDir stringByAppendingPathComponent:@"scoped-apps.plist"];
-    NSDictionary *scopedAppsDict = @{
-        @"ProfileName": defaultProfile.name,
-        @"ProfileDescription": @"Default Profile",
-        @"Apps": @[]
-    };
-    [scopedAppsDict writeToFile:scopedAppsPath atomically:YES];
-    [self.fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:scopedAppsPath error:nil];
-    
-    // Add to profiles array
-    [self.mutableProfiles addObject:defaultProfile];
-    self.mutableCurrentProfile = defaultProfile;
-    
-    // Save to profiles.plist
-    [self saveProfilesWithCompletion:nil];
-    
-    // Update central profile info
-    [self updateCurrentProfileInfoWithProfile:defaultProfile];
-    
-    // Also write directly to active_profile_info.plist as a backup
-    NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-    NSDictionary *activeInfo = @{
-        @"ProfileId": @"0",
-        @"ProfileName": defaultProfile.name,
-        @"LastSelected": now
-    };
-    [activeInfo writeToFile:activeInfoPath atomically:YES];
-    
-    NSLog(@"[WeaponX] ✅ Created and set profile '0' as the default profile");
-}
 
 
 - (NSString *)getActiveProfileId {
-    // First check the primary profile info file
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
-    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-    
-    NSString *profileId = centralInfo[@"ProfileId"];
-    if (!profileId) {
-        // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
-        NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
-        profileId = activeInfo[@"ProfileId"];
-        
-        NSLog(@"[WeaponX] 🔍 CRITICAL CHECK - Primary profile info not found, checked backup: %@", profileId ? @"✅ found" : @"❌ not found");
+    return _currentId;
+}
+
+- (NSString *)getActiveDataPath {
+    NSString *profileId = [self getActiveProfileId];
+    if(!profileId){
+        return nil;
     }
-    
-    if (!profileId) {
-        NSLog(@"[WeaponX] Warning: No active profile ID found, using default");
-        // Try to find any profile directory as a fallback
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
-        NSError *error = nil;
-        NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
-        
-        if (!error && contents.count > 0) {
-            // Use the first directory found as a fallback
-            for (NSString *item in contents) {
-                BOOL isDir = NO;
-                NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
-                [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
-                
-                if (isDir) {
-                    profileId = item;
-                    NSLog(@"[WeaponX] Using fallback profile ID: %@", profileId);
-                    break;
-                }
-            }
-        }
-        
-        // If we still don't have a profile ID, give up
-        if (!profileId) {
-            NSLog(@"[WeaponX] Error: Could not find any profile");
-            return nil;
-        }
-    }
-    
-    return profileId;
+    // Build the path to this profile's identity directory
+    return [NSString stringWithFormat:@"/private/var/mobile/Media/ProjectX/%@", profileId];
 }
 
 - (NSString *)profileIdentityPath {
@@ -1188,7 +383,7 @@
     }
     
     // Build the path to this profile's identity directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/private/var/mobile/Media/ProjectX/%@", profileId];
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     
     // Create the directory if it doesn't exist
@@ -1209,5 +404,35 @@
     
     return identityDir;
 }
+- (Profile *) getProfileById:(NSString *) id{
+    for(Profile * profile in _mutableProfiles){
+        if([profile.id isEqualToString:id]){
+            return profile;
+        }
+    }
+    return nil;
+}
+- (BOOL) removeProfileById:(NSString *) id{
+    for(Profile * profile in _mutableProfiles){
+        if([profile.id isEqualToString:id]){
+            if([self isCurrent:profile]) return NO;
+            NSString * removePath = [NSString stringWithFormat:@"/private/var/mobile/Media/ProjectX/%@", id];
+            NSLog(@"[DEBUG] will delte %@",removePath);
+            BOOL success = [[NSFileManager defaultManager] removeItemAtPath:removePath error:nil];
+            if(success){
+                [_mutableProfiles removeObject: profile];
+                // 发送通知 daemon和应用中的都需要刷新
+                [self saveData];
+            }
+            return YES;
+        }
+    }
+    return NO;
+}
 
+- (void)renameProfile:(NSString *)id to:(NSString *)newName {
+    Profile * profile = [self getProfileById:id];
+    profile.name = newName;
+    [self saveData];
+}
 @end 

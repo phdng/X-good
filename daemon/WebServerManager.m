@@ -7,7 +7,8 @@
 #import "PhoneInfo.h"
 #import "DaemonApi.h"
 #import "DataGenManager.h"
-#define CURRENT_DATA_PATH @"/private/var/mobile/Media/ProjectX/currentData.json"
+#import "ActionManager.h"
+#import "ProfileManager.h"
 
 NSDictionary* getJsonBody(GCDWebServerDataRequest *request,NSError *jsonError)
 {
@@ -72,6 +73,19 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
 }
 +(void) initHandle:(GCDWebsocketServer *)webServer
 {
+    [webServer addHandlerForMethod:@"GET"
+                              path:NEW_PHONE
+                      requestClass:[GCDWebServerDataRequest class] // 必须是 DataRequest 才能读取 Body
+                      processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request) {
+
+        [[ActionManager sharedManager] newPhone];
+        NSMutableSet *scopeSet = [[AppScopeManager sharedManager] loadPreferences];
+        return dataResponse(@{
+            @"status": @"success",
+            @"data": [scopeSet allObjects]
+        });
+    }];
+
     // 保存选中应用
     [webServer addHandlerForMethod:@"POST"
                               path:SAVE_SCOPE_APPS
@@ -127,7 +141,31 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
             });
         }
     }];
-    
+
+    [webServer addHandlerForMethod:@"POST"
+                              path:REMOVE_BACKUP
+                        requestClass:[GCDWebServerDataRequest class] 
+                        processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request){
+                NSError *error;
+        NSDictionary *dict = getJsonBody(request,error);
+        if (error && dict) {
+            return jsonFormatErrorResponse();
+        }
+        [[ProfileManager sharedManager] removeProfileById:dict[@"id"]];
+        return staticSuccessResponse();
+    }];
+    [webServer addHandlerForMethod:@"POST"
+                              path:RENAME_BACKUP
+                        requestClass:[GCDWebServerDataRequest class] 
+                        processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request){
+        NSError *error;
+        NSDictionary *dict = getJsonBody(request,error);
+        if (error && dict) {
+            return jsonFormatErrorResponse();
+        }
+        [[ProfileManager sharedManager] renameProfile:dict[@"id"] to:dict[@"name"]];
+        return staticSuccessResponse();
+    }];
 }
 +(void) load{
     // 检查默认PhoneInf是否存在

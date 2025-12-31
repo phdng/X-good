@@ -1,32 +1,13 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <substrate.h>
-#import "ProfileManager.h"
+#import "DataManager.h"
 
-// Helper: get battery level from profile battery_info.plist
-static NSString *getProfileBatteryLevel(void) {
-    @try {
-        // Get current profile ID
-        NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
-        NSString *batteryInfoPath = [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
-        NSDictionary *batteryInfo = [NSDictionary dictionaryWithContentsOfFile:batteryInfoPath];
-        if (!batteryInfo) {
-            return nil;
-        }
-        NSString *level = batteryInfo[@"BatteryLevel"];
-        if (level && [level floatValue] >= 0.01 && [level floatValue] <= 1.0) {
-            return level;
-        }
-        return nil;
-    } @catch (NSException *e) {
-        return nil;
-    }
-}
 
 // Hook for -[UIDevice batteryLevel]
 static float (*orig_batteryLevel)(UIDevice *, SEL);
 static float hook_batteryLevel(UIDevice *self, SEL _cmd) {
-    NSString *spoofed = getProfileBatteryLevel();
+    NSString *spoofed = CurrentPhoneInfo().batteryInfo.batteryLevel;
     if (spoofed) {
         float spoofedValue = [spoofed floatValue];
         if (spoofedValue >= 0.01 && spoofedValue <= 1.0) {

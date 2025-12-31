@@ -6,51 +6,35 @@ NS_ASSUME_NONNULL_BEGIN
 
 @interface Profile : NSObject <NSSecureCoding>
 
-@property (nonatomic, strong, readonly) NSString *profileId;
+@property (nonatomic, strong) NSString *id;
 @property (nonatomic, strong) NSString *name;
-@property (nonatomic, strong) NSString *shortDescription;
-@property (nonatomic, strong) NSString *iconName;
-@property (nonatomic, strong) NSDate *createdAt;
-@property (nonatomic, strong) NSDate *lastUsed;
-@property (nonatomic, strong) NSDictionary *settings;
-
-- (instancetype)initWithName:(NSString *)name iconName:(NSString *)iconName;
-- (instancetype)initWithName:(NSString *)name shortDescription:(NSString *)shortDescription iconName:(NSString *)iconName;
-- (instancetype)initWithDictionary:(NSDictionary *)dictionary;
+@property (nonatomic, strong) NSDate *createdDate;
 - (NSDictionary *)toDictionary;
-
 @end
 
 @interface ProfileManager : NSObject
 
-@property (nonatomic, strong, readonly) NSArray<Profile *> *profiles;
-@property (nonatomic, strong, readonly) Profile *currentProfile;
-
+@property (nonatomic, strong) NSMutableArray<Profile *> *mutableProfiles;
+@property (nonatomic, strong) NSString *currentId;
 + (instancetype)sharedManager;
-
-- (void)createProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion;
-- (void)updateProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion;
-- (void)deleteProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion;
-- (void)switchToProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion;
-- (void)loadProfilesWithCompletion:(void (^)(BOOL success, NSError * _Nullable error))completion;
-
-// New methods to manage central profile information
-- (void)updateCurrentProfileInfoWithProfile:(Profile *)profile;
-- (Profile *)loadCurrentProfileInfoFromCentralStore;
-- (BOOL)saveCentralProfileInfo:(NSDictionary *)infoDict;
-- (NSDictionary *)loadCentralProfileInfo;
-- (NSString *)centralProfileInfoPath;
-
-// Convenience methods for ProfileTabViewController
-- (void)removeProfile:(NSString *)profileName;
-- (void)renameProfile:(NSString *)oldName to:(NSString *)newName;
-- (void)addProfile:(NSString *)profileName;
-- (void)addProfileWithName:(NSString *)profileName shortDescription:(NSString *)shortDescription;
+- (NSString *)genBackupDirectory;
 
 // Profile ID generation
 - (NSString *)generateProfileID;
 - (NSString *)profileIdentityPath;
 - (NSString *)getActiveProfileId;
+- (NSString *)getActiveDataPath;
+
+- (void)switchToProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion;
+- (void)renameProfile:(NSString *)id to:(NSString *)newName;
+- (BOOL)remove:(Profile *)profile;
+- (BOOL)isCurrent:(Profile *)profile;
+- (BOOL) removeProfileById:(NSString *) id;
+
+- (BOOL)saveData;
+- (BOOL)loadData;
+- (BOOL)clearData;
+
 @end
 
 NS_ASSUME_NONNULL_END 
