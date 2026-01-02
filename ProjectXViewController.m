@@ -731,7 +731,15 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
 #pragma mark - Memory Management
 
 - (void)dealloc {
-    // Remove all notification observers
     [[NSNotificationCenter defaultCenter] removeObserver:self];
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    CFNotificationCenterRemoveObserver(darwinCenter,
+                                       (__bridge const void *)self,
+                                       CFSTR("projectx.newPhoneFinish"),
+                                       NULL);
+    CFNotificationCenterRemoveObserver(darwinCenter,
+                                       (__bridge const void *)self,
+                                       CFSTR("com.hydra.projectx.profileChanged"),
+                                       NULL);
 }
 @end

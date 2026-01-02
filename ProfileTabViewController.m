@@ -75,19 +75,30 @@
     
     // Pre-layout cells to avoid resize delays
     [self.tableView prefetchDataSource];
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
 
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                        selector:@selector(loadProfilesFromDisk:)
-                                            name:@"projectx.newPhoneFinish"
-                                            object:nil];
-
-    // Register for profile changes
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                            selector:@selector(loadProfilesFromDisk:)
-                                                name:@"com.hydra.projectx.profileChanged"
-                                              object:nil];
+    CFNotificationCenterAddObserver(darwinCenter,
+                                (__bridge const void *)self,
+                                darwinNotificationCallback,
+                                CFSTR("projectx.newPhoneFinish"),
+                                NULL,
+                                CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(darwinCenter,
+                            (__bridge const void *)self,
+                            darwinNotificationCallback,
+                            CFSTR("com.hydra.projectx.profileChanged"),
+                            NULL,
+                            CFNotificationSuspensionBehaviorDeliverImmediately);
 }
-
+static void darwinNotificationCallback(CFNotificationCenterRef center,
+                                       void *observer,
+                                       CFStringRef name,
+                                       const void *object,
+                                       CFDictionaryRef userInfo) {
+    // 这里是 C 函数，需要处理桥接
+    ProfileTabViewController *selfInstance = (__bridge ProfileTabViewController *)observer;
+    [selfInstance loadProfilesFromDisk];
+}
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     // Load profiles directly from disk
@@ -1914,5 +1925,16 @@
     
     self.renameButton.frame = CGRectMake(pencilX, 22, 30, 30);
 }
-
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    CFNotificationCenterRemoveObserver(darwinCenter,
+                                       (__bridge const void *)self,
+                                       CFSTR("projectx.newPhoneFinish"),
+                                       NULL);
+    CFNotificationCenterRemoveObserver(darwinCenter,
+                                       (__bridge const void *)self,
+                                       CFSTR("com.hydra.projectx.profileChanged"),
+                                       NULL);
+}
 @end 
