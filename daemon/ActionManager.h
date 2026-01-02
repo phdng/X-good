@@ -6,6 +6,8 @@
 + (instancetype)sharedManager;
 
 - (void) newPhone;
+- (void) removeBackup:(NSString *)id;
+-(void) switchBackup:(NSString *) id;
 @end
 
 @interface LSApplicationProxy(Private)

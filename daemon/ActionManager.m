@@ -3,7 +3,12 @@
 #import "PhoneInfo.h"
 #import "ProfileManager.h"
 #import "DataGenManager.h"
+#import "SysExecutor.h"
 
+
+@interface ActionManager()
+    @property(nonatomic, strong) ProfileManager *profileManager;
+@end
 @implementation ActionManager
 
 + (instancetype)sharedManager {
@@ -16,20 +21,21 @@
 }
 - (instancetype) init{
     self = [super init];
+    _profileManager = [ProfileManager sharedManager];
     return self;
 }
 - (void) newPhone{
     // // 加载所有被选中应用
     NSMutableSet * loadApps = [[AppScopeManager sharedManager] loadPreferences];
     // 获取当前生效备份
-    NSString * activeBackupPath = [[ProfileManager sharedManager] getActiveDataPath];
+    NSString * activeBackupPath = [_profileManager getActiveDataPath];
     if(!activeBackupPath){
         // 首次新机
-        activeBackupPath = [[ProfileManager sharedManager] genBackupDirectory];
+        activeBackupPath = [_profileManager genBackupDirectory];
         
     }
     // 创建备份存放目录
-    NSString * backupPath = [[ProfileManager sharedManager] genBackupDirectory];
+    NSString * backupPath = [_profileManager genBackupDirectory];
     if(!backupPath){
         NSLog(@"create Backup directory error");
         return;
@@ -41,38 +47,70 @@
         if([bundleId isEqualToString:@"com.apple.mobilesafari"]){
             [self delFile:@"/var/mobile/Library/Safari"];
         }
-        // 清理 prefernce /private/var/mobile/Library/Preferences
-
-
+        // 清理 prefernce /private/var/mobile/Library/Preferences   
+        [self delFile:[NSString stringWithFormat:@"/private/var/mobile/Library/Preferences/%@.plist",bundleId]];
        
-
-
         // 清理or备份沙盒数据到activeBackUp中
         [self backupFileToPath:bundleId toPath:activeBackupPath];
     }
-    // // 清理keychain内容
+    // 清理keychain内容
     [self clearKeyChain];
-    // // 保存旧参数
+    // 保存旧参数
     PhoneInfo * phoneInfo = [PhoneInfo loadFromPrefs];
     [PhoneInfo saveDictionaryToFile:[phoneInfo toDictionary] toFile:[activeBackupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
     // 生成新参数
     PhoneInfo * newPhoneInfo = [[DataGenManager sharedManager] generatePhoneInfo];
     [PhoneInfo saveDictionaryToFile:[newPhoneInfo toDictionary] toFile:[backupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
-    [newPhoneInfo saveToFile];
+    [newPhoneInfo saveToPrefs];
     // 通知页面刷新显示
-
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    CFNotificationCenterPostNotification(darwinCenter, CFSTR("projectx.newPhoneFinish"), NULL, NULL, YES);
 
 }
 
 -(void) switchBackup:(NSString *) id{
-   
+    Profile *profile = [_profileManager getProfileById:id];
+    // 不存在该备份直接返回
+    if(!profile) return;
+    // 加载所有被选中应用
+    NSMutableSet * loadApps = [[AppScopeManager sharedManager] loadPreferences];
+    // 获取当前生效备份
+    NSString * activeBackupPath = [_profileManager getActiveDataPath];
+    [_profileManager switchToProfile:profile];
+    NSString * waitActiveBackupPath = [_profileManager getActiveDataPath];
+
+    for (NSString * bundleId in loadApps){
+        // 强制关停应用
+        [self killApp:bundleId];
+       
+        // 清理or备份沙盒数据到activeBackUp中
+        [self backupFileToPath:bundleId toPath:activeBackupPath];
+
+        [self restoreBackupFromPath:waitActiveBackupPath toBundle:bundleId];
+    }
+    
+    [self clearKeyChain];
+
+    // 加载备份下PhoneInfo
+    PhoneInfo * phoneInfo = [PhoneInfo loadDictionaryFromFile:[waitActiveBackupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
+    [phoneInfo saveToPrefs];
+    // Also post a Darwin notification for the floating indicator
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    CFNotificationCenterPostNotification(darwinCenter, 
+                                            CFSTR("com.hydra.projectx.profileChanged"), 
+                                            NULL, 
+                                            NULL, 
+                                            YES);
+                
 }
 
 - (void) clearKeyChain{
 
 }
 - (void) killApp:(NSString *) bundleId{
-
+    LSApplicationProxy* appProxy = [LSApplicationProxy applicationProxyForIdentifier:bundleId];
+    
+    runCommand([NSString stringWithFormat:@"killall -9 %@",appProxy.bundleExecutable]);
 }
 -(NSString *) getAppDataPath:(NSString *) bundleId{
     LSApplicationProxy* appProxy = [LSApplicationProxy applicationProxyForIdentifier:bundleId];
@@ -80,8 +118,21 @@
 }
 - (void)backupFileToPath:(NSString *)bundleId toPath:(NSString *)path {
     NSString *appDataPath = [self getAppDataPath:bundleId];
-    NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *savePath = [path stringByAppendingPathComponent:bundleId];
 
+    NSFileManager *fm = [NSFileManager defaultManager];
+    if(![fm fileExistsAtPath:savePath]){
+        NSDictionary *attributes = @{
+            NSFilePosixPermissions: @0755,
+            NSFileOwnerAccountName: @"mobile",
+            NSFileGroupOwnerAccountName: @"mobile"
+        };
+        
+        [fm createDirectoryAtPath:savePath
+               withIntermediateDirectories:YES
+                                attributes:attributes
+                                     error:nil];
+    }
     NSArray *folders = @[@"Documents", @"tmp", @"Library", @"SystemData"];
 
     //
@@ -89,14 +140,10 @@
     //
     for (NSString *folder in folders) {
         NSString *src = [appDataPath stringByAppendingPathComponent:folder];
-        NSString *dst = [path stringByAppendingPathComponent:folder];
+        NSString *dst = [savePath stringByAppendingPathComponent:folder];
 
         if (![fm fileExistsAtPath:src]) continue;
-
-        // 目标存在先删
-        if ([fm fileExistsAtPath:dst]) {
-            [fm removeItemAtPath:dst error:nil];
-        }
+        [self delFile:dst];
 
         NSError *moveErr = nil;
         if (![fm moveItemAtPath:src toPath:dst error:&moveErr]) {
@@ -131,6 +178,7 @@
 - (void)restoreBackupFromPath:(NSString *)backupPath toBundle:(NSString *)bundleId {
     NSString *appDataPath = [self getAppDataPath:bundleId];
     NSFileManager *fm = [NSFileManager defaultManager];
+    NSString *savePath = [backupPath stringByAppendingPathComponent:bundleId];
 
     NSArray *folders = @[@"Documents", @"tmp", @"Library", @"SystemData"];
 
@@ -138,7 +186,7 @@
     // 1️⃣ 逐个把备份目录拷贝回去（整个目录）
     //
     for (NSString *folder in folders) {
-        NSString *src = [backupPath stringByAppendingPathComponent:folder];
+        NSString *src = [savePath stringByAppendingPathComponent:folder];
         NSString *dst = [appDataPath stringByAppendingPathComponent:folder];
 
         BOOL isDir = NO;
@@ -147,9 +195,7 @@
         }
 
         // 目标存在，先删除
-        if ([fm fileExistsAtPath:dst]) {
-            [fm removeItemAtPath:dst error:nil];
-        }
+        [self delFile:dst];
 
         NSError *copyErr = nil;
         if (![fm copyItemAtPath:src toPath:dst error:&copyErr]) {
@@ -208,9 +254,19 @@
 
 
 -(void) delFile:(NSString *) path{
-    
+    NSFileManager *fm = [NSFileManager defaultManager];
+    // 判断文件是否存在 存在就删除
+    if([fm fileExistsAtPath:path]){
+        NSString *res = runCommand([NSString stringWithFormat:@"rm -rf %@",path]);
+        NSLog(@"delFile res:%@",res);
+    }
 }
 
-
+-(void) removeBackup:(NSString *)id{
+    if([_profileManager removeProfileById:id]){
+        NSString * removePath = [NSString stringWithFormat:@"/private/var/mobile/Media/ProjectX/%@", id];
+        [self delFile:removePath];
+    }
+}
 
 @end

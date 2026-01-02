@@ -75,6 +75,17 @@
     
     // Pre-layout cells to avoid resize delays
     [self.tableView prefetchDataSource];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                        selector:@selector(loadProfilesFromDisk:)
+                                            name:@"projectx.newPhoneFinish"
+                                            object:nil];
+
+    // Register for profile changes
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                            selector:@selector(loadProfilesFromDisk:)
+                                                name:@"com.hydra.projectx.profileChanged"
+                                              object:nil];
 }
 
 - (void)viewWillAppear:(BOOL)animated {
@@ -113,6 +124,7 @@
 }
 
 - (void)loadProfilesFromDisk {
+    NSLog(@"[DEBUG] loadProfilesFromDisk");
     // Get active profile ID directly from central info store first
     [[ProfileManager sharedManager] loadData];
     self.profiles = [ProfileManager sharedManager].mutableProfiles;
@@ -490,17 +502,6 @@
         }
     }
     containerIcon.tintColor = sender.isOn ? [UIColor systemGreenColor] : [UIColor systemGrayColor];
-    
-    // Post notification to update container system state
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"containerSystemToggled" object:nil userInfo:@{@"enabled": @(sender.isOn)}];
-    
-    // Also post Darwin notification for system-wide notification
-    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-    CFNotificationCenterPostNotification(darwinCenter, 
-                                         CFSTR("com.weaponx.containersystem.toggled"), 
-                                         NULL, 
-                                         NULL, 
-                                         YES);
     
     // Provide feedback 
     UIImpactFeedbackGenerator *feedbackGenerator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
@@ -1196,51 +1197,26 @@
     [loadingIndicator startAnimating];
     
     // Switch to the selected profile
-    [[ProfileManager sharedManager] switchToProfile:profile completion:^(BOOL success, NSError * _Nullable error) {
+    [[DaemonApiManager sharedManager] switchBackup:profile comp:^(id response, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
             [loadingIndicator stopAnimating];
             [loadingIndicator removeFromSuperview];
-            
-            if (success) {
-                // Notify floating profile indicator that a change happened
-                // This ensures the indicator updates promptly after the switch completes
-                [[NSNotificationCenter defaultCenter] postNotificationName:@"ProfileManagerCurrentProfileChanged" 
-                                                                    object:nil 
-                                                                  userInfo:@{@"profile": profile}];
                 
-                // Also post a Darwin notification for the floating indicator
-                CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-                CFNotificationCenterPostNotification(darwinCenter, 
-                                                     CFSTR("com.hydra.projectx.profileChanged"), 
-                                                     NULL, 
-                                                     NULL, 
-                                                     YES);
+            // Show success message
+            UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Profile Switched"
+                                                                                message:[NSString stringWithFormat:@"Successfully switched to profile: %@", profile.name]
+                                                                        preferredStyle:UIAlertControllerStyleAlert];
+            [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+                // Notify delegate that a profile was selected
+                if ([self.delegate respondsToSelector:@selector(ProfileTabViewController:didSelectProfile:)]) {
+                    [self.delegate ProfileTabViewController:self didSelectProfile:profile];
+                }
                 
-                // Show success message
-                UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Profile Switched"
-                                                                                 message:[NSString stringWithFormat:@"Successfully switched to profile: %@", profile.name]
-                                                                          preferredStyle:UIAlertControllerStyleAlert];
-                [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
-                    // Notify delegate that a profile was selected
-                    if ([self.delegate respondsToSelector:@selector(ProfileTabViewController:didSelectProfile:)]) {
-                        [self.delegate ProfileTabViewController:self didSelectProfile:profile];
-                    }
-                    
-                    // Dismiss the profile manager
-                    [self dismissViewControllerAnimated:YES completion:nil];
-                }]];
-                [self presentViewController:successAlert animated:YES completion:nil];
-            } else {
-                // Show error message
-                UIAlertController *errorAlert = [UIAlertController alertControllerWithTitle:@"Error"
-                                                                                message:[NSString stringWithFormat:@"Failed to switch profile: %@", error.localizedDescription ?: @"Unknown error"]
-                                                                         preferredStyle:UIAlertControllerStyleAlert];
-                [errorAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:errorAlert animated:YES completion:nil];
-                
-                // Reload profiles from disk to ensure UI is in sync
-                [self loadProfilesFromDisk];
-            }
+                // Dismiss the profile manager
+                [self dismissViewControllerAnimated:YES completion:nil];
+            }]];
+            [self presentViewController:successAlert animated:YES completion:nil];
+       
         });
     }];
 }

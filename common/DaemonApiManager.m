@@ -97,4 +97,12 @@
     });
 }
 
+- (void) switchBackup:(Profile *)profile comp:(void(^)(id response, NSError *error))completion{
+    daemonPOST(SWITCH_BACKUP,[profile toDictionary], ^(id response, NSError *error) {
+        // 如果有回调，执行回调
+        if (completion) {
+            completion(response, error);
+        }
+    });
+}
 @end

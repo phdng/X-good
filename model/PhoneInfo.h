@@ -1,13 +1,7 @@
 #import <Foundation/Foundation.h>
 
 // StorageInfo.h 或同一个文件顶部先声明 StorageInfo
-@class StorageInfo;  // 前向声明，解决循环依赖
-@class BatteryInfo;
-@class WifiInfo;
-@class IosVersion;
-@class UpTimeInfo;
-@class DeviceModel;
-@class WebGLInfo;
+@class StorageInfo,NetworkInfo,BatteryInfo,WifiInfo,IosVersion,UpTimeInfo,DeviceModel,WebGLInfo;  // 前向声明，解决循环依赖
 
 @interface PhoneInfo : NSObject
 
@@ -39,6 +33,8 @@
 @property (nonatomic, strong) WifiInfo *wifiInfo;
 @property (nonatomic, strong) DeviceModel *deviceModel;
 
+@property (nonatomic, strong) NetworkInfo *networkInfo;
+
 
 // 启动时间
 @property (nonatomic, strong) UpTimeInfo *upTimeInfo;
@@ -47,7 +43,7 @@
 + (instancetype)fromDictionary:(NSDictionary *)dict;
 
 // 文件存储方法
-- (BOOL)saveToFile;
+- (BOOL)saveToPrefs;
 + (instancetype)loadFromPrefs;
 
 // 静态方法：直接保存 NSDictionary 到文件
@@ -138,6 +134,26 @@
 @property (nonatomic, copy) NSString *webglVersion;
 @property (nonatomic, copy) NSNumber *maxTextureSize;
 @property (nonatomic, copy) NSNumber *maxRenderBufferSize;
+- (NSDictionary *)toDictionary;
++ (instancetype)fromDictionary:(NSDictionary *)dict;
+@end
+
+
+typedef NS_ENUM(NSInteger, NetworkConnectionType) {
+    NetworkConnectionTypeAuto = 0,
+    NetworkConnectionTypeWiFi = 1,
+    NetworkConnectionTypeCellular = 2,
+    NetworkConnectionTypeNone = 3
+};
+@interface NetworkInfo : NSObject
+@property (nonatomic, copy) NSString *carrierName;
+@property (nonatomic, copy) NSString *mcc;
+@property (nonatomic, copy) NSString *mnc;
+@property (nonatomic, copy) NSString *localIPv6Address;
+@property (nonatomic, copy) NSString *localIPAddress;
+// 0~3
+@property (nonatomic, assign) NetworkConnectionType connectionType;
+
 - (NSDictionary *)toDictionary;
 + (instancetype)fromDictionary:(NSDictionary *)dict;
 @end

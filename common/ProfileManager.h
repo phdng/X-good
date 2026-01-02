@@ -24,8 +24,9 @@ NS_ASSUME_NONNULL_BEGIN
 - (NSString *)profileIdentityPath;
 - (NSString *)getActiveProfileId;
 - (NSString *)getActiveDataPath;
+- (Profile *) getProfileById:(NSString *) id;
 
-- (void)switchToProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion;
+- (void)switchToProfile:(Profile *)profile;
 - (void)renameProfile:(NSString *)id to:(NSString *)newName;
 - (BOOL)remove:(Profile *)profile;
 - (BOOL)isCurrent:(Profile *)profile;

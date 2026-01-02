@@ -603,13 +603,6 @@ static void setupAdditionalSystemUUIDHooks() {
         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
             // Enhanced process filtering - check if this is a process we should hook
             NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-            NSString *executablePath = [[NSBundle mainBundle] executablePath];
-            NSString *processName = [executablePath lastPathComponent];
-            
-            // Perform a more thorough check for iPad-specific processes that might be causing issues
-            UIDevice *device = [UIDevice currentDevice];
-                        
-            
             // Create a separate try-catch block for each hook to prevent one failure from affecting others
             @try {
                 // Set up hook for _dyld_get_shared_cache_uuid

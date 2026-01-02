@@ -10,49 +10,9 @@
 #import <SystemConfiguration/CaptiveNetwork.h>
 #import <ifaddrs.h>
 #import <arpa/inet.h>
-#import "NetworkManager.h"
-#import "ProfileManager.h"
 #include <dlfcn.h>
+#import "DataManager.h"
 
-
-// Constants for connection types
-typedef NS_ENUM(NSInteger, NetworkConnectionType) {
-    NetworkConnectionTypeAuto = 0,
-    NetworkConnectionTypeWiFi = 1,
-    NetworkConnectionTypeCellular = 2,
-    NetworkConnectionTypeNone = 3
-};
-
-// Path to security settings plist
-static NSString *const kSecuritySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
-
-
-// Cache for quick lookup
-static NSInteger cachedConnectionType = -1;
-static BOOL cachedNetworkDataSpoofEnabled = NO;
-static NSDate *cacheTimestamp = nil;
-static const NSTimeInterval kCacheValidDuration = 5.0; // 5 seconds
-
-// Shared fake cellular carrier for consistent spoofing
-static NSString *const kFakeCarrierName = @"ProjectX";
-static NSString *const kFakeMobileCountryCode = @"310";
-static NSString *const kFakeMobileNetworkCode = @"260";
-
-// Cache for ISO country code
-static NSString *cachedISOCountryCode = nil;
-static NSDate *isoCountryCodeCacheTimestamp = nil;
-static const NSTimeInterval kISOCountryCodeCacheValidDuration = 60.0; // 60 seconds
-
-// Fake WiFi SSID
-static NSString *const kFakeWiFiSSID = @"ProjectX_WiFi";
-static NSString *const kFakeBSSID = @"00:11:22:33:44:55";
-
-// Cache for carrier details
-static NSString *cachedCarrierName = nil;
-static NSString *cachedMobileCountryCode = nil;
-static NSString *cachedMobileNetworkCode = nil;
-static NSDate *carrierDetailsCacheTimestamp = nil;
-static const NSTimeInterval kCarrierDetailsCacheValidDuration = 60.0; // 60 seconds
 
 // Constants for signal strength
 static const int kWiFiSignalStrengthExcellent = -45;  // -45 dBm (Excellent)
@@ -81,57 +41,10 @@ static const NSTimeInterval kMinNetworkTypeChangeDuration = 120.0; // Minimum 2 
 
 // Get the current ISO country code from security settings
 static NSString *getCurrentISOCountryCode() {
-    // Check cache validity
-    if (cachedISOCountryCode && isoCountryCodeCacheTimestamp && 
-        [[NSDate date] timeIntervalSinceDate:isoCountryCodeCacheTimestamp] < kISOCountryCodeCacheValidDuration) {
-        return cachedISOCountryCode;
-    }
-    
-    // Read from security settings
-    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:kSecuritySettingsPath];
-    NSString *isoCode = [settings objectForKey:@"networkISOCountryCode"];
-    
-    // Use default if not set
-    if (!isoCode) {
-        isoCode = @"us";
-    }
-    
-    // Update cache
-    cachedISOCountryCode = isoCode;
-    isoCountryCodeCacheTimestamp = [NSDate date];
-    
-    PXLog(@"[NetworkHook] Read ISO country code: %@", isoCode);
-    return isoCode;
+    return @"us";
 }
 
 
-// Get the local IP address from the current profile
-static NSString *getProfileLocalIPAddress() {
-    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
-    if (!identityDir) {
-        return @"192.168.1.1"; // Default fallback
-    }
-    
-    // Try to read from network_settings.plist
-    NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
-    NSDictionary *networkDict = [NSDictionary dictionaryWithContentsOfFile:networkPath];
-    
-    NSString *localIP = networkDict[@"localIPAddress"];
-    
-    // If not found in dedicated file, try the combined device_ids.plist
-    if (!localIP) {
-        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-        localIP = deviceIds[@"LocalIPAddress"];
-    }
-    
-    // If still not found, return default IP
-    if (!localIP) {
-        localIP = @"192.168.1.1";
-    }
-    
-    return localIP;
-}
 
 // Get the current local IP address from the system
 static NSString * __attribute__((unused)) getCurrentLocalIPAddress() {
@@ -163,40 +76,7 @@ static NSString * __attribute__((unused)) getCurrentLocalIPAddress() {
 }
 
 
-// Get the current connection type setting from the plist
-static NetworkConnectionType getNetworkConnectionType() {
-    // Check if cache is valid
-    if (cacheTimestamp && [[NSDate date] timeIntervalSinceDate:cacheTimestamp] < kCacheValidDuration) {
-        return cachedConnectionType;
-    }
-    
-    // Read directly from plist file for speed
-    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:kSecuritySettingsPath];
-    
-    // Check if network data spoofing is enabled
-    BOOL networkDataSpoofEnabled = [settings[@"networkDataSpoofEnabled"] boolValue];
-    cachedNetworkDataSpoofEnabled = networkDataSpoofEnabled;
-    
-    if (!networkDataSpoofEnabled) {
-        // If spoofing is disabled, return -1 as a signal to use original behavior
-        cachedConnectionType = -1;
-        cacheTimestamp = [NSDate date];
-        return cachedConnectionType;
-    }
-    
-    // Get the connection type value
-    NSNumber *typeNumber = settings[@"networkConnectionType"];
-    NSInteger type = typeNumber ? [typeNumber integerValue] : NetworkConnectionTypeAuto;
-    
-    // Update cache
-    cachedConnectionType = type;
-    cacheTimestamp = [NSDate date];
-    
-    PXLog(@"[NetworkHook] Read connection type: %ld, spoofing enabled: %@", 
-          (long)type, networkDataSpoofEnabled ? @"YES" : @"NO");
-    
-    return cachedConnectionType;
-}
+
 
 // For Auto mode, decide randomly between WiFi and Cellular
 static BOOL shouldUseWiFiForAutoMode() {
@@ -215,7 +95,7 @@ static BOOL shouldUseWiFiForAutoMode() {
 
 // Helper to check if we should show as WiFi
 static BOOL shouldShowAsWiFi() {
-    NetworkConnectionType type = getNetworkConnectionType();
+    NetworkConnectionType type = CurrentPhoneInfo().networkInfo.connectionType;
     
     if (type == NetworkConnectionTypeWiFi) {
         return YES;
@@ -228,7 +108,7 @@ static BOOL shouldShowAsWiFi() {
 
 // Helper to check if we should show as Cellular
 static BOOL shouldShowAsCellular() {
-    NetworkConnectionType type = getNetworkConnectionType();
+    NetworkConnectionType type = CurrentPhoneInfo().networkInfo.connectionType;
     if (type == NetworkConnectionTypeCellular) {
         return YES;
     } else if (type == NetworkConnectionTypeAuto && !shouldUseWiFiForAutoMode()) {
@@ -237,123 +117,7 @@ static BOOL shouldShowAsCellular() {
     return NO;
 }
 
-// Get carrier details from the current profile
-static NSDictionary *getCarrierDetailsFromProfile() {
-    // Check cache validity
-    if (cachedCarrierName && cachedMobileCountryCode && cachedMobileNetworkCode && carrierDetailsCacheTimestamp && 
-        [[NSDate date] timeIntervalSinceDate:carrierDetailsCacheTimestamp] < kCarrierDetailsCacheValidDuration) {
-        return @{
-            @"carrierName": cachedCarrierName,
-            @"mobileCountryCode": cachedMobileCountryCode,
-            @"mobileNetworkCode": cachedMobileNetworkCode
-        };
-    }
-    
-    // Default values (fallback)
-    NSString *carrierName = kFakeCarrierName;
-    NSString *mobileCountryCode = kFakeMobileCountryCode;
-    NSString *mobileNetworkCode = kFakeMobileNetworkCode;
-    
-    // Get the profile identity path
-    NSString *identityDir = [[ProfileManager sharedManager] profileIdentityPath];
-    if (identityDir) {
-        // Build path to carrier_details.plist
-        NSString *carrierDetailsPath = [identityDir stringByAppendingPathComponent:@"carrier_details.plist"];
-        
-        // Check if file exists
-        if ([[NSFileManager defaultManager] fileExistsAtPath:carrierDetailsPath]) {
-            // Read the carrier details from plist
-            NSDictionary *carrierDetails = [NSDictionary dictionaryWithContentsOfFile:carrierDetailsPath];
-            if (carrierDetails) {
-                // Extract values from plist with fallbacks
-                if (carrierDetails[@"carrierName"]) {
-                    carrierName = carrierDetails[@"carrierName"];
-                }
-                
-                if (carrierDetails[@"mcc"]) {
-                    mobileCountryCode = carrierDetails[@"mcc"];
-                } else if (carrierDetails[@"CarrierMCC"]) {
-                    // Also try the alternative field name used in device_ids.plist
-                    mobileCountryCode = carrierDetails[@"CarrierMCC"];
-                }
-                
-                if (carrierDetails[@"mnc"]) {
-                    mobileNetworkCode = carrierDetails[@"mnc"];
-                } else if (carrierDetails[@"CarrierMNC"]) {
-                    // Also try the alternative field name used in device_ids.plist
-                    mobileNetworkCode = carrierDetails[@"CarrierMNC"];
-                }
-                
-                PXLog(@"[NetworkHook] Read carrier details from profile: carrier=%@, MCC=%@, MNC=%@", 
-                     carrierName, mobileCountryCode, mobileNetworkCode);
-            } else {
-                PXLog(@"[NetworkHook] Failed to read carrier details from %@, using default carrier details", carrierDetailsPath);
-            }
-        } else {
-            // If carrier_details.plist not found, try network_settings.plist
-            NSString *networkPath = [identityDir stringByAppendingPathComponent:@"network_settings.plist"];
-            if ([[NSFileManager defaultManager] fileExistsAtPath:networkPath]) {
-                NSDictionary *networkDict = [NSDictionary dictionaryWithContentsOfFile:networkPath];
-                if (networkDict) {
-                    // Extract values from network_settings.plist
-                    if (networkDict[@"carrierName"]) {
-                        carrierName = networkDict[@"carrierName"];
-                    }
-                    
-                    if (networkDict[@"mcc"]) {
-                        mobileCountryCode = networkDict[@"mcc"];
-                    }
-                    
-                    if (networkDict[@"mnc"]) {
-                        mobileNetworkCode = networkDict[@"mnc"];
-                    }
-                    
-                    PXLog(@"[NetworkHook] Read carrier details from network_settings.plist: carrier=%@, MCC=%@, MNC=%@", 
-                         carrierName, mobileCountryCode, mobileNetworkCode);
-                }
-            } else {
-                // If network_settings.plist not found, try device_ids.plist
-                NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-                if ([[NSFileManager defaultManager] fileExistsAtPath:deviceIdsPath]) {
-                    NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-                    if (deviceIds) {
-                        // Extract values from device_ids.plist
-                        if (deviceIds[@"CarrierName"]) {
-                            carrierName = deviceIds[@"CarrierName"];
-                        }
-                        
-                        if (deviceIds[@"CarrierMCC"]) {
-                            mobileCountryCode = deviceIds[@"CarrierMCC"];
-                        }
-                        
-                        if (deviceIds[@"CarrierMNC"]) {
-                            mobileNetworkCode = deviceIds[@"CarrierMNC"];
-                        }
-                        
-                        PXLog(@"[NetworkHook] Read carrier details from device_ids.plist: carrier=%@, MCC=%@, MNC=%@", 
-                             carrierName, mobileCountryCode, mobileNetworkCode);
-                    }
-                } else {
-                    PXLog(@"[NetworkHook] Carrier details file not found at %@, using default carrier details", carrierDetailsPath);
-                }
-            }
-        }
-    } else {
-        PXLog(@"[NetworkHook] Could not find profile identity directory, using default carrier details");
-    }
-    
-    // Update cache
-    cachedCarrierName = carrierName;
-    cachedMobileCountryCode = mobileCountryCode;
-    cachedMobileNetworkCode = mobileNetworkCode;
-    carrierDetailsCacheTimestamp = [NSDate date];
-    
-    return @{
-        @"carrierName": carrierName,
-        @"mobileCountryCode": mobileCountryCode,
-        @"mobileNetworkCode": mobileNetworkCode
-    };
-}
+
 
 // Get a realistic WiFi signal strength in dBm that changes gradually over time
 static int getWiFiSignalStrength() {
@@ -363,7 +127,7 @@ static int getWiFiSignalStrength() {
     // Update signal strength every 30-60 seconds with small random fluctuations
     if (timeSinceLastUpdate >= 30.0 || !lastSignalUpdateTime) {
         // Determine the base signal strength based on connection type
-        NetworkConnectionType connectionType = getNetworkConnectionType();
+        NetworkConnectionType connectionType = CurrentPhoneInfo().networkInfo.connectionType;
         int targetSignal;
         
         if (connectionType == NetworkConnectionTypeWiFi || 
@@ -439,7 +203,7 @@ static int getCellularSignalBars() {
     // Update signal bars every 30-60 seconds
     if (timeSinceLastUpdate >= 30.0 || !lastSignalUpdateTime) {
         // Determine the base signal bars based on connection type
-        NetworkConnectionType connectionType = getNetworkConnectionType();
+        NetworkConnectionType connectionType = CurrentPhoneInfo().networkInfo.connectionType;
         int targetBars;
         
         if (connectionType == NetworkConnectionTypeCellular || 
@@ -640,7 +404,7 @@ Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SC
     if (shouldShowAsWiFi()) {
         return %orig;
     } else if (shouldShowAsCellular()) {
-        return getCarrierDetailsFromProfile()[@"carrierName"];
+        return CurrentPhoneInfo().networkInfo.carrierName;
     }
     return %orig;
 }
@@ -649,7 +413,7 @@ Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SC
     if (shouldShowAsWiFi()) {
         return %orig;
     } else if (shouldShowAsCellular()) {
-        return getCarrierDetailsFromProfile()[@"mobileCountryCode"];
+        return CurrentPhoneInfo().networkInfo.mnc;
     }
     return %orig;
 }
@@ -658,7 +422,7 @@ Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SC
     if (shouldShowAsWiFi()) {
         return %orig;
     } else if (shouldShowAsCellular()) {
-        return getCarrierDetailsFromProfile()[@"mobileNetworkCode"];
+        return CurrentPhoneInfo().networkInfo.mnc;
     }
     return %orig;
 }
@@ -719,9 +483,10 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
     int result = original_getifaddrs(ifap);
     if (result == 0 && ifap && *ifap) {
         struct ifaddrs *ifa = *ifap;
-        NetworkConnectionType type = getNetworkConnectionType();
-        NSString *spoofedIP = getProfileLocalIPAddress();
-        NSString *spoofedIPv6 = [NetworkManager getSavedLocalIPv6Address];
+        NetworkInfo * networkInfo = CurrentPhoneInfo().networkInfo;
+        NetworkConnectionType type = networkInfo.connectionType;
+        NSString *spoofedIP = networkInfo.localIPAddress;
+        NSString *spoofedIPv6 = networkInfo.localIPv6Address;
         if (!spoofedIPv6) {
             spoofedIPv6 = @"fe80::1234:abcd:5678:9abc";
         }
@@ -924,9 +689,9 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
             PXLog(@"[NetworkHook] ERROR: Could not find getifaddrs function!");
         }
         
-        
+        NetworkInfo * networkInfo = CurrentPhoneInfo().networkInfo;
         // Log initial state
-        NetworkConnectionType initialType = getNetworkConnectionType();
+        NetworkConnectionType initialType = networkInfo.connectionType;
         if (initialType != -1) {
             NSString *connectionName;
             switch (initialType) {
@@ -949,7 +714,7 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
             
             if (initialType == NetworkConnectionTypeWiFi || 
                 (initialType == NetworkConnectionTypeAuto && shouldUseWiFiForAutoMode())) {
-                NSString *localIP = getProfileLocalIPAddress();
+                NSString *localIP = networkInfo.localIPAddress;
                 PXLog(@"[NetworkHook] Network connection type spoofing enabled with type: %@ (Local IP: %@) for scoped app", 
                         connectionName, localIP);
             } else if (initialType == NetworkConnectionTypeCellular ||

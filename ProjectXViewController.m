@@ -210,6 +210,9 @@
 
 - (instancetype)init {
     self = [super init];
+    if(self){
+        _identifierLabels = [NSMutableDictionary dictionary];
+    }
     return self;
 }
 
@@ -248,23 +251,33 @@
     self.title = @"Project X";
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     
-    
-    // Add long press gesture to show debug info for trial banner
-    UILongPressGestureRecognizer *longPressGesture = [[UILongPressGestureRecognizer alloc] initWithTarget:self action:@selector(showTrialBannerDebugInfo:)];
-    longPressGesture.minimumPressDuration = 2.0; // 2 seconds
-    [self.view addGestureRecognizer:longPressGesture];
-    
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
 
-    
-    // Register for profile changes
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                            selector:@selector(handleProfileChanged:)
-                                                name:@"com.hydra.projectx.profileChanged"
-                                              object:nil];
+    CFNotificationCenterAddObserver(darwinCenter,
+                                (__bridge const void *)self,
+                                darwinNotificationCallback,
+                                CFSTR("projectx.newPhoneFinish"),
+                                NULL,
+                                CFNotificationSuspensionBehaviorDeliverImmediately);
+    CFNotificationCenterAddObserver(darwinCenter,
+                            (__bridge const void *)self,
+                            darwinNotificationCallback,
+                            CFSTR("com.hydra.projectx.profileChanged"),
+                            NULL,
+                            CFNotificationSuspensionBehaviorDeliverImmediately);
+
     
     [self setupUI];
 }
-
+static void darwinNotificationCallback(CFNotificationCenterRef center,
+                                       void *observer,
+                                       CFStringRef name,
+                                       const void *object,
+                                       CFDictionaryRef userInfo) {
+    // 这里是 C 函数，需要处理桥接
+    ProjectXViewController *selfInstance = (__bridge ProjectXViewController *)observer;
+    [selfInstance handleProfileChanged:name];
+}
 - (void)viewDidLayoutSubviews {
     [super viewDidLayoutSubviews];
     
@@ -511,7 +524,6 @@
     identifierLabel.textAlignment = NSTextAlignmentCenter;
     identifierLabel.translatesAutoresizingMaskIntoConstraints = NO;
     self.identifierLabels[type] = identifierLabel;
-
     // Add padding to identifier label
     [identifierContainer addSubview:identifierLabel];
     [NSLayoutConstraint activateConstraints:@[
@@ -572,6 +584,7 @@
 
 
 - (NSString *)identifierValueForType:(NSString *)type {
+    [[DataManager sharedManager] freshCacheData];
     PhoneInfo * phoneInfo = CurrentPhoneInfo();
     // 转换为小写或保持原样，根据你的实际需求
     NSString *lowerType = [type lowercaseString];
@@ -666,28 +679,6 @@
 
 
 
-#pragma mark - ProfileTabViewControllerDelegate
-
-- (void)ProfileTabViewController:(UIViewController *)viewController didUpdateProfiles:(NSArray<Profile *> *)profiles {
-    self.profiles = [profiles mutableCopy];
-}
-
-- (void)ProfileTabViewController:(UIViewController *)viewController didSelectProfile:(Profile *)profile {
-    
-    // Explicitly notify floating profile indicator to refresh
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"ProfileManagerCurrentProfileChanged" 
-                                                        object:nil 
-                                                      userInfo:nil];
-    
-    // Also post a Darwin notification for the floating indicator
-    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
-    CFNotificationCenterPostNotification(darwinCenter, 
-                                         CFSTR("com.hydra.projectx.profileChanged"), 
-                                         NULL, 
-                                         NULL, 
-                                         YES);
-}
-
 
 
 - (NSArray *)findSubviewsOfClass:(Class)cls inView:(UIView *)view {
@@ -723,13 +714,18 @@
 #pragma mark - More Options Button Action
 
 
-- (void)handleProfileChanged:(NSNotification *)notification {
+- (void)handleProfileChanged:(CFStringRef)notificationName {
     // This method is called when the profile changes
-    NSLog(@"[WeaponX] Profile changed notification received");
     
-    for (NSString * type in [self allIdentifierTypes]){
-        self.identifierLabels[type].text = [self identifierValueForType:type];
-    }
+    
+    dispatch_async(dispatch_get_main_queue(), ^{
+        for (NSString *type in [self allIdentifierTypes]) {
+            UILabel *label = self.identifierLabels[type];
+            if (label) {
+                label.text = [self identifierValueForType:type];
+            }
+        }
+    });
 }
 
 #pragma mark - Memory Management

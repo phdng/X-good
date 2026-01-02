@@ -1,5 +1,7 @@
 #import "DataGenManager.h"
 #import <sys/sysctl.h> 
+#import <ifaddrs.h>
+#import <arpa/inet.h>
 
 @interface DataGenManager()
 @property (nonatomic, strong) NSError *error;
@@ -51,6 +53,8 @@
     phoneInfo.upTimeInfo = [self generateUpTimeInfo];
 
     phoneInfo.deviceModel = [self generateDeviceModel];
+    phoneInfo.networkInfo = [self generateNetworkInfo];
+
     return phoneInfo;
 }
 
@@ -1383,7 +1387,131 @@
     
     return batteryInfo;
 }
+- (NetworkInfo *) generateNetworkInfo{
+    NSArray *carriers = @[
+        // Major Carriers
+        @{@"name": @"Verizon", @"mcc": @"310", @"mnc": @"004"},
+        @{@"name": @"Verizon", @"mcc": @"310", @"mnc": @"010"},
+        @{@"name": @"Verizon", @"mcc": @"311", @"mnc": @"480"},
+        
+        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"170"},
+        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"410"},
+        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"150"},
+        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"680"},
+        
+        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"260"},
+        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"160"},
+        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"240"},
+        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"800"},
+        
+        @{@"name": @"Sprint", @"mcc": @"310", @"mnc": @"120"},
+        @{@"name": @"Sprint", @"mcc": @"311", @"mnc": @"870"},
+        @{@"name": @"Sprint", @"mcc": @"312", @"mnc": @"530"},
+        
+        // Regional Carriers without spaces
+        @{@"name": @"Cellcom", @"mcc": @"311", @"mnc": @"210"}
+    ];
+    NSUInteger randomIndex = arc4random_uniform((uint32_t)carriers.count);
+    NetworkInfo *networkInfo = [[NetworkInfo alloc] init];
+    networkInfo.carrierName = carriers[randomIndex][@"name"];
+    networkInfo.mcc = carriers[randomIndex][@"mcc"];
+    networkInfo.mnc = carriers[randomIndex][@"mnc"];
+    networkInfo.localIPAddress = [self generateSpoofedLocalIPAddressFromCurrent];
+    networkInfo.localIPv6Address = [self generateSpoofedLocalIPv6AddressFromCurrent];
+    // 获取最小值和最大值
+    NetworkConnectionType minType = NetworkConnectionTypeAuto;    // 0
+    NetworkConnectionType maxType = NetworkConnectionTypeCellular;    // 2
 
+    // 生成随机数（包含 min 和 max）
+    NetworkConnectionType randomType = arc4random_uniform(maxType - minType + 1) + minType;
+    networkInfo.connectionType = randomType;
+    return networkInfo;
+}
+- (NSString *)getCurrentLocalIPAddress {
+    NSString *address = @"192.168.1.1"; // Default fallback
+    struct ifaddrs *interfaces = NULL;
+    struct ifaddrs *temp_addr = NULL;
+    
+    // Retrieve the current interfaces - returns 0 on success
+    if (getifaddrs(&interfaces) == 0) {
+        // Loop through linked list of interfaces
+        temp_addr = interfaces;
+        while (temp_addr != NULL) {
+            if (temp_addr->ifa_addr->sa_family == AF_INET) {
+                // Check if interface is en0 which is the wifi connection on iOS
+                if ([[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"en0"]) {
+                    // Get NSString from C String
+                    address = [NSString stringWithUTF8String:inet_ntoa(((struct sockaddr_in *)temp_addr->ifa_addr)->sin_addr)];
+                    break;
+                }
+            }
+            temp_addr = temp_addr->ifa_next;
+        }
+    }
+    
+    // Free memory
+    freeifaddrs(interfaces);
+    
+    return address;
+}
+
+- (NSString *)generateSpoofedLocalIPAddressFromCurrent {
+    NSString *currentIP = [self getCurrentLocalIPAddress];
+    NSArray<NSString *> *parts = [currentIP componentsSeparatedByString:@"."];
+    if (parts.count == 4) {
+        // Change the last octet to a random value (2-253), not the original
+        int lastOctet = [parts[3] intValue];
+        int newLastOctet = lastOctet;
+        int attempts = 0;
+        while (newLastOctet == lastOctet && attempts < 10) {
+            newLastOctet = 2 + arc4random_uniform(252); // 2-253
+            attempts++;
+        }
+        NSString *spoofedIP = [NSString stringWithFormat:@"%@.%@.%@.%d", parts[0], parts[1], parts[2], newLastOctet];
+        return spoofedIP;
+    }
+    // Fallback to random if parsing fails
+    return [self getCurrentLocalIPAddress];
+}
+
+- (NSString *)generateSpoofedLocalIPv6AddressFromCurrent {
+    NSString *address = nil;
+    struct ifaddrs *interfaces = NULL;
+    struct ifaddrs *temp_addr = NULL;
+    if (getifaddrs(&interfaces) == 0) {
+        temp_addr = interfaces;
+        while (temp_addr != NULL) {
+            if (temp_addr->ifa_addr && temp_addr->ifa_addr->sa_family == AF_INET6) {
+                if ([[NSString stringWithUTF8String:temp_addr->ifa_name] isEqualToString:@"en0"]) {
+                    char ip6[INET6_ADDRSTRLEN];
+                    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)temp_addr->ifa_addr;
+                    inet_ntop(AF_INET6, &sin6->sin6_addr, ip6, sizeof(ip6));
+                    address = [NSString stringWithUTF8String:ip6];
+                    break;
+                }
+            }
+            temp_addr = temp_addr->ifa_next;
+        }
+    }
+    freeifaddrs(interfaces);
+    if (!address) {
+        address = @"fe80::1234:abcd:5678:9abc";
+    }
+    // Spoof last segment
+    NSArray *parts = [address componentsSeparatedByString:@":"];
+    if (parts.count >= 2) {
+        NSMutableArray *mutableParts = [parts mutableCopy];
+        NSString *last = parts.lastObject;
+        NSString *spoofedLast = [NSString stringWithFormat:@"%x", arc4random_uniform(0xFFFF)];
+        if ([last length] > 0) {
+            mutableParts[mutableParts.count-1] = spoofedLast;
+        } else if (mutableParts.count > 1) {
+            mutableParts[mutableParts.count-2] = spoofedLast;
+        }
+        return [mutableParts componentsJoinedByString:@":"];
+    }
+    return address;
+}
 - (NSString *)generateSerialNumber {
 
     self.error = nil;

@@ -32,6 +32,7 @@
     dict[@"wifiInfo"] = [self.wifiInfo toDictionary] ?: @{};
     dict[@"deviceModel"] = [self.deviceModel toDictionary] ?: @{};
     dict[@"upTimeInfo"] = [self.upTimeInfo toDictionary] ?: @{};
+    dict[@"networkInfo"] = [self.networkInfo toDictionary] ?: @{};
     
     return [dict copy];
 }
@@ -96,13 +97,17 @@
     if ([upTimeInfoDict isKindOfClass:[NSDictionary class]]) {
         phoneInfo.upTimeInfo = [UpTimeInfo fromDictionary:upTimeInfoDict];
     }
+    NSDictionary *networkInfoDict = dict[@"networkInfo"];
+    if ([networkInfoDict isKindOfClass:[NSDictionary class]]) {
+        phoneInfo.networkInfo = [NetworkInfo fromDictionary:networkInfoDict];
+    }
     
     return phoneInfo;
 }
 
 #pragma mark - 文件存储
 
-- (BOOL)saveToFile{
+- (BOOL)saveToPrefs{
     NSDictionary *dict = [self toDictionary];
     
     // 使用新的静态方法保存
@@ -506,4 +511,38 @@
 }
 
 
+@end
+
+
+@implementation NetworkInfo : NSObject
+
+- (NSDictionary *)toDictionary{
+      return @{
+        @"carrierName": self.carrierName ?: @"",
+        @"mcc": self.mcc ?: @"",
+        @"mnc": self.mnc ?: @"",
+        @"localIPv6Address": self.localIPv6Address ?: @"",
+        @"localIPAddress": self.localIPAddress ?: @"",
+        @"connectionType": @(self.connectionType)
+    };
+}
++ (instancetype)fromDictionary:(NSDictionary *)dict{
+    NetworkInfo *networkInfo = [[NetworkInfo alloc] init];
+    networkInfo.carrierName = dict[@"carrierName"] ?: @"";
+    networkInfo.mcc = dict[@"mcc"] ?: @"";
+    networkInfo.mnc = dict[@"mnc"] ?: @"";
+    networkInfo.localIPv6Address = dict[@"localIPv6Address"] ?: @"";
+    networkInfo.localIPAddress = dict[@"localIPAddress"] ?: @"";
+    id connectionTypeObj = dict[@"connectionType"];
+    if ([connectionTypeObj isKindOfClass:[NSNumber class]]) {
+        networkInfo.connectionType = [connectionTypeObj integerValue];
+    } else if ([connectionTypeObj isKindOfClass:[NSString class]]) {
+        // 兼容：如果存储的是字符串，尝试转换
+        networkInfo.connectionType = [connectionTypeObj integerValue];
+    } else {
+        // 默认值
+        networkInfo.connectionType = NetworkConnectionTypeAuto;
+    }
+    return networkInfo;
+}
 @end

@@ -302,9 +302,6 @@
     NSString *directoryName = [self generateProfileID];
     NSString *fullPath = [basePath stringByAppendingPathComponent:directoryName];
     
-    // 创建NSFileManager实例
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-        
     // 创建时间戳目录
     BOOL success = [self createDirectoryIfNeeded:fullPath];
     
@@ -323,7 +320,7 @@
     }
 }
 
-- (void)switchToProfile:(Profile *)profile completion:(void (^)(BOOL success, NSError * _Nullable error))completion {
+- (void)switchToProfile:(Profile *)profile {
     NSLog(@"[WeaponX] 🔄 Switching to profile: %@", profile.name);
     
     // Set as current profile
@@ -331,9 +328,6 @@
     
     // Save to disk
     BOOL success = [self saveData];
-    if(success && completion){
-        completion(success,nil);
-    }
 }
 
 
@@ -416,14 +410,8 @@
     for(Profile * profile in _mutableProfiles){
         if([profile.id isEqualToString:id]){
             if([self isCurrent:profile]) return NO;
-            NSString * removePath = [NSString stringWithFormat:@"/private/var/mobile/Media/ProjectX/%@", id];
-            NSLog(@"[DEBUG] will delte %@",removePath);
-            BOOL success = [[NSFileManager defaultManager] removeItemAtPath:removePath error:nil];
-            if(success){
-                [_mutableProfiles removeObject: profile];
-                // 发送通知 daemon和应用中的都需要刷新
-                [self saveData];
-            }
+            [_mutableProfiles removeObject: profile];
+            [self saveData];
             return YES;
         }
     }

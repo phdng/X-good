@@ -54,12 +54,6 @@
     
     // Set delegate to self for tab change notifications
     self.delegate = self;
-    
-    // Register for notifications
-    [[NSNotificationCenter defaultCenter] addObserver:self
-                                            selector:@selector(accountTabDidFinish:)
-                                                name:@"accountTabDidFinish"
-                                              object:nil];
 
     
     
@@ -126,11 +120,6 @@
     [super viewDidAppear:animated];
     
     
-    // Post notification that this view controller did appear
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"UIViewController_DidAppear" 
-                                                        object:self 
-                                                      userInfo:nil];
-    
     // Verify authentication status whenever tab bar controller appears
     static BOOL firstAppearance = YES;
     
@@ -138,10 +127,6 @@
     // duplicate login screen presentations
     
     firstAppearance = NO;
-}
-
-- (void)dealloc {
-    [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 
 

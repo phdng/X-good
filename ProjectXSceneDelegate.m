@@ -44,12 +44,6 @@
     
     [self.window makeKeyAndVisible];
     
-    // Post connection notification
-    if (@available(iOS 14.0, *)) {
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [[NSNotificationCenter defaultCenter] postNotificationName:@"ProjectXSceneConnectionNotification" object:nil];
-        });
-    }
     
     // Handle any URL contexts for deep linking
     if (connectionOptions.URLContexts.count > 0) {
@@ -108,35 +102,25 @@
 
 - (void)sceneDidDisconnect:(UIScene *)scene {
     [self stateRestorationActivityForScene:scene];
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"SceneWillDisconnect" object:nil];
     self.window = nil;
 }
 
 - (void)sceneDidBecomeActive:(UIScene *)scene {
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"SceneDidBecomeActive" object:nil];
 }
 
 - (void)sceneWillResignActive:(UIScene *)scene {
     [self stateRestorationActivityForScene:scene];
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"SceneWillResignActive" object:nil];
 }
 
 - (void)sceneWillEnterForeground:(UIScene *)scene {
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"SceneWillEnterForeground" object:nil];
 }
 
 - (void)sceneDidEnterBackground:(UIScene *)scene {
     [self stateRestorationActivityForScene:scene];
-    [[NSNotificationCenter defaultCenter] postNotificationName:@"SceneDidEnterBackground" object:nil];
 }
 
 - (void)windowScene:(UIWindowScene *)windowScene didUpdateCoordinateSpace:(id<UICoordinateSpace>)previousCoordinateSpace interfaceOrientation:(UIInterfaceOrientation)previousInterfaceOrientation traitCollection:(UITraitCollection *)previousTraitCollection {
-    if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
-        [[NSNotificationCenter defaultCenter] postNotificationName:@"WindowSceneDidUpdate" object:nil userInfo:@{
-            @"interfaceOrientation": @(windowScene.interfaceOrientation),
-            @"traitCollection": previousTraitCollection
-        }];
-    }
+
 }
 
 @end 

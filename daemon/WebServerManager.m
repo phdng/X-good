@@ -151,7 +151,7 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
         if (error && dict) {
             return jsonFormatErrorResponse();
         }
-        [[ProfileManager sharedManager] removeProfileById:dict[@"id"]];
+        [[ActionManager sharedManager] removeBackup:dict[@"id"]];
         return staticSuccessResponse();
     }];
     [webServer addHandlerForMethod:@"POST"
@@ -166,13 +166,26 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
         [[ProfileManager sharedManager] renameProfile:dict[@"id"] to:dict[@"name"]];
         return staticSuccessResponse();
     }];
+
+    [webServer addHandlerForMethod:@"POST"
+                              path:SWITCH_BACKUP
+                        requestClass:[GCDWebServerDataRequest class] 
+                        processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request){
+        NSError *error;
+        NSDictionary *dict = getJsonBody(request,error);
+        if (error && dict) {
+            return jsonFormatErrorResponse();
+        }
+        [[ActionManager sharedManager] switchBackup:dict[@"id"]];
+        return staticSuccessResponse();
+    }];
 }
 +(void) load{
     // 检查默认PhoneInf是否存在
     PhoneInfo * phoneInfo = [PhoneInfo loadFromPrefs];
     if(!phoneInfo){
         phoneInfo = [[DataGenManager sharedManager] generatePhoneInfo];
-        [phoneInfo saveToFile];
+        [phoneInfo saveToPrefs];
     }
 }
 @end
