@@ -18,7 +18,6 @@ struct timeval_boot {
 
 // Original function pointers - ONLY for system calls
 static int (*orig_sysctl)(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
-static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 
 
 // Global flag to track if hooks are installed
@@ -54,29 +53,6 @@ int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *new
     return -1;
 }
 
-// Hook sysctlbyname() for "kern.boottime" queries - ONLY method that App Store apps commonly use
-int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
-    @try {
-        if (name && strcmp(name, "kern.boottime") == 0) {
-            NSDate * bootTime = CurrentPhoneInfo().upTimeInfo.bootTime;
-            if (bootTime && oldp && oldlenp && *oldlenp >= sizeof(struct timeval)) {
-                struct timeval boottime;
-                boottime.tv_sec = (time_t)[bootTime timeIntervalSince1970];
-                boottime.tv_usec = 0;
-                memcpy(oldp, &boottime, sizeof(boottime));
-                *oldlenp = sizeof(boottime);
-                return 0; // Success
-            }
-        }
-    } @catch (NSException *e) {
-        // Silent failure, pass through to original
-    }
-    // Call original function for all other cases
-    if (orig_sysctlbyname) {
-        return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
-    }
-    return -1;
-}
 
 // Hook for -[NSProcessInfo systemUptime]
 static NSTimeInterval (*orig_systemUptime)(NSProcessInfo *, SEL);
@@ -107,12 +83,6 @@ static void installSystemCallHooks(void) {
             hookingSuccess = YES;
         }
         
-        void *sysctlbynamePtr = dlsym(RTLD_DEFAULT, "sysctlbyname");
-        if (sysctlbynamePtr) {
-            MSHookFunction(sysctlbynamePtr, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname);
-            hookingSuccess = YES;
-        }
-    
         
         if (hookingSuccess) {
             hooksInstalled = YES;

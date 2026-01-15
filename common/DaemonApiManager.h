@@ -14,4 +14,6 @@
 - (void) removeBackup:(Profile *)profile comp:(void(^)(id response, NSError *error))completion;
 - (void) renameBackup:(Profile *)profile comp:(void(^)(id response, NSError *error))completion;
 - (void) switchBackup:(Profile *)profile comp:(void(^)(id response, NSError *error))completion;
+- (NSArray *) getAllCarrier;
+- (NSArray *) getAllVersions;
 @end

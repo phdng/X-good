@@ -1,6 +1,6 @@
 #import "TabBarController.h"
 #import "ProjectXViewController.h"
-#import "SecurityTabViewController.h"
+#import "SettingTabViewController.h"
 #import <objc/runtime.h>
 #import <Security/Security.h>
 #import <CommonCrypto/CommonHMAC.h>
@@ -60,7 +60,7 @@
     // Create view controllers
     ProjectXViewController *identityVC = [[ProjectXViewController alloc] init];
     ProjectXViewController *profileVC = [[ProfileTabViewController alloc] init];
-    SecurityTabViewController *securityVC = [[SecurityTabViewController alloc] init];
+    SettingTabViewController *securityVC = [[SettingTabViewController alloc] init];
     AppTabViewController  *appVC = [[AppTabViewController  alloc] init];
 
     // AccountViewController *accountVC = [[AccountViewController alloc] init];

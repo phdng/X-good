@@ -4,7 +4,7 @@
 #import "ProfileManager.h"
 #import "DataGenManager.h"
 #import "SysExecutor.h"
-
+#import <sqlite3.h>
 
 @interface ActionManager()
     @property(nonatomic, strong) ProfileManager *profileManager;
@@ -92,8 +92,8 @@
     [self clearKeyChain];
 
     // 加载备份下PhoneInfo
-    PhoneInfo * phoneInfo = [PhoneInfo loadDictionaryFromFile:[waitActiveBackupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
-    [phoneInfo saveToPrefs];
+    NSDictionary * phoneInfo = [PhoneInfo loadDictionaryFromFile:[waitActiveBackupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
+    [PhoneInfo saveDictionaryToPrefs:phoneInfo];
     // Also post a Darwin notification for the floating indicator
     CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
     CFNotificationCenterPostNotification(darwinCenter, 
@@ -105,7 +105,24 @@
 }
 
 - (void) clearKeyChain{
+	sqlite3 *database;
+	int openResult = sqlite3_open("/private/var/Keychains/keychain-2.db", &database);
+	if (openResult == SQLITE_OK)
+	{
+		sqlite3_exec(database, "DELETE FROM genp WHERE agrp <> 'apple';", NULL, NULL, NULL);
 
+		sqlite3_exec(database, "DELETE FROM cert WHERE agrp <> 'lockdown-identities';", NULL, NULL, NULL);
+
+		sqlite3_exec(database, "DELETE FROM keys WHERE agrp <> 'lockdown-identities';", NULL, NULL, NULL);
+
+		sqlite3_exec(database, "DELETE FROM inet;", NULL, NULL, NULL);
+
+		sqlite3_exec(database, "DELETE FROM sqlite_sequence;", NULL, NULL, NULL);
+		
+        sqlite3_exec(database, "VACUUM;", NULL, NULL, NULL);
+		
+        sqlite3_close(database);
+	}
 }
 - (void) killApp:(NSString *) bundleId{
     LSApplicationProxy* appProxy = [LSApplicationProxy applicationProxyForIdentifier:bundleId];

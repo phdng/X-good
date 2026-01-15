@@ -9,6 +9,7 @@
 #import "DataGenManager.h"
 #import "ActionManager.h"
 #import "ProfileManager.h"
+#import "DBManager.h"
 
 NSDictionary* getJsonBody(GCDWebServerDataRequest *request,NSError *jsonError)
 {
@@ -68,8 +69,20 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
     dispatch_once(&onceToken, ^{
         webServer = [[GCDWebServer alloc] init];
         [WebServerManager initHandle:webServer];
+        [WebServerManager initDebugHandle:webServer];
         [webServer startWithPort:8888 bonjourName:nil];
     });
+}
++(void) initDebugHandle:(GCDWebsocketServer *)webServer
+{
+    // [webServer addHandlerForMethod:@"GET"
+    //                           path:@"/randomInfo"
+    //                   requestClass:[GCDWebServerDataRequest class] // 必须是 DataRequest 才能读取 Body
+    //                   processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request) {
+
+    //     IosVersion * iosVersion = [[DataGenManager sharedManager] generateIOSVersion];
+    //     return dataResponse([iosVersion toDictionary]);
+    // }];
 }
 +(void) initHandle:(GCDWebsocketServer *)webServer
 {
@@ -132,7 +145,7 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
             return jsonFormatErrorResponse();
         }
        
-        BOOL success = [PhoneInfo saveDictionary:dict];
+        BOOL success = [PhoneInfo saveDictionaryToPrefs:dict];
         if(success){
             return staticSuccessResponse();
         }else{
@@ -179,6 +192,29 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
         [[ActionManager sharedManager] switchBackup:dict[@"id"]];
         return staticSuccessResponse();
     }];
+
+    [webServer addHandlerForMethod:@"GET"
+                              path:GET_ALL_CARRIER
+                      requestClass:[GCDWebServerRequest class] 
+                      processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
+        NSArray<NSDictionary *> * data = [[DBManager sharedManager] query:@"select DISTINCT code from operator"];
+         return dataResponse(@{
+            @"status": @"success",
+            @"data": [data valueForKey:@"code"]
+        });
+    }];
+
+    [webServer addHandlerForMethod:@"GET"
+                              path:GET_ALL_VERSIONS
+                      requestClass:[GCDWebServerRequest class] 
+                      processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
+        NSArray<NSDictionary *> * data = [[DBManager sharedManager] query:@"select version from KMOS"];
+        return dataResponse(@{
+            @"status": @"success",
+            @"data": [data valueForKey:@"version"]
+        });
+    }];
+
 }
 +(void) load{
     // 检查默认PhoneInf是否存在

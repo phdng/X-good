@@ -700,70 +700,27 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
 
 // Hook sysctlbyname to spoof iOS kernel version information
 int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
-    // Store last call time and cached result for the common kernel version calls
-    static uint64_t lastOsVersionCallTime = 0;
-    static char cachedBuildStr[32] = {0}; // Cache the build string
-    static size_t cachedBuildStrLen = 0;
-    
-    // For kern.version - full Darwin kernel version string
-    static uint64_t lastKernVersionCallTime = 0;
-    static char cachedKernelVersionStr[256] = {0}; // Cache the kernel version string
-    static size_t cachedKernelVersionStrLen = 0;
     
     @try {
         // Pre-cache version info only once
-        static IosVersion *cachedVersionInfo = nil;
-        static dispatch_once_t onceToken;
-        dispatch_once(&onceToken, ^{
-            cachedVersionInfo = CurrentPhoneInfo().iosVersion;
-            if (cachedVersionInfo) {
-                // Extract build number and cache it
-                NSString *buildNumber = cachedVersionInfo.build;
-                if (buildNumber) {
-                    strlcpy(cachedBuildStr, [buildNumber UTF8String], sizeof(cachedBuildStr));
-                    cachedBuildStrLen = strlen(cachedBuildStr) + 1; // +1 for null terminator
-                }
-                
-                // Extract kernel version string and cache it
-                NSString *kernelVersion = cachedVersionInfo.kernelVersion;
-                if (kernelVersion) {
-                    strlcpy(cachedKernelVersionStr, [kernelVersion UTF8String], sizeof(cachedKernelVersionStr));
-                    cachedKernelVersionStrLen = strlen(cachedKernelVersionStr) + 1; // +1 for null terminator
-                }
-                
-                IOSVERSION_LOG(@"🔄 Pre-cached version info: %@ (%@), kernel: %@", 
-                      cachedVersionInfo.version, 
-                      cachedVersionInfo.build,
-                      cachedVersionInfo.kernelVersion);
-            } else {
-                IOSVERSION_LOG(@"⚠️ Failed to pre-cache version info");
-            }
-        });
+        IosVersion *cachedVersionInfo = CurrentPhoneInfo().iosVersion;
+        static char cachedBuildStr[32] = {0}; // Cache the build string
+        static size_t cachedBuildStrLen = 0;
+        strlcpy(cachedBuildStr, [cachedVersionInfo.build UTF8String], sizeof(cachedBuildStr));
+        cachedBuildStrLen = strlen(cachedBuildStr) + 1; // +1 for null terminator
 
+        static char cachedKernelVersionStr[256] = {0}; // Cache the kernel version string
+        strlcpy(cachedKernelVersionStr, [cachedVersionInfo.kernelVersion UTF8String], sizeof(cachedKernelVersionStr));
+        static size_t cachedKernelVersionStrLen = 0;
+        cachedKernelVersionStrLen = strlen(cachedKernelVersionStr) + 1; // +1 for null terminator
 
         // Check if this is a request for full kernel version string
         if (name && strcmp(name, "kern.version") == 0) {
-            uint64_t currentTime = mach_absolute_time();
-            
-            // Ensure we have a valid cached kernel version string
-            if (cachedKernelVersionStrLen == 0 && cachedVersionInfo && cachedVersionInfo.kernelVersion) {
-                NSString *kernelVersion = cachedVersionInfo.kernelVersion;
-                strlcpy(cachedKernelVersionStr, [kernelVersion UTF8String], sizeof(cachedKernelVersionStr));
-                cachedKernelVersionStrLen = strlen(cachedKernelVersionStr) + 1;
-            }
-            
             // If we have a valid cached kernel version string
             if (cachedKernelVersionStrLen > 0) {
                 // Check if this is just a length query (oldp is NULL but oldlenp is not)
                 if (!oldp && oldlenp) {
                     *oldlenp = cachedKernelVersionStrLen;
-                    
-                    // Only log occasionally
-                    if (lastKernVersionCallTime == 0 || (currentTime - lastKernVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                        IOSVERSION_LOG(@"ℹ️ Returning required buffer size for kern.version: %zu", cachedKernelVersionStrLen);
-                    }
-                    
-                    lastKernVersionCallTime = currentTime;
                     return 0;
                 }
                 
@@ -771,24 +728,10 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
                 if (oldp && oldlenp && *oldlenp >= cachedKernelVersionStrLen) {
                     memcpy(oldp, cachedKernelVersionStr, cachedKernelVersionStrLen);
                     *oldlenp = cachedKernelVersionStrLen;
-                    
-                    // Only log occasionally
-                    if (lastKernVersionCallTime == 0 || (currentTime - lastKernVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                        IOSVERSION_LOG(@"✅ Successfully spoofed kern.version to %s", cachedKernelVersionStr);
-                    }
-                    
-                    lastKernVersionCallTime = currentTime;
                     return 0; // Success
                 } else if (oldlenp) {
                     // Not enough space, just set the required length
                     *oldlenp = cachedKernelVersionStrLen;
-                    
-                    // Only log occasionally
-                    if (lastKernVersionCallTime == 0 || (currentTime - lastKernVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                        IOSVERSION_LOG(@"⚠️ Buffer too small for kern.version (%zu < %zu)", *oldlenp, cachedKernelVersionStrLen);
-                    }
-                    
-                    lastKernVersionCallTime = currentTime;
                     return 0; // Success (caller will need to provide a bigger buffer)
                 }
             } else {
@@ -797,8 +740,6 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
         }
         // Check if this is a request for Darwin version number (kern.osrelease)
         else if (name && strcmp(name, "kern.osrelease") == 0 && cachedVersionInfo && cachedVersionInfo.darwin) {
-            uint64_t currentTime = mach_absolute_time();
-            
             // Get Darwin version (format: "21.6.0")
             NSString *darwinVersion = cachedVersionInfo.darwin;
             if (darwinVersion) {
@@ -816,12 +757,6 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
                     memcpy(oldp, darwinVersionStr, darwinVersionLen);
                     *oldlenp = darwinVersionLen;
                     
-                    // Only log occasionally
-                    if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                        IOSVERSION_LOG(@"✅ Successfully spoofed kern.osrelease to %s", darwinVersionStr);
-                    }
-                    
-                    lastOsVersionCallTime = currentTime;
                     return 0; // Success
                 } else if (oldlenp) {
                     // Not enough space, just set the required length
@@ -832,28 +767,12 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
         }
         // Check if this is a request for iOS version information
         else if (name && (strcmp(name, "kern.osversion") == 0)) {
-            // Rate limiting - don't process too many calls
-            uint64_t currentTime = mach_absolute_time();
-            
-            // Ensure we have a valid cached build string
-            if (cachedBuildStrLen == 0 && cachedVersionInfo && cachedVersionInfo.build) {
-                NSString *buildNumber = cachedVersionInfo.build;
-                strlcpy(cachedBuildStr, [buildNumber UTF8String], sizeof(cachedBuildStr));
-                cachedBuildStrLen = strlen(cachedBuildStr) + 1;
-            }
             
             // Skip processing if we have a valid cached build and not enough time has passed
             if (cachedBuildStrLen > 0) {
                 // Check if this is just a length query (oldp is NULL but oldlenp is not)
                 if (!oldp && oldlenp) {
                     *oldlenp = cachedBuildStrLen;
-                    
-                    // Only log occasionally
-                    if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                        IOSVERSION_LOG(@"ℹ️ Returning required buffer size: %zu", cachedBuildStrLen);
-                    }
-                    
-                    lastOsVersionCallTime = currentTime;
                     return 0;
                 }
                 
@@ -862,23 +781,10 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
                     memcpy(oldp, cachedBuildStr, cachedBuildStrLen);
                     *oldlenp = cachedBuildStrLen;
                     
-                    // Only log occasionally
-                    if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                        IOSVERSION_LOG(@"✅ Successfully spoofed sysctlbyname to %s", cachedBuildStr);
-                    }
-                    
-                    lastOsVersionCallTime = currentTime;
                     return 0; // Success
                 } else if (oldlenp) {
                     // Not enough space, just set the required length
                     *oldlenp = cachedBuildStrLen;
-                    
-                    // Only log occasionally
-                    if (lastOsVersionCallTime == 0 || (currentTime - lastOsVersionCallTime) > THROTTLE_INTERVAL_NSEC * 10) {
-                        IOSVERSION_LOG(@"⚠️ Buffer too small for sysctlbyname (%zu < %zu)", *oldlenp, cachedBuildStrLen);
-                    }
-                    
-                    lastOsVersionCallTime = currentTime;
                     return 0; // Success (caller will need to provide a bigger buffer)
                 }
             } else {

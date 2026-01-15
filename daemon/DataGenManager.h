@@ -4,4 +4,5 @@
 @interface DataGenManager : NSObject
 + (instancetype)sharedManager;
 - (PhoneInfo *) generatePhoneInfo;
+// - (IosVersion *) generateIOSVersion;
 @end

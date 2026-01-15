@@ -1,6 +1,5 @@
 #import "ProjectXViewController.h"
 #import "BottomButtons.h"
-#import "AppVersionManager.h"
 #import "ProfileManager.h"
 #import <UIKit/UIKit.h>
 #import <spawn.h>

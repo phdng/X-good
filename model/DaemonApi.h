@@ -9,3 +9,5 @@
 #define REMOVE_BACKUP @"/removeBackup"
 #define RENAME_BACKUP @"/renameBackup"
 #define SWITCH_BACKUP @"/switchBackup"
+#define GET_ALL_CARRIER @"/getAllCarrier"
+#define GET_ALL_VERSIONS @"/getAllVersions"

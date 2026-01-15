@@ -111,7 +111,7 @@
     NSDictionary *dict = [self toDictionary];
     
     // 使用新的静态方法保存
-    return [PhoneInfo saveDictionary:dict ];
+    return [PhoneInfo saveDictionaryToPrefs:dict ];
 }
 
 + (instancetype)loadFromPrefs{
@@ -142,7 +142,7 @@
  * @param filePath 文件路径
  * @return 保存是否成功
  */
-+ (BOOL)saveDictionary:(NSDictionary *)dict {
++ (BOOL)saveDictionaryToPrefs:(NSDictionary *)dict {
     if (!dict || ![dict isKindOfClass:[NSDictionary class]]) {
         NSLog(@"无效的字典参数");
         return NO;
@@ -299,8 +299,7 @@
         @"version": self.version ?: @"",
         @"build": self.build ?: @"",
         @"kernelVersion": self.kernelVersion ?: @"",
-        @"darwin": self.darwin ?: @"",
-        @"xnu": self.xnu ?: @""
+        @"darwin": self.darwin ?: @""
     };
 }
 
@@ -310,7 +309,6 @@
     iosVersion.build = dict[@"build"] ?: @"";
     iosVersion.kernelVersion = dict[@"kernelVersion"] ?: @"";
     iosVersion.darwin = dict[@"darwin"] ?: @"";
-    iosVersion.xnu = dict[@"xnu"] ?: @"";
     return iosVersion;
 }
 
@@ -447,10 +445,8 @@
         @"devicePixelRatio": self.devicePixelRatio ?: @1,
         @"screenDensity": self.screenDensity ?: @1,
         @"cpuArchitecture": self.cpuArchitecture ?: @"",
-        @"boardId": self.boardId ?: @"",
         @"hwModel": self.hwModel ?: @"",
         @"gpuFamily": self.gpuFamily ?: @"",
-        @"metalFeatureSet": self.metalFeatureSet ?: @"",
         @"deviceMemory": self.deviceMemory ?: @0,
         @"cpuCoreCount": self.cpuCoreCount ?: @0,
         @"webGLInfo": [self.webGLInfo toDictionary] ?: @{}
@@ -466,10 +462,8 @@
     deviceModel.devicePixelRatio = dict[@"devicePixelRatio"] ?: @1;
     deviceModel.screenDensity = dict[@"screenDensity"] ?: @1;
     deviceModel.cpuArchitecture = dict[@"cpuArchitecture"] ?: @"";
-    deviceModel.boardId = dict[@"boardId"] ?: @"";
     deviceModel.hwModel = dict[@"hwModel"] ?: @"";
     deviceModel.gpuFamily = dict[@"gpuFamily"] ?: @"";
-    deviceModel.metalFeatureSet = dict[@"metalFeatureSet"] ?: @"";
     deviceModel.deviceMemory = dict[@"deviceMemory"] ?: @0;
     deviceModel.cpuCoreCount = dict[@"cpuCoreCount"] ?: @0;
     

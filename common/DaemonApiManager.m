@@ -105,4 +105,48 @@
         }
     });
 }
+- (NSArray *) getAllCarrier{
+    __block NSArray *dataArray = @[];
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0); // 创建信号量
+    daemonGET(GET_ALL_CARRIER,^(id jsonResponse, NSError *error) {
+        if ([jsonResponse isKindOfClass:[NSDictionary class]]) {
+            NSString *status = jsonResponse[@"status"];
+            if ([status isEqualToString:@"success"]) {
+                // 获取 data 字段并确保它是一个数组
+                id data = jsonResponse[@"data"];
+                if ([data isKindOfClass:[NSArray class]]) {
+                    dataArray = (NSArray *)data;
+                } 
+            } else {
+                NSLog(@"[ProjectXDaemon]success：%@", status);
+            }
+        }
+        dispatch_semaphore_signal(semaphore); 
+    });
+
+    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+    return dataArray;
+}
+- (NSArray *) getAllVersions{
+    __block NSArray *dataArray = @[];
+    dispatch_semaphore_t semaphore = dispatch_semaphore_create(0); // 创建信号量
+    daemonGET(GET_ALL_VERSIONS,^(id jsonResponse, NSError *error) {
+        if ([jsonResponse isKindOfClass:[NSDictionary class]]) {
+            NSString *status = jsonResponse[@"status"];
+            if ([status isEqualToString:@"success"]) {
+                // 获取 data 字段并确保它是一个数组
+                id data = jsonResponse[@"data"];
+                if ([data isKindOfClass:[NSArray class]]) {
+                    dataArray = (NSArray *)data;
+                } 
+            } else {
+                NSLog(@"[ProjectXDaemon]success：%@", status);
+            }
+        }
+        dispatch_semaphore_signal(semaphore); 
+    });
+
+    dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
+    return dataArray;
+}
 @end

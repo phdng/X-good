@@ -1,6 +1,7 @@
 #import "ProfileTabViewController.h"
 #import "ProfileManager.h"
 #import "DaemonApiManager.h"
+#import "LoadingView.h"
 
 // Custom ProfileTableViewCell class
 @interface ProfileTableViewCell : UITableViewCell
@@ -29,7 +30,6 @@
 @property (nonatomic, strong) UILabel *currentProfileIdLabel;
 @property (nonatomic, strong) NSMutableArray<Profile *> *filteredProfiles;
 @property (nonatomic, strong) NSMutableArray<Profile *> *allProfiles;
-@property (nonatomic, assign) NSInteger displayedProfilesCount;
 @property (nonatomic, strong) UITextField *searchTextField;
 @property (nonatomic, assign) BOOL isSearchActive;
 @property (nonatomic, strong) UIImageView *searchIcon;
@@ -140,7 +140,6 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
     [[ProfileManager sharedManager] loadData];
     self.profiles = [ProfileManager sharedManager].mutableProfiles;
     self.allProfiles = [ProfileManager sharedManager].mutableProfiles;
-    self.displayedProfilesCount = MIN(10, self.allProfiles.count);
     [self.tableView reloadData];
     [self updateProfileCount];
 }
@@ -420,11 +419,9 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
         // Profiles section
         if (self.isSearchActive) {
             return self.filteredProfiles.count;
-        } else {
-            // Add one more row for "Show More" button if there are more profiles to show
-            NSInteger showMoreButtonCount = (self.displayedProfilesCount < self.allProfiles.count) ? 1 : 0;
-            return self.profiles.count + showMoreButtonCount;
-        }
+        }else{
+            return self.profiles.count;
+        } 
     }
 }
 
@@ -453,43 +450,7 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
         titleLabel.textColor = [UIColor secondaryLabelColor];
         [headerView addSubview:titleLabel];
         
-        // Create the toggle switch with a smaller size
-        UISwitch *containerSwitch = [[UISwitch alloc] initWithFrame:CGRectZero];
-        containerSwitch.onTintColor = [UIColor systemGreenColor];
-        containerSwitch.transform = CGAffineTransformMakeScale(0.75, 0.75); // Smaller switch size
-        
-        // Position the switch more to the left side
-        CGFloat switchWidth = 51 * 0.75; // Scaled width
-        CGFloat rightMargin = 25; // Reduced from 15 to move left
-        containerSwitch.frame = CGRectMake(tableView.frame.size.width - switchWidth - rightMargin, 8, switchWidth, 31 * 0.75);
-        
-        // Set initial state from NSUserDefaults
-        NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.containersystem"];
-        BOOL isEnabled = [defaults boolForKey:@"containerSystemEnabled"];
-        containerSwitch.on = isEnabled;
-        
-        // Add target action
-        [containerSwitch addTarget:self action:@selector(containerSwitchToggled:) forControlEvents:UIControlEventValueChanged];
-        [headerView addSubview:containerSwitch];
-        
-        // Create container icon with a smaller size
-        UIImageView *containerIcon = [[UIImageView alloc] initWithFrame:CGRectMake(containerSwitch.frame.origin.x - 30, 10, 20, 20)];
-        UIImage *boxImage = [UIImage systemImageNamed:@"shippingbox"];
-        containerIcon.image = [boxImage imageWithTintColor:[UIColor systemGrayColor] renderingMode:UIImageRenderingModeAlwaysTemplate];
-        containerIcon.tintColor = isEnabled ? [UIColor systemGreenColor] : [UIColor systemGrayColor];
-        containerIcon.contentMode = UIViewContentModeScaleAspectFit;
-        [headerView addSubview:containerIcon];
-        
-        // Create label for container system - moved more to the left
-        UILabel *containerLabel = [[UILabel alloc] initWithFrame:CGRectMake(containerIcon.frame.origin.x - 110, 10, 100, 20)];
-        containerLabel.text = @"Container System";
-        containerLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
-        containerLabel.textColor = [UIColor secondaryLabelColor];
-        containerLabel.textAlignment = NSTextAlignmentRight;
-        containerLabel.adjustsFontSizeToFitWidth = YES;
-        containerLabel.minimumScaleFactor = 0.75;
-        [headerView addSubview:containerLabel];
-        
+  
         return headerView;
     }
     
@@ -497,28 +458,6 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
     return nil;
 }
 
-// Add the toggle handler method
-- (void)containerSwitchToggled:(UISwitch *)sender {
-    // Save to NSUserDefaults
-    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.containersystem"];
-    [defaults setBool:sender.isOn forKey:@"containerSystemEnabled"];
-    [defaults synchronize];
-    
-    // Update the tint color of the container icon
-    UIImageView *containerIcon = nil;
-    for (UIView *subview in sender.superview.subviews) {
-        if ([subview isKindOfClass:[UIImageView class]]) {
-            containerIcon = (UIImageView *)subview;
-            break;
-        }
-    }
-    containerIcon.tintColor = sender.isOn ? [UIColor systemGreenColor] : [UIColor systemGrayColor];
-    
-    // Provide feedback 
-    UIImpactFeedbackGenerator *feedbackGenerator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
-    [feedbackGenerator prepare];
-    [feedbackGenerator impactOccurred];
-}
 
 // Override height for header in section
 - (CGFloat)tableView:(UITableView *)tableView heightForHeaderInSection:(NSInteger)section {
@@ -779,7 +718,7 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
         
         // Configure button with icon and text - smaller font
         UIImage *importExportIcon = [UIImage systemImageNamed:@"square.and.arrow.up.on.square"];
-        NSString *importExportTitle = @"IMPORT/EXPORT";
+        NSString *importExportTitle = @"导入/导出";
         
         // Create configuration for button with smaller text
         UIButtonConfiguration *importExportConfig = [UIButtonConfiguration filledButtonConfiguration];
@@ -858,98 +797,6 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
         return cell;
     } else {
         // Profiles section - Show More button
-        if (!self.isSearchActive && indexPath.row >= self.profiles.count) {
-            // "Show More" button cell (only shown in main list mode)
-            static NSString *moreIdentifier = @"MoreCell";
-            UITableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:moreIdentifier];
-            
-            if (!cell) {
-                cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:moreIdentifier];
-                cell.selectionStyle = UITableViewCellSelectionStyleNone;
-                cell.backgroundColor = [UIColor clearColor];
-                // Pre-set cell frame to avoid resize issues
-                CGRect frame = cell.frame;
-                frame.size.height = 70;
-                frame.size.width = tableView.bounds.size.width;
-                cell.frame = frame;
-            }
-            
-            // Remove any existing subviews to prevent duplication
-            for (UIView *subview in cell.contentView.subviews) {
-                [subview removeFromSuperview];
-            }
-            
-            // Create a container for the "Show More" button
-            UIView *container = [[UIView alloc] initWithFrame:CGRectMake(15, 5, cell.contentView.bounds.size.width - 30, 60)];
-            container.backgroundColor = [UIColor secondarySystemBackgroundColor];
-            container.layer.cornerRadius = 15;
-            container.autoresizingMask = UIViewAutoresizingFlexibleWidth;
-            [cell.contentView addSubview:container];
-            
-            // Add "Show More" button on the left side
-            UIButton *showMoreButton = [UIButton buttonWithType:UIButtonTypeSystem];
-            showMoreButton.frame = CGRectMake(15, 10, (container.bounds.size.width / 2) - 25, 40);
-            
-            // Configure button with icon and text properly spaced
-            UIImage *addIcon = [UIImage systemImageNamed:@"plus.circle.fill"];
-            NSString *title = @"Show More";
-            
-            // Create configuration for button
-            UIButtonConfiguration *showMoreConfig = [UIButtonConfiguration filledButtonConfiguration];
-            showMoreConfig.title = title;
-            showMoreConfig.image = addIcon;
-            showMoreConfig.imagePlacement = NSDirectionalRectEdgeLeading;
-            showMoreConfig.imagePadding = 8;
-            showMoreConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-            showMoreConfig.baseBackgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.1];
-            showMoreConfig.baseForegroundColor = [UIColor systemBlueColor];
-            
-            showMoreButton.configuration = showMoreConfig;
-            showMoreButton.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleRightMargin;
-            [showMoreButton addTarget:self action:@selector(loadMoreProfiles) forControlEvents:UIControlEventTouchUpInside];
-            
-            // Add border
-            showMoreButton.layer.borderWidth = 1.0;
-            showMoreButton.layer.borderColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.3].CGColor;
-            showMoreButton.layer.cornerRadius = 12;
-            
-            [container addSubview:showMoreButton];
-            
-            // Add "Search Profiles" button to the right side
-            UIButton *searchButton = [UIButton buttonWithType:UIButtonTypeSystem];
-            searchButton.frame = CGRectMake(container.bounds.size.width/2 + 10, 10, (container.bounds.size.width / 2) - 25, 40);
-            
-            // Configure button with icon and text properly spaced
-            UIImage *searchIcon = [UIImage systemImageNamed:@"magnifyingglass"];
-            NSString *searchTitle = @"Search";
-            
-            // Create configuration for button
-            UIButtonConfiguration *searchConfig = [UIButtonConfiguration filledButtonConfiguration];
-            searchConfig.title = searchTitle;
-            searchConfig.image = searchIcon;
-            searchConfig.imagePlacement = NSDirectionalRectEdgeLeading;
-            searchConfig.imagePadding = 8;
-            searchConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-            searchConfig.baseBackgroundColor = [[UIColor systemPurpleColor] colorWithAlphaComponent:0.1];
-            searchConfig.baseForegroundColor = [UIColor systemPurpleColor];
-            
-            searchButton.configuration = searchConfig;
-            searchButton.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleLeftMargin;
-            [searchButton addTarget:self action:@selector(scrollToSearchField) forControlEvents:UIControlEventTouchUpInside];
-            
-            // Add border
-            searchButton.layer.borderWidth = 1.0;
-            searchButton.layer.borderColor = [[UIColor systemPurpleColor] colorWithAlphaComponent:0.3].CGColor;
-            searchButton.layer.cornerRadius = 12;
-            
-            [container addSubview:searchButton];
-            
-            // Hide default labels
-            cell.textLabel.text = nil;
-            
-            return cell;
-        }
-        
         // Regular profile cells - Use custom ProfileTableViewCell
         static NSString *cellIdentifier = @"ProfileCell";
         ProfileTableViewCell *cell = [tableView dequeueReusableCellWithIdentifier:cellIdentifier];
@@ -965,20 +812,6 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
         }
         
         Profile *profile = self.isSearchActive ? self.filteredProfiles[indexPath.row] : self.profiles[indexPath.row];
-        
-        // Skip profiles with ID 0 to ensure they are never displayed
-        // if (!profile.profileId || 
-        //     [profile.profileId isEqualToString:@"0"] || 
-        //     [profile.profileId isEqualToString:@"profile_0"] ||
-        //     [profile.profileId intValue] == 0) {
-            
-        //     // Create a blank cell instead
-        //     UITableViewCell *blankCell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleDefault reuseIdentifier:@"BlankCell"];
-        //     blankCell.hidden = YES;
-        //     blankCell.userInteractionEnabled = NO;
-        //     blankCell.contentView.hidden = YES;
-        //     return blankCell;
-        // }
         
         // Check if this is the current profile using direct access to central profile info
         BOOL isCurrentProfile = [[ProfileManager sharedManager] isCurrent:profile];
@@ -1201,17 +1034,13 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
 
 - (void)switchToProfile:(Profile *)profile {
     // Show loading indicator
-    UIActivityIndicatorView *loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-    loadingIndicator.center = self.view.center;
-    loadingIndicator.hidesWhenStopped = YES;
-    [self.view addSubview:loadingIndicator];
-    [loadingIndicator startAnimating];
+    [[LoadingView sharedInstance] showWithMessage:@"切换备份中"];
     
     // Switch to the selected profile
     [[DaemonApiManager sharedManager] switchBackup:profile comp:^(id response, NSError *error) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [loadingIndicator stopAnimating];
-            [loadingIndicator removeFromSuperview];
+            [[LoadingView sharedInstance] hide];
+
                 
             // Show success message
             UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Profile Switched"
@@ -1252,18 +1081,13 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
         NSString *newName = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (newName.length > 0) {
             // Show loading indicator
-            UIActivityIndicatorView *loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-            loadingIndicator.center = self.view.center;
-            loadingIndicator.hidesWhenStopped = YES;
-            [self.view addSubview:loadingIndicator];
-            [loadingIndicator startAnimating];
+            [[LoadingView sharedInstance] showWithMessage:@"处理中"];
+
             profile.name = newName;
             // profile 修改为newName
             [[DaemonApiManager sharedManager] renameBackup:profile comp:^(id response, NSError *error) {
                 dispatch_async(dispatch_get_main_queue(), ^{
-                    [loadingIndicator stopAnimating];
-                    [loadingIndicator removeFromSuperview];
-                    
+                    [[LoadingView sharedInstance] hide];
                 
                     // Show success message
                     UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Profile Renamed"
@@ -1331,17 +1155,12 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
                                             style:UIAlertActionStyleDestructive
                                           handler:^(UIAlertAction * _Nonnull action) {
         // Show loading indicator
-        UIActivityIndicatorView *loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
-        loadingIndicator.center = self.view.center;
-        loadingIndicator.hidesWhenStopped = YES;
-        [self.view addSubview:loadingIndicator];
-        [loadingIndicator startAnimating];
+        [[LoadingView sharedInstance] showWithMessage:@"处理中"];
         
         [manager remove:profile];
         [[DaemonApiManager sharedManager] removeBackup:profile comp:^(id response, NSError *error){
             dispatch_async(dispatch_get_main_queue(), ^{
-                [loadingIndicator stopAnimating];
-                [loadingIndicator removeFromSuperview];
+                [[LoadingView sharedInstance] hide];
                 
                 // Reload the table view
                 [self.tableView reloadData];
@@ -1499,40 +1318,9 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
     [self showDeleteConfirmationForProfile:profile];
 }
 
-- (void)loadMoreProfiles {
-    // Check if we already loaded all profiles
-    if (self.displayedProfilesCount >= self.allProfiles.count) {
-        return;
-    }
-    
-    // Calculate how many more to load (10 more or whatever is left)
-    NSInteger remainingProfiles = self.allProfiles.count - self.displayedProfilesCount;
-    NSInteger additionalCount = MIN(10, remainingProfiles);
-    
-    // Create range for additional profiles
-    NSRange additionalRange = NSMakeRange(self.displayedProfilesCount, additionalCount);
-    
-    // Add profiles to displayed profiles array
-    NSArray *additionalProfiles = [self.allProfiles subarrayWithRange:additionalRange];
-    [self.profiles addObjectsFromArray:additionalProfiles];
-    
-    // Update displayed count
-    self.displayedProfilesCount += additionalCount;
-    
-    // Reload table view
-    [self.tableView reloadData];
-}
 
-- (void)scrollToSearchField {
-    // Scroll to the search section
-    NSIndexPath *searchIndexPath = [NSIndexPath indexPathForRow:0 inSection:1];
-    [self.tableView scrollToRowAtIndexPath:searchIndexPath atScrollPosition:UITableViewScrollPositionTop animated:YES];
-    
-    // After scrolling, focus on the search field
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        [self.searchTextField becomeFirstResponder];
-    });
-}
+
+
 
 - (void)importExportButtonTapped:(UIButton *)sender {
     // To be implemented later
@@ -1561,20 +1349,13 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
 
 - (void)deleteAllProfiles {
     // Show loading indicator
-    UIActivityIndicatorView *loadingIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleLarge];
-    loadingIndicator.center = self.view.center;
-    loadingIndicator.hidesWhenStopped = YES;
-    [self.view addSubview:loadingIndicator];
-    [loadingIndicator startAnimating];
-
-    
+    [[LoadingView sharedInstance] showWithMessage:@"处理中"];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSError *error = nil;
         
         if (error) {
             dispatch_async(dispatch_get_main_queue(), ^{
-                [loadingIndicator stopAnimating];
-                [loadingIndicator removeFromSuperview];
+                [[LoadingView sharedInstance] hide];
                 
                 UIAlertController *errorAlert = [UIAlertController alertControllerWithTitle:@"Error"
                                                                                    message:[NSString stringWithFormat:@"Failed to access profiles directory: %@", error.localizedDescription]
@@ -1587,8 +1368,7 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
         
 
         dispatch_async(dispatch_get_main_queue(), ^{
-            [loadingIndicator stopAnimating];
-            [loadingIndicator removeFromSuperview];
+            [[LoadingView sharedInstance] hide];
             // TODO clearAll
 
             // Reload profiles from disk

@@ -9,12 +9,15 @@
 #import <mach-o/dyld.h>
 #import <substrate.h>
 
+// Define the swap usage structure if it's not available
+#ifndef HAVE_XSW_USAGE
+typedef struct xsw_usage xsw_usage;
+#endif
+
 // Original function pointers
 static int (*orig_uname)(struct utsname *);
 static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
-static CFTypeRef (*orig_IORegistryEntryCreateCFProperty)(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options);
 static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
-static CFTypeRef (*orig_MGCopyAnswer)(CFStringRef prop);
 
 
 #pragma mark - Hook Implementations
@@ -71,274 +74,368 @@ static int hook_uname(struct utsname *buf) {
 static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     // First, we need to log that this call happened
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    // Check if we should intercept this call
-    BOOL isHWMachine = (name && (strcmp(name, "hw.machine") == 0));
-    BOOL isHWModel = (name && (strcmp(name, "hw.model") == 0));
-    
-    if (isHWMachine || isHWModel) {
+    // if (isHWMachine || isHWModel || isOSVersion) {
         // Make a copy of the original value for logging purposes
-        char originalValue[256] = "<not available>";
-        size_t originalLen = sizeof(originalValue);
-        
-        // Get the original value first to show before/after in logs
-        int origResult = orig_sysctlbyname(name, originalValue, &originalLen, NULL, 0);
-        
-        NSString *spoofedValue = nil;
-        
-        if (isHWMachine) {
-            // For hw.machine, use the device model
-            spoofedValue = CurrentPhoneInfo().deviceModel.modelName;
-        } else if (isHWModel) {
-            // For hw.model, use the hw.model value
-            spoofedValue = CurrentPhoneInfo().deviceModel.hwModel;
+    char originalValue[256] = "<not available>";
+    size_t originalLen = sizeof(originalValue);
+
+    // Get the original value first to show before/after in logs
+    int origResult = orig_sysctlbyname(name, originalValue, &originalLen, NULL, 0);
+    if(!name){
+        return origResult;
+    }
+
+
+    // Get device specs
+    DeviceModel *model = CurrentPhoneInfo().deviceModel;
+    if (!model) {
+        return origResult;
+    }
+
+    // Get CPU architecture for processor-related sysctls
+    NSString *cpuArchitecture = model.cpuArchitecture;
+    NSInteger cpuCoreCount = [model.cpuCoreCount integerValue];
+    NSString *spoofedValue = nil;
+
+    if (strcmp(name, "hw.machine") == 0 || strcmp(name, "hw.product") == 0){
+        spoofedValue = model.modelName;
+    }else if (strcmp(name, "hw.model") == 0){
+        spoofedValue = model.hwModel;
+    }else if(strcmp(name, "kern.osproductversion") == 0){
+        spoofedValue = CurrentPhoneInfo().iosVersion.version;
+    }
+    // Handle CPU-related sysctls
+    else if (strcmp(name, "hw.ncpu") == 0 || strcmp(name, "hw.activecpu") == 0) {
+        // Number of CPUs / Active CPUs
+        if (cpuCoreCount > 0) {
+            if (*oldlenp == sizeof(uint32_t)) {
+                *(uint32_t *)oldp = (uint32_t)cpuCoreCount;
+            } else if (*oldlenp == sizeof(int)) {
+                *(int *)oldp = (int)cpuCoreCount;
+            } else if (*oldlenp == sizeof(unsigned long)) {
+                *(unsigned long *)oldp = (unsigned long)cpuCoreCount;
+            }
         }
-        
-        if (spoofedValue.length > 0 && oldp && oldlenp && *oldlenp > 0) {
-            const char *valueToUse = [spoofedValue UTF8String];
-            if (valueToUse) {
-                size_t valueLen = strlen(valueToUse);
-                
-                // Ensure we don't overflow the buffer
-                if (valueLen < *oldlenp) {
-                    *oldlenp = valueLen + 1; // +1 for null terminator
+    }
+    else if (strcmp(name, "hw.cpu.brand_string") == 0 || strcmp(name, "hw.cpubrand") == 0 || strcmp(name, "hw.model") == 0) {
+        // CPU Brand/Model Name - return the processor name like "Apple A11 Bionic"
+        if (cpuArchitecture && cpuArchitecture.length > 0) {
+            const char *cpuBrand = [cpuArchitecture UTF8String];
+            if (cpuBrand && *oldlenp > 0) {
+                size_t brandLen = strlen(cpuBrand);
+                if (brandLen < *oldlenp) {
+                    *oldlenp = brandLen + 1;
                     memset(oldp, 0, *oldlenp);
-                    strcpy(oldp, valueToUse);
-                    
-                    if (origResult == 0) {
-                        PXLog(@"[model] Spoofed sysctlbyname %s from: %s to: %s for app: %@", 
-                                name, originalValue, valueToUse, bundleID);
-                    } else {
-                        PXLog(@"[model] Spoofed sysctlbyname %s to: %s for app: %@", 
-                                name, valueToUse, bundleID);
-                    }
-                    return 0;
+                    strcpy(oldp, cpuBrand);
                 } else {
-                    PXLog(@"[model] WARNING: Spoofed value too long for sysctlbyname buffer");
+                    PXLog(@"[DeviceSpec] WARNING: CPU brand string too long for buffer");
                 }
             }
-        } else {
-            PXLog(@"[model] WARNING: Cannot spoof sysctlbyname, missing required params or spoofed value");
         }
-    
+    }
+    else if (strcmp(name, "hw.cputype") == 0) {
+        // CPU Type - ARM64 is already defined as CPU_TYPE_ARM64 in system headers
+        if (*oldlenp >= sizeof(uint32_t)) {
+            *(uint32_t *)oldp = CPU_TYPE_ARM64;
+        }
+    }
+    else if (strcmp(name, "hw.cpusubtype") == 0) {
+        // CPU Subtype - varies by processor
+        uint32_t cpuSubtype = 0;
+        
+        if (cpuArchitecture) {
+            if ([cpuArchitecture containsString:@"A9"]) {
+                cpuSubtype = 2; // A9 subtype
+            } else if ([cpuArchitecture containsString:@"A10"]) {
+                cpuSubtype = 3; // A10 subtype  
+            } else if ([cpuArchitecture containsString:@"A11"]) {
+                cpuSubtype = 4; // A11 subtype
+            } else if ([cpuArchitecture containsString:@"A12"]) {
+                cpuSubtype = 5; // A12 subtype
+            } else if ([cpuArchitecture containsString:@"A13"]) {
+                cpuSubtype = 6; // A13 subtype
+            } else if ([cpuArchitecture containsString:@"A14"]) {
+                cpuSubtype = 7; // A14 subtype
+            } else if ([cpuArchitecture containsString:@"A15"]) {
+                cpuSubtype = 8; // A15 subtype
+            } else if ([cpuArchitecture containsString:@"A16"]) {
+                cpuSubtype = 9; // A16 subtype
+            } else if ([cpuArchitecture containsString:@"A17"]) {
+                cpuSubtype = 10; // A17 subtype
+            } else if ([cpuArchitecture containsString:@"A18"]) {
+                cpuSubtype = 11; // A18 subtype
+            } else if ([cpuArchitecture containsString:@"M1"]) {
+                cpuSubtype = 12; // M1 subtype
+            } else if ([cpuArchitecture containsString:@"M2"]) {
+                cpuSubtype = 13; // M2 subtype
+            } else {
+                cpuSubtype = 1; // Default ARM64 subtype
+            }
+        }
+        
+        if (*oldlenp >= sizeof(uint32_t)) {
+            *(uint32_t *)oldp = cpuSubtype;
+        }
+    }
+    else if (strcmp(name, "hw.cpufamily") == 0) {
+        // CPU Family - unique identifier for each processor family
+        uint32_t cpuFamily = 0;
+        
+        if (cpuArchitecture) {
+            if ([cpuArchitecture containsString:@"A9"]) {
+                cpuFamily = 0x67CEEE93; // Apple A9 family
+            } else if ([cpuArchitecture containsString:@"A10"]) {
+                cpuFamily = 0x92FB37C8; // Apple A10 family
+            } else if ([cpuArchitecture containsString:@"A11"]) {
+                cpuFamily = 0xDA33D83D; // Apple A11 family
+            } else if ([cpuArchitecture containsString:@"A12"]) {
+                cpuFamily = 0x8765EDEA; // Apple A12 family
+            } else if ([cpuArchitecture containsString:@"A13"]) {
+                cpuFamily = 0xAF4F32CB; // Apple A13 family
+            } else if ([cpuArchitecture containsString:@"A14"]) {
+                cpuFamily = 0x1B588BB3; // Apple A14 family
+            } else if ([cpuArchitecture containsString:@"A15"]) {
+                cpuFamily = 0xDA33D83D; // Apple A15 family
+            } else if ([cpuArchitecture containsString:@"A16"]) {
+                cpuFamily = 0x8765EDEA; // Apple A16 family
+            } else if ([cpuArchitecture containsString:@"A17"]) {
+                cpuFamily = 0xAF4F32CB; // Apple A17 family
+            } else if ([cpuArchitecture containsString:@"A18"]) {
+                cpuFamily = 0x1B588BB3; // Apple A18 family
+            } else if ([cpuArchitecture containsString:@"M1"]) {
+                cpuFamily = 0x458F4D97; // Apple M1 family
+            } else if ([cpuArchitecture containsString:@"M2"]) {
+                cpuFamily = 0x458F4D97; // Apple M2 family (same as M1)
+            } else {
+                cpuFamily = 0x67CEEE93; // Default ARM64 family
+            }
+        }
+        
+        if (*oldlenp >= sizeof(uint32_t)) {
+            *(uint32_t *)oldp = cpuFamily;
+        }
+    }
+    else if (strcmp(name, "hw.cpufrequency") == 0 || strcmp(name, "hw.cpufrequency_max") == 0 || strcmp(name, "hw.cpufrequency_min") == 0) {
+        // CPU Frequency - approximate values based on processor
+        uint64_t cpuFrequency = 0;
+        
+        if (cpuArchitecture) {
+            if ([cpuArchitecture containsString:@"A9"]) {
+                cpuFrequency = 1800000000; // 1.8 GHz
+            } else if ([cpuArchitecture containsString:@"A10"]) {
+                cpuFrequency = 2340000000; // 2.34 GHz
+            } else if ([cpuArchitecture containsString:@"A11"]) {
+                cpuFrequency = 2390000000; // 2.39 GHz
+            } else if ([cpuArchitecture containsString:@"A12"]) {
+                cpuFrequency = 2490000000; // 2.49 GHz
+            } else if ([cpuArchitecture containsString:@"A13"]) {
+                cpuFrequency = 2650000000; // 2.65 GHz
+            } else if ([cpuArchitecture containsString:@"A14"]) {
+                cpuFrequency = 2990000000; // 2.99 GHz
+            } else if ([cpuArchitecture containsString:@"A15"]) {
+                cpuFrequency = 3230000000; // 3.23 GHz
+            } else if ([cpuArchitecture containsString:@"A16"]) {
+                cpuFrequency = 3460000000; // 3.46 GHz
+            } else if ([cpuArchitecture containsString:@"A17"]) {
+                cpuFrequency = 3780000000; // 3.78 GHz
+            } else if ([cpuArchitecture containsString:@"A18"]) {
+                cpuFrequency = 4050000000; // 4.05 GHz
+            } else if ([cpuArchitecture containsString:@"M1"]) {
+                cpuFrequency = 3200000000; // 3.2 GHz
+            } else if ([cpuArchitecture containsString:@"M2"]) {
+                cpuFrequency = 3490000000; // 3.49 GHz
+            } else {
+                cpuFrequency = 2000000000; // Default 2.0 GHz
+            }
+            
+            // Adjust for min/max variants
+            if (strcmp(name, "hw.cpufrequency_min") == 0) {
+                cpuFrequency = cpuFrequency * 0.4; // Min is typically 40% of max
+            }
+        }
+        
+        if (*oldlenp >= sizeof(uint64_t)) {
+            *(uint64_t *)oldp = cpuFrequency;
+        } else if (*oldlenp >= sizeof(uint32_t)) {
+            *(uint32_t *)oldp = (uint32_t)cpuFrequency;
+        }
+    }
+    else if (strcmp(name, "hw.cachelinesize") == 0) {
+        // Cache line size - typically 64 bytes for ARM64
+        uint32_t cacheLineSize = 64;
+        
+        if (*oldlenp >= sizeof(uint32_t)) {
+            *(uint32_t *)oldp = cacheLineSize;
+        }
+    }
+    else if (strcmp(name, "hw.l1icachesize") == 0 || strcmp(name, "hw.l1dcachesize") == 0 || 
+             strcmp(name, "hw.l2cachesize") == 0) {
+        // Cache sizes vary by processor
+        uint32_t cacheSize = 0;
+        
+        if (cpuArchitecture) {
+            BOOL isL1 = (strcmp(name, "hw.l1icachesize") == 0 || strcmp(name, "hw.l1dcachesize") == 0);
+            BOOL isL2 = (strcmp(name, "hw.l2cachesize") == 0);
+            
+            if ([cpuArchitecture containsString:@"A9"]) {
+                cacheSize = isL1 ? 32768 : (isL2 ? 3145728 : 0); // 32KB L1, 3MB L2
+            } else if ([cpuArchitecture containsString:@"A10"]) {
+                cacheSize = isL1 ? 32768 : (isL2 ? 3145728 : 0); // 32KB L1, 3MB L2  
+            } else if ([cpuArchitecture containsString:@"A11"]) {
+                cacheSize = isL1 ? 32768 : (isL2 ? 8388608 : 0); // 32KB L1, 8MB L2
+            } else if ([cpuArchitecture containsString:@"A12"]) {
+                cacheSize = isL1 ? 32768 : (isL2 ? 8388608 : 0); // 32KB L1, 8MB L2
+            } else if ([cpuArchitecture containsString:@"A13"]) {
+                cacheSize = isL1 ? 65536 : (isL2 ? 8388608 : 0); // 64KB L1, 8MB L2
+            } else if ([cpuArchitecture containsString:@"A14"] || [cpuArchitecture containsString:@"A15"]) {
+                cacheSize = isL1 ? 65536 : (isL2 ? 12582912 : 0); // 64KB L1, 12MB L2
+            } else if ([cpuArchitecture containsString:@"A16"] || [cpuArchitecture containsString:@"A17"]) {
+                cacheSize = isL1 ? 65536 : (isL2 ? 16777216 : 0); // 64KB L1, 16MB L2
+            } else if ([cpuArchitecture containsString:@"A18"]) {
+                cacheSize = isL1 ? 131072 : (isL2 ? 20971520 : 0); // 128KB L1, 20MB L2
+            } else if ([cpuArchitecture containsString:@"M1"]) {
+                cacheSize = isL1 ? 131072 : (isL2 ? 12582912 : 0); // 128KB L1, 12MB L2
+            } else if ([cpuArchitecture containsString:@"M2"]) {
+                cacheSize = isL1 ? 131072 : (isL2 ? 16777216 : 0); // 128KB L1, 16MB L2
+            } else {
+                cacheSize = isL1 ? 32768 : (isL2 ? 3145728 : 0); // Default
+            }
+        }
+        
+        if (*oldlenp >= sizeof(uint32_t) && cacheSize > 0) {
+            *(uint32_t *)oldp = cacheSize;
+        }
+    }
+    // Handle memory-related sysctls
+    else if (strcmp(name, "hw.memsize") == 0 || strcmp(name, "hw.physmem") == 0) {
+        // Get the device memory from specs (in GB)
+        NSInteger deviceMemoryGB = [CurrentPhoneInfo().deviceModel.deviceMemory integerValue];
+        if (deviceMemoryGB <= 0) {
+            return origResult;
+        }
+        
+        // Calculate total memory in bytes
+        unsigned long long totalMemory = deviceMemoryGB * 1024 * 1024 * 1024;
+        
+        // Different sysctls might return different size types
+        if (*oldlenp == sizeof(uint64_t)) {
+            *(uint64_t *)oldp = totalMemory;
+        } else if (*oldlenp == sizeof(uint32_t)) {
+            *(uint32_t *)oldp = (uint32_t)totalMemory;
+        } else if (*oldlenp == sizeof(unsigned long)) {
+            *(unsigned long *)oldp = (unsigned long)totalMemory;
+        }
+        
+    } else if (strcmp(name, "vm.swapusage") == 0 && *oldlenp >= sizeof(xsw_usage)) {
+        // Swap usage information
+        xsw_usage *swap = (xsw_usage *)oldp;
+        
+        // Get the device memory from specs (in GB)
+        NSInteger deviceMemoryGB = [model.deviceMemory integerValue];
+        if (deviceMemoryGB <= 0) {
+            return origResult;
+        }
+        
+        // Calculate realistic swap values based on device memory
+        // iOS typically uses swap space proportional to RAM
+        uint64_t totalMemory = deviceMemoryGB * 1024 * 1024 * 1024;
+        
+        // Typical iOS swap is ~50-100% of RAM depending on device
+        float swapRatio = (deviceMemoryGB >= 4) ? 0.5 : 1.0;  // Less swap on high-RAM devices
+        
+        swap->xsu_total = totalMemory * swapRatio;
+        swap->xsu_avail = totalMemory * swapRatio * 0.7;  // 70% available
+        swap->xsu_used = totalMemory * swapRatio * 0.3;   // 30% used
+        
+    }
+    // Add additional CPU feature and identification sysctls
+    else if (strncmp(name, "hw.optional.", 12) == 0) {
+        // Handle CPU feature flags - these indicate specific CPU capabilities
+        // Most ARM64 devices support these features consistently
+        BOOL featureSupported = YES;
+        
+        // Some features that might not be supported on older processors
+        if (cpuArchitecture) {
+            if (strstr(name, "arm64e") && [cpuArchitecture containsString:@"A9"]) {
+                featureSupported = NO; // A9 doesn't support arm64e
+            } else if (strstr(name, "armv8_3") && ([cpuArchitecture containsString:@"A9"] || [cpuArchitecture containsString:@"A10"])) {
+                featureSupported = NO; // A9/A10 don't support ARMv8.3
+            }
+        }
+        
+        if (*oldlenp >= sizeof(uint32_t)) {
+            *(uint32_t *)oldp = featureSupported ? 1 : 0;
+        }
+    }
+    else if (strcmp(name, "hw.cpu.features") == 0) {
+        // CPU features string - return a realistic feature set
+        NSString *cpuFeatures = @"SSE SSE2 SSE3 SSSE3 SSE4.1 SSE4.2 AES AVX AVX2 BMI1 BMI2 FMA";
+        
+        // For ARM64, use ARM-specific features
+        if (cpuArchitecture) {
+            if ([cpuArchitecture containsString:@"A17"] || [cpuArchitecture containsString:@"A18"] || [cpuArchitecture containsString:@"M"]) {
+                cpuFeatures = @"NEON AES SHA1 SHA2 CRC32 ATOMICS FP16 JSCVT FCMA LRCPC";
+            } else if ([cpuArchitecture containsString:@"A15"] || [cpuArchitecture containsString:@"A16"]) {
+                cpuFeatures = @"NEON AES SHA1 SHA2 CRC32 ATOMICS FP16 JSCVT";
+            } else {
+                cpuFeatures = @"NEON AES SHA1 SHA2 CRC32 ATOMICS";
+            }
+        }
+        
+        const char *featuresStr = [cpuFeatures UTF8String];
+        if (featuresStr && *oldlenp > 0) {
+            size_t featuresLen = strlen(featuresStr);
+            if (featuresLen < *oldlenp) {
+                *oldlenp = featuresLen + 1;
+                memset(oldp, 0, *oldlenp);
+                strcpy(oldp, featuresStr);
+            }
+        }
+    }else if (name && strcmp(name, "kern.boottime") == 0) {
+        NSDate * bootTime = CurrentPhoneInfo().upTimeInfo.bootTime;
+        if (bootTime && oldp && oldlenp && *oldlenp >= sizeof(struct timeval)) {
+            struct timeval boottime;
+            boottime.tv_sec = (time_t)[bootTime timeIntervalSince1970];
+            boottime.tv_usec = 0;
+            memcpy(oldp, &boottime, sizeof(boottime));
+            *oldlenp = sizeof(boottime);
+            return 0; // Success
+        }
+    }
+    else{
+        PXLog(@"[DeviceSpec] ***not hooked name:%s",name);
     }
     
+    if (spoofedValue.length > 0 && oldp && oldlenp && *oldlenp > 0) {
+        const char *valueToUse = [spoofedValue UTF8String];
+        if (valueToUse) {
+            size_t valueLen = strlen(valueToUse);
+            
+            // Ensure we don't overflow the buffer
+            if (valueLen < *oldlenp) {
+                *oldlenp = valueLen + 1; // +1 for null terminator
+                memset(oldp, 0, *oldlenp);
+                strcpy(oldp, valueToUse);
+                
+                if (origResult == 0) {
+                    PXLog(@"[model] Spoofed sysctlbyname %s from: %s to: %s for app: %@", 
+                            name, originalValue, valueToUse, bundleID);
+                } else {
+                    PXLog(@"[model] Spoofed sysctlbyname %s to: %s for app: %@", 
+                            name, valueToUse, bundleID);
+                }
+                return 0;
+            } else {
+                PXLog(@"[model] WARNING: Spoofed value too long for sysctlbyname buffer");
+            }
+        }
+    } else {
+        PXLog(@"[model] WARNING: Cannot spoof sysctlbyname, missing required params or spoofed value");
+    }
     // For all other cases, pass through to the original function
     return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
 }
 
-// Hook for IOKit device property - used by some apps to get detailed device info
-static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
-    // Call original first to avoid unnecessary operations
-    CFTypeRef result = orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
-    
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    // Check if this is a device property we want to spoof
-    if (key) {
-        // Check for various model-related keys
-        BOOL isModelKey = 
-            (CFStringCompare(key, CFSTR("model"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) ||
-            (CFStringCompare(key, CFSTR("device-model"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) ||
-            (CFStringCompare(key, CFSTR("hw.machine"), kCFCompareCaseInsensitive) == kCFCompareEqualTo);
-            
-        // Check for board-id related keys
-        BOOL isBoardIDKey = 
-            (CFStringCompare(key, CFSTR("board-id"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) ||
-            (CFStringCompare(key, CFSTR("BoardId"), kCFCompareCaseInsensitive) == kCFCompareEqualTo);
-            
-        // Check for hw.model related keys
-        BOOL isHWModelKey = 
-            (CFStringCompare(key, CFSTR("hw.model"), kCFCompareCaseInsensitive) == kCFCompareEqualTo) ||
-            (CFStringCompare(key, CFSTR("HWModel"), kCFCompareCaseInsensitive) == kCFCompareEqualTo);
-        
-   
-        // Handle device model spoofing
-        if (isModelKey) {
-            // Convert the original result to a string for logging
-            NSString *originalModel = nil;
-            if (result && CFGetTypeID(result) == CFStringGetTypeID()) {
-                originalModel = (__bridge NSString *)result;
-            }
-            
-            NSString *spoofedModel = CurrentPhoneInfo().deviceModel.modelName;
-            
-            if (spoofedModel.length > 0) {
-                // If we already have a result, release it since we're replacing it
-                if (result) {
-                    CFRelease(result);
-                }
-                
-                // Create a new CFString with our spoofed model
-                result = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedModel UTF8String], kCFStringEncodingUTF8);
-                PXLog(@"[model] Spoofed IOKit property '%@' from: %@ to: %@ for app: %@", 
-                        (__bridge NSString *)key, originalModel ?: @"<nil>", spoofedModel, bundleID);
-            } else {
-                PXLog(@"[model] WARNING: getSpoofedDeviceModel returned empty for IOKit property: %@", 
-                        (__bridge NSString *)key);
-            }
-        }
-        // Handle board-id spoofing
-        else if (isBoardIDKey) {
-            // Convert the original result to a string for logging
-            NSString *originalBoardID = nil;
-            if (result && CFGetTypeID(result) == CFStringGetTypeID()) {
-                originalBoardID = (__bridge NSString *)result;
-            } else if (result && CFGetTypeID(result) == CFDataGetTypeID()) {
-                // Some properties might be returned as data
-                CFDataRef dataRef = (CFDataRef)result;
-                NSData *data = (__bridge NSData *)dataRef;
-                originalBoardID = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            }
-            
-            NSString *spoofedBoardID = CurrentPhoneInfo().deviceModel.boardId;
-            
-            if (spoofedBoardID.length > 0) {
-                // If we already have a result, release it since we're replacing it
-                if (result) {
-                    CFRelease(result);
-                }
-                
-                // Create a new CFString with our spoofed board ID
-                result = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedBoardID UTF8String], kCFStringEncodingUTF8);
-                PXLog(@"[model] Spoofed IOKit board-id property '%@' from: %@ to: %@ for app: %@", 
-                        (__bridge NSString *)key, originalBoardID ?: @"<nil>", spoofedBoardID, bundleID);
-            } else {
-                PXLog(@"[model] WARNING: getSpoofedBoardID returned empty for IOKit property: %@", 
-                        (__bridge NSString *)key);
-            }
-        }
-        // Handle hw.model spoofing
-        else if (isHWModelKey) {
-            // Convert the original result to a string for logging
-            NSString *originalHWModel = nil;
-            if (result && CFGetTypeID(result) == CFStringGetTypeID()) {
-                originalHWModel = (__bridge NSString *)result;
-            } else if (result && CFGetTypeID(result) == CFDataGetTypeID()) {
-                // Some properties might be returned as data
-                CFDataRef dataRef = (CFDataRef)result;
-                NSData *data = (__bridge NSData *)dataRef;
-                originalHWModel = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
-            }
-            
-            NSString *spoofedHWModel = CurrentPhoneInfo().deviceModel.hwModel;
-            
-            if (spoofedHWModel.length > 0) {
-                // If we already have a result, release it since we're replacing it
-                if (result) {
-                    CFRelease(result);
-                }
-                
-                // Create a new CFString with our spoofed hw.model
-                result = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedHWModel UTF8String], kCFStringEncodingUTF8);
-                PXLog(@"[model] Spoofed IOKit hw-model property '%@' from: %@ to: %@ for app: %@", 
-                        (__bridge NSString *)key, originalHWModel ?: @"<nil>", spoofedHWModel, bundleID);
-            } else {
-                PXLog(@"[model] WARNING: getSpoofedHWModel returned empty for IOKit property: %@", 
-                        (__bridge NSString *)key);
-            }
-        }
-     
-    }
-    
-    return result;
-}
-
-CFTypeRef hook_MGCopyAnswer(CFStringRef property){
-    if (!property) {
-        return orig_MGCopyAnswer(property); // Handle null property case
-    }
-    
-    NSString *propertyString = (__bridge NSString *)property;
-    NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    // Comprehensive list of hardware model identifier properties
-    static NSSet *modelProperties = nil;
-    static NSSet *boardIDProperties = nil;
-    static NSSet *hwModelProperties = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        modelProperties = [NSSet setWithArray:@[
-            @"HWModelStr",
-            @"DeviceName",
-            @"ProductType",
-            @"ProductModel",
-            @"HardwareModel",
-            @"ModelNumber",
-            @"DeviceClass",
-            @"DeviceVariant"
-        ]];
-        
-        boardIDProperties = [NSSet setWithArray:@[
-            @"BoardId",
-            @"board-id"
-        ]];
-        
-        hwModelProperties = [NSSet setWithArray:@[
-            @"hw-model",
-            @"HWModel"
-        ]];
-    });
-    
-    BOOL isModelProperty = [modelProperties containsObject:propertyString];
-    BOOL isBoardIDProperty = [boardIDProperties containsObject:propertyString];
-    BOOL isHWModelProperty = [hwModelProperties containsObject:propertyString];
-    
-    // Get the original value first for logging
-    CFTypeRef originalValue = orig_MGCopyAnswer(property);
-    NSString *originalValueString = nil;
-
-    if (originalValue && CFGetTypeID(originalValue) == CFStringGetTypeID()) {
-        originalValueString = (__bridge NSString *)originalValue;
-    }
-    // Handle device model properties
-    if (isModelProperty) {
-        // Log regardless of whether spoofing is enabled
-        PXLog(@"[model] MGCopyAnswer(%@) called by app: %@ - original value: %@", 
-            propertyString, currentBundleID, originalValueString ?: @"<nil>");
-        
-        NSString *spoofedModel = CurrentPhoneInfo().deviceModel.modelName;
-        
-        if (spoofedModel.length > 0) {
-            PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                propertyString, originalValueString ?: @"<nil>", spoofedModel, currentBundleID);
-            return (__bridge_retained CFTypeRef)spoofedModel;
-        } else {
-            PXLog(@"[model] WARNING: getSpoofedDeviceModel returned empty for MGCopyAnswer property: %@", 
-                propertyString);
-        }
-    }
-    // Handle board ID properties
-    else if (isBoardIDProperty) {
-        PXLog(@"[model] MGCopyAnswer BoardID(%@) called by app: %@ - original value: %@", 
-            propertyString, currentBundleID, originalValueString ?: @"<nil>");
-        
-        NSString *spoofedBoardID = CurrentPhoneInfo().deviceModel.boardId;
-        
-        if (spoofedBoardID.length > 0) {
-            PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                propertyString, originalValueString ?: @"<nil>", spoofedBoardID, currentBundleID);
-            return (__bridge_retained CFTypeRef)spoofedBoardID;
-        }
-    }
-    // Handle hw.model properties
-    else if (isHWModelProperty) {
-        PXLog(@"[model] MGCopyAnswer HWModel(%@) called by app: %@ - original value: %@", 
-            propertyString, currentBundleID, originalValueString ?: @"<nil>");
-        
-        NSString *spoofedHWModel = CurrentPhoneInfo().deviceModel.hwModel;
-        
-        if (spoofedHWModel.length > 0) {
-            PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                propertyString, originalValueString ?: @"<nil>", spoofedHWModel, currentBundleID);
-            return (__bridge_retained CFTypeRef)spoofedHWModel;
-        }
-    }
-
-    
-    // For all other properties, pass through to the original implementation
-    return originalValue;
-}
 
 
 // Hook for UIDevice methods - many apps use combinations of these
@@ -534,37 +631,6 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
             }
         } @catch (NSException *e) {
             PXLog(@"[model] ERROR hooking sysctl(): %@", e);
-        }
-        @try{
-            void *lib = dlopen("/usr/lib/libMobileGestalt.dylib", RTLD_NOW);
-            void *MGCopyAnswer_addr = dlsym(lib, "MGCopyAnswer");
-            if(MGCopyAnswer_addr){
-                MSHookFunction(MGCopyAnswer_addr, (void *)hook_MGCopyAnswer, (void **)&orig_MGCopyAnswer);
-            }else {
-                PXLog(@"[model] Could not find MGCopyAnswer");
-            }
-        }@catch (NSException *e) {
-            PXLog(@"[model] ERROR hooking MGCopyAnswer(): %@", e);
-        }
-
-        
-        // Look up IOKit functions dynamically
-        void *IOKitHandle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
-        if (IOKitHandle) {
-            void *IORegEntryCreateCFPropertyPtr = dlsym(IOKitHandle, "IORegistryEntryCreateCFProperty");
-            if (IORegEntryCreateCFPropertyPtr) {
-                @try {
-                    MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, (void **)&orig_IORegistryEntryCreateCFProperty);
-                    PXLog(@"[model] Hooked IORegistryEntryCreateCFProperty successfully");
-                } @catch (NSException *e) {
-                    PXLog(@"[model] ERROR hooking IORegistryEntryCreateCFProperty: %@", e);
-                }
-            } else {
-                PXLog(@"[model] Could not find IORegistryEntryCreateCFProperty symbol");
-            }
-            dlclose(IOKitHandle);
-        } else {
-            PXLog(@"[model] Could not open IOKit framework");
         }
     }
 }

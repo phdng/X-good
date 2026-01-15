@@ -47,7 +47,7 @@
 + (instancetype)loadFromPrefs;
 
 // 静态方法：直接保存 NSDictionary 到文件
-+ (BOOL)saveDictionary:(NSDictionary *)dict ;
++ (BOOL)saveDictionaryToPrefs:(NSDictionary *)dict ;
 + (BOOL)saveDictionaryToFile:(NSDictionary *)dict toFile:(NSString *)filePath;
 
 // 静态方法：从文件读取并返回 NSDictionary
@@ -60,7 +60,6 @@
 @property (nonatomic, copy) NSString *build;
 @property (nonatomic, copy) NSString *kernelVersion;
 @property (nonatomic, copy) NSString *darwin;
-@property (nonatomic, copy) NSString *xnu;
 - (NSString *) versionAndBuild;
 - (NSDictionary *)toDictionary;
 + (instancetype)fromDictionary:(NSDictionary *)dict;
@@ -114,10 +113,8 @@
 @property (nonatomic, copy) NSNumber *devicePixelRatio;
 @property (nonatomic, copy) NSNumber *screenDensity;
 @property (nonatomic, copy) NSString *cpuArchitecture;
-@property (nonatomic, copy) NSString *boardId;
 @property (nonatomic, copy) NSString *hwModel;
 @property (nonatomic, copy) NSString *gpuFamily;
-@property (nonatomic, copy) NSString *metalFeatureSet;
 @property (nonatomic, copy) NSNumber *deviceMemory;
 @property (nonatomic, copy) NSNumber *cpuCoreCount;
 @property (nonatomic, strong) WebGLInfo *webGLInfo;

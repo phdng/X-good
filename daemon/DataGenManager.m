@@ -2,6 +2,8 @@
 #import <sys/sysctl.h> 
 #import <ifaddrs.h>
 #import <arpa/inet.h>
+#import "DBManager.h"
+#import "SettingManager.h"
 
 @interface DataGenManager()
 @property (nonatomic, strong) NSError *error;
@@ -11,7 +13,6 @@
 @implementation DataGenManager
 - (instancetype)init {
     if (self = [super init]) {
-        [self setupDeviceSpecifications];
     }
     return self;
 }
@@ -32,7 +33,7 @@
     phoneInfo.serialNumber = [self generateSerialNumber];
     phoneInfo.IMEI = [self generateIMEI];
     phoneInfo.MEID = [self generateMEID];
-    phoneInfo.iosVersion = [self generateIOSVersion];
+    [self generateIOSVersion:phoneInfo];
 
     phoneInfo.systemBootUUID = [[[NSUUID UUID] UUIDString] lowercaseString];
     phoneInfo.dyldCacheUUID = [[[NSUUID UUID] UUIDString] lowercaseString];
@@ -44,7 +45,7 @@
     phoneInfo.appInstallUUID = [[[NSUUID UUID] UUIDString] lowercaseString];
     phoneInfo.appContainerUUID = [[[NSUUID UUID] UUIDString] lowercaseString];
     
-    phoneInfo.storageInfo = [self generateStorage];
+    // phoneInfo.storageInfo = [self generateStorage];
 
     phoneInfo.batteryInfo = [self generateBatteryInfo];
 
@@ -52,726 +53,12 @@
     // 启动时间
     phoneInfo.upTimeInfo = [self generateUpTimeInfo];
 
-    phoneInfo.deviceModel = [self generateDeviceModel];
     phoneInfo.networkInfo = [self generateNetworkInfo];
 
     return phoneInfo;
 }
 
-- (void)setupDeviceSpecifications {
-    // Build a comprehensive database of device specifications
-    NSMutableArray <DeviceModel *> *devices = [NSMutableArray array];
-    
-    // iPhone 8 Plus
-    DeviceModel *iphone8Plus = [[DeviceModel alloc] init];
-    iphone8Plus.modelName = @"iPhone10,5";
-    iphone8Plus.name = @"iPhone 8 Plus";
-    iphone8Plus.resolution = @"1920x1080";
-    iphone8Plus.viewportResolution = @"2208x1242";
-    iphone8Plus.devicePixelRatio = @3.0;
-    iphone8Plus.screenDensity = @401;
-    iphone8Plus.cpuArchitecture = @"Apple A11 Bionic";
-    iphone8Plus.boardId = @"D211AP";
-    iphone8Plus.hwModel = @"D211AP";
-    // Additional specs from addSpecsForDevice
-    iphone8Plus.deviceMemory = @3;
-    iphone8Plus.cpuCoreCount = @6;
-    iphone8Plus.gpuFamily = @"Apple A11 GPU";
-    iphone8Plus.metalFeatureSet = @"Metal 2.3";
-    WebGLInfo *iphone8PlusWebGL = [[WebGLInfo alloc] init];
-    iphone8PlusWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone8PlusWebGL.unmaskedRenderer = @"Apple A11 GPU";
-    iphone8PlusWebGL.webglVendor = @"Apple";
-    iphone8PlusWebGL.webglRenderer = @"Apple GPU";
-    iphone8PlusWebGL.webglVersion = @"WebGL 2.0";
-    iphone8PlusWebGL.maxTextureSize = @8192;
-    iphone8PlusWebGL.maxRenderBufferSize = @8192;
-    iphone8Plus.webGLInfo = iphone8PlusWebGL;
-    [devices addObject:iphone8Plus];
 
-    // iPhone X
-    DeviceModel *iphoneX = [[DeviceModel alloc] init];
-    iphoneX.modelName = @"iPhone10,3";
-    iphoneX.name = @"iPhone X";
-    iphoneX.resolution = @"2436x1125";
-    iphoneX.viewportResolution = @"2436x1125";
-    iphoneX.devicePixelRatio = @3.0;
-    iphoneX.screenDensity = @458;
-    iphoneX.cpuArchitecture = @"Apple A11 Bionic";
-    iphoneX.boardId = @"D221AP";
-    iphoneX.hwModel = @"D221AP";
-    // Additional specs from addSpecsForDevice
-    iphoneX.deviceMemory = @3;
-    iphoneX.cpuCoreCount = @6;
-    iphoneX.gpuFamily = @"Apple A11 GPU";
-    iphoneX.metalFeatureSet = @"Metal 2.3";
-    WebGLInfo *iphoneXWebGL = [[WebGLInfo alloc] init];
-    iphoneXWebGL.unmaskedVendor = @"Apple Inc.";
-    iphoneXWebGL.unmaskedRenderer = @"Apple A11 GPU";
-    iphoneXWebGL.webglVendor = @"Apple";
-    iphoneXWebGL.webglRenderer = @"Apple GPU";
-    iphoneXWebGL.webglVersion = @"WebGL 2.0";
-    iphoneXWebGL.maxTextureSize = @8192;
-    iphoneXWebGL.maxRenderBufferSize = @8192;
-    iphoneX.webGLInfo = iphoneXWebGL;
-    [devices addObject:iphoneX];
-
-    // iPhone XR
-    DeviceModel *iphoneXR = [[DeviceModel alloc] init];
-    iphoneXR.modelName = @"iPhone11,8";
-    iphoneXR.name = @"iPhone XR";
-    iphoneXR.resolution = @"1792x828";
-    iphoneXR.viewportResolution = @"1792x828";
-    iphoneXR.devicePixelRatio = @2.0;
-    iphoneXR.screenDensity = @326;
-    iphoneXR.cpuArchitecture = @"Apple A12 Bionic";
-    iphoneXR.boardId = @"N841AP";
-    iphoneXR.hwModel = @"D331AP";
-    // Additional specs from addSpecsForDevice
-    iphoneXR.deviceMemory = @4;
-    iphoneXR.cpuCoreCount = @6;
-    iphoneXR.gpuFamily = @"Apple A12 GPU";
-    iphoneXR.metalFeatureSet = @"Metal 2.4";
-    WebGLInfo *iphoneXRWebGL = [[WebGLInfo alloc] init];
-    iphoneXRWebGL.unmaskedVendor = @"Apple Inc.";
-    iphoneXRWebGL.unmaskedRenderer = @"Apple A12 GPU";
-    iphoneXRWebGL.webglVendor = @"Apple";
-    iphoneXRWebGL.webglRenderer = @"Apple GPU";
-    iphoneXRWebGL.webglVersion = @"WebGL 2.0";
-    iphoneXRWebGL.maxTextureSize = @8192;
-    iphoneXRWebGL.maxRenderBufferSize = @8192;
-    iphoneXR.webGLInfo = iphoneXRWebGL;
-    [devices addObject:iphoneXR];
-
-    // iPhone XS
-    DeviceModel *iphoneXS = [[DeviceModel alloc] init];
-    iphoneXS.modelName = @"iPhone11,2";
-    iphoneXS.name = @"iPhone XS";
-    iphoneXS.resolution = @"2436x1125";
-    iphoneXS.viewportResolution = @"2436x1125";
-    iphoneXS.devicePixelRatio = @3.0;
-    iphoneXS.screenDensity = @458;
-    iphoneXS.cpuArchitecture = @"Apple A12 Bionic";
-    iphoneXS.boardId = @"D321AP";
-    iphoneXS.hwModel = @"D321AP";
-    // Additional specs from addSpecsForDevice
-    iphoneXS.deviceMemory = @4;
-    iphoneXS.cpuCoreCount = @6;
-    iphoneXS.gpuFamily = @"Apple A12 GPU";
-    iphoneXS.metalFeatureSet = @"Metal 2.4";
-    WebGLInfo *iphoneXSWebGL = [[WebGLInfo alloc] init];
-    iphoneXSWebGL.unmaskedVendor = @"Apple Inc.";
-    iphoneXSWebGL.unmaskedRenderer = @"Apple A12 GPU";
-    iphoneXSWebGL.webglVendor = @"Apple";
-    iphoneXSWebGL.webglRenderer = @"Apple GPU";
-    iphoneXSWebGL.webglVersion = @"WebGL 2.0";
-    iphoneXSWebGL.maxTextureSize = @8192;
-    iphoneXSWebGL.maxRenderBufferSize = @8192;
-    iphoneXS.webGLInfo = iphoneXSWebGL;
-    [devices addObject:iphoneXS];
-    
-    // iPhone XS Max
-    DeviceModel *iphoneXSMax = [[DeviceModel alloc] init];
-    iphoneXSMax.modelName = @"iPhone11,6";
-    iphoneXSMax.name = @"iPhone XS Max";
-    iphoneXSMax.resolution = @"2688x1242";
-    iphoneXSMax.viewportResolution = @"2688x1242";
-    iphoneXSMax.devicePixelRatio = @3.0;
-    iphoneXSMax.screenDensity = @458;
-    iphoneXSMax.cpuArchitecture = @"Apple A12 Bionic";
-    iphoneXSMax.boardId = @"D331AP";
-    iphoneXSMax.hwModel = @"D331AP";
-    // Additional specs from addSpecsForDevice
-    iphoneXSMax.deviceMemory = @4;
-    iphoneXSMax.cpuCoreCount = @6;
-    iphoneXSMax.gpuFamily = @"Apple A12 GPU";
-    iphoneXSMax.metalFeatureSet = @"Metal 2.4";
-    WebGLInfo *iphoneXSMaxWebGL = [[WebGLInfo alloc] init];
-    iphoneXSMaxWebGL.unmaskedVendor = @"Apple Inc.";
-    iphoneXSMaxWebGL.unmaskedRenderer = @"Apple A12 GPU";
-    iphoneXSMaxWebGL.webglVendor = @"Apple";
-    iphoneXSMaxWebGL.webglRenderer = @"Apple GPU";
-    iphoneXSMaxWebGL.webglVersion = @"WebGL 2.0";
-    iphoneXSMaxWebGL.maxTextureSize = @8192;
-    iphoneXSMaxWebGL.maxRenderBufferSize = @8192;
-    iphoneXSMax.webGLInfo = iphoneXSMaxWebGL;
-    [devices addObject:iphoneXSMax];
-    
-    // iPhone 11
-    DeviceModel *iphone11 = [[DeviceModel alloc] init];
-    iphone11.modelName = @"iPhone12,1";
-    iphone11.name = @"iPhone 11";
-    iphone11.resolution = @"1792x828";
-    iphone11.viewportResolution = @"1792x828";
-    iphone11.devicePixelRatio = @2.0;
-    iphone11.screenDensity = @326;
-    iphone11.cpuArchitecture = @"Apple A13 Bionic";
-    iphone11.boardId = @"N104AP";
-    iphone11.hwModel = @"D421AP";
-    // Additional specs from addSpecsForDevice
-    iphone11.deviceMemory = @4;
-    iphone11.cpuCoreCount = @6;
-    iphone11.gpuFamily = @"Apple A13 GPU";
-    iphone11.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone11WebGL = [[WebGLInfo alloc] init];
-    iphone11WebGL.unmaskedVendor = @"Apple Inc.";
-    iphone11WebGL.unmaskedRenderer = @"Apple A13 GPU";
-    iphone11WebGL.webglVendor = @"Apple";
-    iphone11WebGL.webglRenderer = @"Apple GPU";
-    iphone11WebGL.webglVersion = @"WebGL 2.0";
-    iphone11WebGL.maxTextureSize = @16384;
-    iphone11WebGL.maxRenderBufferSize = @16384;
-    iphone11.webGLInfo = iphone11WebGL;
-    [devices addObject:iphone11];
-    
-    // iPhone 11 Pro
-    DeviceModel *iphone11Pro = [[DeviceModel alloc] init];
-    iphone11Pro.modelName = @"iPhone12,3";
-    iphone11Pro.name = @"iPhone 11 Pro";
-    iphone11Pro.resolution = @"2436x1125";
-    iphone11Pro.viewportResolution = @"2436x1125";
-    iphone11Pro.devicePixelRatio = @3.0;
-    iphone11Pro.screenDensity = @458;
-    iphone11Pro.cpuArchitecture = @"Apple A13 Bionic";
-    iphone11Pro.boardId = @"D431AP";
-    iphone11Pro.hwModel = @"D431AP";
-    // Additional specs from addSpecsForDevice
-    iphone11Pro.deviceMemory = @4;
-    iphone11Pro.cpuCoreCount = @6;
-    iphone11Pro.gpuFamily = @"Apple A13 GPU";
-    iphone11Pro.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone11ProWebGL = [[WebGLInfo alloc] init];
-    iphone11ProWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone11ProWebGL.unmaskedRenderer = @"Apple A13 GPU";
-    iphone11ProWebGL.webglVendor = @"Apple";
-    iphone11ProWebGL.webglRenderer = @"Apple GPU";
-    iphone11ProWebGL.webglVersion = @"WebGL 2.0";
-    iphone11ProWebGL.maxTextureSize = @16384;
-    iphone11ProWebGL.maxRenderBufferSize = @16384;
-    iphone11Pro.webGLInfo = iphone11ProWebGL;
-    [devices addObject:iphone11Pro];
-    
-    // iPhone 11 Pro Max
-    DeviceModel *iphone11ProMax = [[DeviceModel alloc] init];
-    iphone11ProMax.modelName = @"iPhone12,5";
-    iphone11ProMax.name = @"iPhone 11 Pro Max";
-    iphone11ProMax.resolution = @"2688x1242";
-    iphone11ProMax.viewportResolution = @"2688x1242";
-    iphone11ProMax.devicePixelRatio = @3.0;
-    iphone11ProMax.screenDensity = @458;
-    iphone11ProMax.cpuArchitecture = @"Apple A13 Bionic";
-    iphone11ProMax.boardId = @"D441AP";
-    iphone11ProMax.hwModel = @"D441AP";
-    // Additional specs from addSpecsForDevice
-    iphone11ProMax.deviceMemory = @4;
-    iphone11ProMax.cpuCoreCount = @6;
-    iphone11ProMax.gpuFamily = @"Apple A13 GPU";
-    iphone11ProMax.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone11ProMaxWebGL = [[WebGLInfo alloc] init];
-    iphone11ProMaxWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone11ProMaxWebGL.unmaskedRenderer = @"Apple A13 GPU";
-    iphone11ProMaxWebGL.webglVendor = @"Apple";
-    iphone11ProMaxWebGL.webglRenderer = @"Apple GPU";
-    iphone11ProMaxWebGL.webglVersion = @"WebGL 2.0";
-    iphone11ProMaxWebGL.maxTextureSize = @16384;
-    iphone11ProMaxWebGL.maxRenderBufferSize = @16384;
-    iphone11ProMax.webGLInfo = iphone11ProMaxWebGL;
-    [devices addObject:iphone11ProMax];
-    
-    // iPhone SE (2nd Gen)
-    DeviceModel *iphoneSE2 = [[DeviceModel alloc] init];
-    iphoneSE2.modelName = @"iPhone12,8";
-    iphoneSE2.name = @"iPhone SE (2nd Gen)";
-    iphoneSE2.resolution = @"1334x750";
-    iphoneSE2.viewportResolution = @"1334x750";
-    iphoneSE2.devicePixelRatio = @2.0;
-    iphoneSE2.screenDensity = @326;
-    iphoneSE2.cpuArchitecture = @"Apple A13 Bionic";
-    iphoneSE2.boardId = @"D79AP";
-    iphoneSE2.hwModel = @"D79AP";
-    // Additional specs from addSpecsForDevice
-    iphoneSE2.deviceMemory = @4;
-    iphoneSE2.cpuCoreCount = @6;
-    iphoneSE2.gpuFamily = @"Apple A13 GPU";
-    iphoneSE2.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphoneSE2WebGL = [[WebGLInfo alloc] init];
-    iphoneSE2WebGL.unmaskedVendor = @"Apple Inc.";
-    iphoneSE2WebGL.unmaskedRenderer = @"Apple A13 GPU";
-    iphoneSE2WebGL.webglVendor = @"Apple";
-    iphoneSE2WebGL.webglRenderer = @"Apple GPU";
-    iphoneSE2WebGL.webglVersion = @"WebGL 2.0";
-    iphoneSE2WebGL.maxTextureSize = @16384;
-    iphoneSE2WebGL.maxRenderBufferSize = @16384;
-    iphoneSE2.webGLInfo = iphoneSE2WebGL;
-    [devices addObject:iphoneSE2];
-    
-    // iPhone 12 mini
-    DeviceModel *iphone12mini = [[DeviceModel alloc] init];
-    iphone12mini.modelName = @"iPhone13,1";
-    iphone12mini.name = @"iPhone 12 mini";
-    iphone12mini.resolution = @"2340x1080";
-    iphone12mini.viewportResolution = @"2340x1080";
-    iphone12mini.devicePixelRatio = @3.0;
-    iphone12mini.screenDensity = @476;
-    iphone12mini.cpuArchitecture = @"Apple A14 Bionic";
-    iphone12mini.boardId = @"D52gAP";
-    iphone12mini.hwModel = @"D52gAP";
-    // Additional specs from addSpecsForDevice
-    iphone12mini.deviceMemory = @4;
-    iphone12mini.cpuCoreCount = @6;
-    iphone12mini.gpuFamily = @"Apple A14 GPU";
-    iphone12mini.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone12miniWebGL = [[WebGLInfo alloc] init];
-    iphone12miniWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone12miniWebGL.unmaskedRenderer = @"Apple A14 GPU";
-    iphone12miniWebGL.webglVendor = @"Apple";
-    iphone12miniWebGL.webglRenderer = @"Apple GPU";
-    iphone12miniWebGL.webglVersion = @"WebGL 2.0";
-    iphone12miniWebGL.maxTextureSize = @16384;
-    iphone12miniWebGL.maxRenderBufferSize = @16384;
-    iphone12mini.webGLInfo = iphone12miniWebGL;
-    [devices addObject:iphone12mini];
-    
-    // iPhone 12
-    DeviceModel *iphone12 = [[DeviceModel alloc] init];
-    iphone12.modelName = @"iPhone13,2";
-    iphone12.name = @"iPhone 12";
-    iphone12.resolution = @"2532x1170";
-    iphone12.viewportResolution = @"2532x1170";
-    iphone12.devicePixelRatio = @3.0;
-    iphone12.screenDensity = @460;
-    iphone12.cpuArchitecture = @"Apple A14 Bionic";
-    iphone12.boardId = @"D53gAP";
-    iphone12.hwModel = @"D53gAP";
-    // Additional specs from addSpecsForDevice
-    iphone12.deviceMemory = @4;
-    iphone12.cpuCoreCount = @6;
-    iphone12.gpuFamily = @"Apple A14 GPU";
-    iphone12.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone12WebGL = [[WebGLInfo alloc] init];
-    iphone12WebGL.unmaskedVendor = @"Apple Inc.";
-    iphone12WebGL.unmaskedRenderer = @"Apple A14 GPU";
-    iphone12WebGL.webglVendor = @"Apple";
-    iphone12WebGL.webglRenderer = @"Apple GPU";
-    iphone12WebGL.webglVersion = @"WebGL 2.0";
-    iphone12WebGL.maxTextureSize = @16384;
-    iphone12WebGL.maxRenderBufferSize = @16384;
-    iphone12.webGLInfo = iphone12WebGL;
-    [devices addObject:iphone12];
-    
-    // iPhone 12 Pro
-    DeviceModel *iphone12Pro = [[DeviceModel alloc] init];
-    iphone12Pro.modelName = @"iPhone13,3";
-    iphone12Pro.name = @"iPhone 12 Pro";
-    iphone12Pro.resolution = @"2532x1170";
-    iphone12Pro.viewportResolution = @"2532x1170";
-    iphone12Pro.devicePixelRatio = @3.0;
-    iphone12Pro.screenDensity = @460;
-    iphone12Pro.cpuArchitecture = @"Apple A14 Bionic";
-    iphone12Pro.boardId = @"D53pAP";
-    iphone12Pro.hwModel = @"D53pAP";
-    // Additional specs from addSpecsForDevice
-    iphone12Pro.deviceMemory = @6;
-    iphone12Pro.cpuCoreCount = @6;
-    iphone12Pro.gpuFamily = @"Apple A14 GPU";
-    iphone12Pro.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone12ProWebGL = [[WebGLInfo alloc] init];
-    iphone12ProWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone12ProWebGL.unmaskedRenderer = @"Apple A14 GPU";
-    iphone12ProWebGL.webglVendor = @"Apple";
-    iphone12ProWebGL.webglRenderer = @"Apple GPU";
-    iphone12ProWebGL.webglVersion = @"WebGL 2.0";
-    iphone12ProWebGL.maxTextureSize = @16384;
-    iphone12ProWebGL.maxRenderBufferSize = @16384;
-    iphone12Pro.webGLInfo = iphone12ProWebGL;
-    [devices addObject:iphone12Pro];
-    
-    // iPhone 12 Pro Max
-    DeviceModel *iphone12ProMax = [[DeviceModel alloc] init];
-    iphone12ProMax.modelName = @"iPhone13,4";
-    iphone12ProMax.name = @"iPhone 12 Pro Max";
-    iphone12ProMax.resolution = @"2778x1284";
-    iphone12ProMax.viewportResolution = @"2778x1284";
-    iphone12ProMax.devicePixelRatio = @3.0;
-    iphone12ProMax.screenDensity = @458;
-    iphone12ProMax.cpuArchitecture = @"Apple A14 Bionic";
-    iphone12ProMax.boardId = @"D54pAP";
-    iphone12ProMax.hwModel = @"D54pAP";
-    // Additional specs from addSpecsForDevice
-    iphone12ProMax.deviceMemory = @6;
-    iphone12ProMax.cpuCoreCount = @6;
-    iphone12ProMax.gpuFamily = @"Apple A14 GPU";
-    iphone12ProMax.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone12ProMaxWebGL = [[WebGLInfo alloc] init];
-    iphone12ProMaxWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone12ProMaxWebGL.unmaskedRenderer = @"Apple A14 GPU";
-    iphone12ProMaxWebGL.webglVendor = @"Apple";
-    iphone12ProMaxWebGL.webglRenderer = @"Apple GPU";
-    iphone12ProMaxWebGL.webglVersion = @"WebGL 2.0";
-    iphone12ProMaxWebGL.maxTextureSize = @16384;
-    iphone12ProMaxWebGL.maxRenderBufferSize = @16384;
-    iphone12ProMax.webGLInfo = iphone12ProMaxWebGL;
-    [devices addObject:iphone12ProMax];
-
-    // iPhone 13 mini
-    DeviceModel *iphone13mini = [[DeviceModel alloc] init];
-    iphone13mini.modelName = @"iPhone14,4";
-    iphone13mini.name = @"iPhone 13 mini";
-    iphone13mini.resolution = @"2340x1080";
-    iphone13mini.viewportResolution = @"2340x1080";
-    iphone13mini.devicePixelRatio = @3.0;
-    iphone13mini.screenDensity = @476;
-    iphone13mini.cpuArchitecture = @"Apple A15 Bionic";
-    iphone13mini.boardId = @"D16AP";
-    iphone13mini.hwModel = @"D16AP";
-    // Additional specs from addSpecsForDevice
-    iphone13mini.deviceMemory = @4;
-    iphone13mini.cpuCoreCount = @6;
-    iphone13mini.gpuFamily = @"Apple A15 GPU";
-    iphone13mini.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone13miniWebGL = [[WebGLInfo alloc] init];
-    iphone13miniWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone13miniWebGL.unmaskedRenderer = @"Apple A15 GPU";
-    iphone13miniWebGL.webglVendor = @"Apple";
-    iphone13miniWebGL.webglRenderer = @"Apple GPU";
-    iphone13miniWebGL.webglVersion = @"WebGL 2.0";
-    iphone13miniWebGL.maxTextureSize = @16384;
-    iphone13miniWebGL.maxRenderBufferSize = @16384;
-    iphone13mini.webGLInfo = iphone13miniWebGL;
-    [devices addObject:iphone13mini];
-    
-    // iPhone 13
-    DeviceModel *iphone13 = [[DeviceModel alloc] init];
-    iphone13.modelName = @"iPhone14,5";
-    iphone13.name = @"iPhone 13";
-    iphone13.resolution = @"2532x1170";
-    iphone13.viewportResolution = @"2532x1170";
-    iphone13.devicePixelRatio = @3.0;
-    iphone13.screenDensity = @460;
-    iphone13.cpuArchitecture = @"Apple A15 Bionic";
-    iphone13.boardId = @"D17AP";
-    iphone13.hwModel = @"D17AP";
-    // Additional specs from addSpecsForDevice
-    iphone13.deviceMemory = @4;
-    iphone13.cpuCoreCount = @6;
-    iphone13.gpuFamily = @"Apple A15 GPU";
-    iphone13.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone13WebGL = [[WebGLInfo alloc] init];
-    iphone13WebGL.unmaskedVendor = @"Apple Inc.";
-    iphone13WebGL.unmaskedRenderer = @"Apple A15 GPU";
-    iphone13WebGL.webglVendor = @"Apple";
-    iphone13WebGL.webglRenderer = @"Apple GPU";
-    iphone13WebGL.webglVersion = @"WebGL 2.0";
-    iphone13WebGL.maxTextureSize = @16384;
-    iphone13WebGL.maxRenderBufferSize = @16384;
-    iphone13.webGLInfo = iphone13WebGL;
-    [devices addObject:iphone13];
-    
-    // iPhone 13 Pro
-    DeviceModel *iphone13Pro = [[DeviceModel alloc] init];
-    iphone13Pro.modelName = @"iPhone14,2";
-    iphone13Pro.name = @"iPhone 13 Pro";
-    iphone13Pro.resolution = @"2532x1170";
-    iphone13Pro.viewportResolution = @"2532x1170";
-    iphone13Pro.devicePixelRatio = @3.0;
-    iphone13Pro.screenDensity = @460;
-    iphone13Pro.cpuArchitecture = @"Apple A15 Bionic";
-    iphone13Pro.boardId = @"D63AP";
-    iphone13Pro.hwModel = @"D63AP";
-    // Additional specs from addSpecsForDevice
-    iphone13Pro.deviceMemory = @6;
-    iphone13Pro.cpuCoreCount = @6;
-    iphone13Pro.gpuFamily = @"Apple A15 GPU";
-    iphone13Pro.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone13ProWebGL = [[WebGLInfo alloc] init];
-    iphone13ProWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone13ProWebGL.unmaskedRenderer = @"Apple A15 GPU";
-    iphone13ProWebGL.webglVendor = @"Apple";
-    iphone13ProWebGL.webglRenderer = @"Apple GPU";
-    iphone13ProWebGL.webglVersion = @"WebGL 2.0";
-    iphone13ProWebGL.maxTextureSize = @16384;
-    iphone13ProWebGL.maxRenderBufferSize = @16384;
-    iphone13Pro.webGLInfo = iphone13ProWebGL;
-    [devices addObject:iphone13Pro];
-    
-    // iPhone 13 Pro Max
-    DeviceModel *iphone13ProMax = [[DeviceModel alloc] init];
-    iphone13ProMax.modelName = @"iPhone14,3";
-    iphone13ProMax.name = @"iPhone 13 Pro Max";
-    iphone13ProMax.resolution = @"2778x1284";
-    iphone13ProMax.viewportResolution = @"2778x1284";
-    iphone13ProMax.devicePixelRatio = @3.0;
-    iphone13ProMax.screenDensity = @458;
-    iphone13ProMax.cpuArchitecture = @"Apple A15 Bionic";
-    iphone13ProMax.boardId = @"D64AP";
-    iphone13ProMax.hwModel = @"D64AP";
-    // Additional specs from addSpecsForDevice
-    iphone13ProMax.deviceMemory = @6;
-    iphone13ProMax.cpuCoreCount = @6;
-    iphone13ProMax.gpuFamily = @"Apple A15 GPU";
-    iphone13ProMax.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone13ProMaxWebGL = [[WebGLInfo alloc] init];
-    iphone13ProMaxWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone13ProMaxWebGL.unmaskedRenderer = @"Apple A15 GPU";
-    iphone13ProMaxWebGL.webglVendor = @"Apple";
-    iphone13ProMaxWebGL.webglRenderer = @"Apple GPU";
-    iphone13ProMaxWebGL.webglVersion = @"WebGL 2.0";
-    iphone13ProMaxWebGL.maxTextureSize = @16384;
-    iphone13ProMaxWebGL.maxRenderBufferSize = @16384;
-    iphone13ProMax.webGLInfo = iphone13ProMaxWebGL;
-    [devices addObject:iphone13ProMax];
-    
-    // iPhone SE (3rd Gen)
-    DeviceModel *iphoneSE3 = [[DeviceModel alloc] init];
-    iphoneSE3.modelName = @"iPhone14,6";
-    iphoneSE3.name = @"iPhone SE (3rd Gen)";
-    iphoneSE3.resolution = @"1334x750";
-    iphoneSE3.viewportResolution = @"1334x750";
-    iphoneSE3.devicePixelRatio = @2.0;
-    iphoneSE3.screenDensity = @326;
-    iphoneSE3.cpuArchitecture = @"Apple A15 Bionic";
-    iphoneSE3.boardId = @"D49AP";
-    iphoneSE3.hwModel = @"D49AP";
-    // Additional specs from addSpecsForDevice
-    iphoneSE3.deviceMemory = @4;
-    iphoneSE3.cpuCoreCount = @6;
-    iphoneSE3.gpuFamily = @"Apple A15 GPU";
-    iphoneSE3.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphoneSE3WebGL = [[WebGLInfo alloc] init];
-    iphoneSE3WebGL.unmaskedVendor = @"Apple Inc.";
-    iphoneSE3WebGL.unmaskedRenderer = @"Apple A15 GPU";
-    iphoneSE3WebGL.webglVendor = @"Apple";
-    iphoneSE3WebGL.webglRenderer = @"Apple GPU";
-    iphoneSE3WebGL.webglVersion = @"WebGL 2.0";
-    iphoneSE3WebGL.maxTextureSize = @16384;
-    iphoneSE3WebGL.maxRenderBufferSize = @16384;
-    iphoneSE3.webGLInfo = iphoneSE3WebGL;
-    [devices addObject:iphoneSE3];
-    
-    // iPhone 14
-    DeviceModel *iphone14 = [[DeviceModel alloc] init];
-    iphone14.modelName = @"iPhone14,7";
-    iphone14.name = @"iPhone 14";
-    iphone14.resolution = @"2532x1170";
-    iphone14.viewportResolution = @"2532x1170";
-    iphone14.devicePixelRatio = @3.0;
-    iphone14.screenDensity = @460;
-    iphone14.cpuArchitecture = @"Apple A15 Bionic";
-    iphone14.boardId = @"D27AP";
-    iphone14.hwModel = @"D27AP";
-    // Additional specs from addSpecsForDevice
-    iphone14.deviceMemory = @4;
-    iphone14.cpuCoreCount = @6;
-    iphone14.gpuFamily = @"Apple A15 GPU";
-    iphone14.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone14WebGL = [[WebGLInfo alloc] init];
-    iphone14WebGL.unmaskedVendor = @"Apple Inc.";
-    iphone14WebGL.unmaskedRenderer = @"Apple A15 GPU";
-    iphone14WebGL.webglVendor = @"Apple";
-    iphone14WebGL.webglRenderer = @"Apple GPU";
-    iphone14WebGL.webglVersion = @"WebGL 2.0";
-    iphone14WebGL.maxTextureSize = @16384;
-    iphone14WebGL.maxRenderBufferSize = @16384;
-    iphone14.webGLInfo = iphone14WebGL;
-    [devices addObject:iphone14];
-
-    // iPhone 14 Plus
-    DeviceModel *iphone14Plus = [[DeviceModel alloc] init];
-    iphone14Plus.modelName = @"iPhone14,8";
-    iphone14Plus.name = @"iPhone 14 Plus";
-    iphone14Plus.resolution = @"2778x1284";
-    iphone14Plus.viewportResolution = @"2778x1284";
-    iphone14Plus.devicePixelRatio = @3.0;
-    iphone14Plus.screenDensity = @458;
-    iphone14Plus.cpuArchitecture = @"Apple A15 Bionic";
-    iphone14Plus.boardId = @"D28AP";
-    iphone14Plus.hwModel = @"D28AP";
-    // Additional specs from addSpecsForDevice
-    iphone14Plus.deviceMemory = @4;
-    iphone14Plus.cpuCoreCount = @6;
-    iphone14Plus.gpuFamily = @"Apple A15 GPU";
-    iphone14Plus.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone14PlusWebGL = [[WebGLInfo alloc] init];
-    iphone14PlusWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone14PlusWebGL.unmaskedRenderer = @"Apple A15 GPU";
-    iphone14PlusWebGL.webglVendor = @"Apple";
-    iphone14PlusWebGL.webglRenderer = @"Apple GPU";
-    iphone14PlusWebGL.webglVersion = @"WebGL 2.0";
-    iphone14PlusWebGL.maxTextureSize = @16384;
-    iphone14PlusWebGL.maxRenderBufferSize = @16384;
-    iphone14Plus.webGLInfo = iphone14PlusWebGL;
-    [devices addObject:iphone14Plus];
-    
-    // iPhone 14 Pro
-    DeviceModel *iphone14Pro = [[DeviceModel alloc] init];
-    iphone14Pro.modelName = @"iPhone15,2";
-    iphone14Pro.name = @"iPhone 14 Pro";
-    iphone14Pro.resolution = @"2556x1179";
-    iphone14Pro.viewportResolution = @"2556x1179";
-    iphone14Pro.devicePixelRatio = @3.0;
-    iphone14Pro.screenDensity = @460;
-    iphone14Pro.cpuArchitecture = @"Apple A16 Bionic";
-    iphone14Pro.boardId = @"D73AP";
-    iphone14Pro.hwModel = @"D73AP";
-    // Additional specs from addSpecsForDevice
-    iphone14Pro.deviceMemory = @6;
-    iphone14Pro.cpuCoreCount = @6;
-    iphone14Pro.gpuFamily = @"Apple A16 Pro GPU";
-    iphone14Pro.metalFeatureSet = @"Metal 3.1";
-    WebGLInfo *iphone14ProWebGL = [[WebGLInfo alloc] init];
-    iphone14ProWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone14ProWebGL.unmaskedRenderer = @"Apple A16 GPU";
-    iphone14ProWebGL.webglVendor = @"Apple";
-    iphone14ProWebGL.webglRenderer = @"Apple GPU";
-    iphone14ProWebGL.webglVersion = @"WebGL 2.0";
-    iphone14ProWebGL.maxTextureSize = @16384;
-    iphone14ProWebGL.maxRenderBufferSize = @16384;
-    iphone14Pro.webGLInfo = iphone14ProWebGL;
-    [devices addObject:iphone14Pro];
-    
-    // iPhone 14 Pro Max
-    DeviceModel *iphone14ProMax = [[DeviceModel alloc] init];
-    iphone14ProMax.modelName = @"iPhone15,3";
-    iphone14ProMax.name = @"iPhone 14 Pro Max";
-    iphone14ProMax.resolution = @"2796x1290";
-    iphone14ProMax.viewportResolution = @"2796x1290";
-    iphone14ProMax.devicePixelRatio = @3.0;
-    iphone14ProMax.screenDensity = @460;
-    iphone14ProMax.cpuArchitecture = @"Apple A16 Bionic";
-    iphone14ProMax.boardId = @"D74AP";
-    iphone14ProMax.hwModel = @"D74AP";
-    // Additional specs from addSpecsForDevice
-    iphone14ProMax.deviceMemory = @6;
-    iphone14ProMax.cpuCoreCount = @6;
-    iphone14ProMax.gpuFamily = @"Apple A16 Pro GPU";
-    iphone14ProMax.metalFeatureSet = @"Metal 3.1";
-    WebGLInfo *iphone14ProMaxWebGL = [[WebGLInfo alloc] init];
-    iphone14ProMaxWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone14ProMaxWebGL.unmaskedRenderer = @"Apple A16 GPU";
-    iphone14ProMaxWebGL.webglVendor = @"Apple";
-    iphone14ProMaxWebGL.webglRenderer = @"Apple GPU";
-    iphone14ProMaxWebGL.webglVersion = @"WebGL 2.0";
-    iphone14ProMaxWebGL.maxTextureSize = @16384;
-    iphone14ProMaxWebGL.maxRenderBufferSize = @16384;
-    iphone14ProMax.webGLInfo = iphone14ProMaxWebGL;
-    [devices addObject:iphone14ProMax];
-    
-    // iPhone 15
-    DeviceModel *iphone15 = [[DeviceModel alloc] init];
-    iphone15.modelName = @"iPhone15,4";
-    iphone15.name = @"iPhone 15";
-    iphone15.resolution = @"2556x1179";
-    iphone15.viewportResolution = @"2556x1179";
-    iphone15.devicePixelRatio = @3.0;
-    iphone15.screenDensity = @460;
-    iphone15.cpuArchitecture = @"Apple A16 Bionic";
-    iphone15.boardId = @"D37AP";
-    iphone15.hwModel = @"D37AP";
-    // Additional specs from addSpecsForDevice
-    iphone15.deviceMemory = @6;
-    iphone15.cpuCoreCount = @6;
-    iphone15.gpuFamily = @"Apple A16 GPU";
-    iphone15.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone15WebGL = [[WebGLInfo alloc] init];
-    iphone15WebGL.unmaskedVendor = @"Apple Inc.";
-    iphone15WebGL.unmaskedRenderer = @"Apple A16 GPU";
-    iphone15WebGL.webglVendor = @"Apple";
-    iphone15WebGL.webglRenderer = @"Apple GPU";
-    iphone15WebGL.webglVersion = @"WebGL 2.0";
-    iphone15WebGL.maxTextureSize = @16384;
-    iphone15WebGL.maxRenderBufferSize = @16384;
-    iphone15.webGLInfo = iphone15WebGL;
-    [devices addObject:iphone15];
-    
-    // iPhone 15 Plus
-    DeviceModel *iphone15Plus = [[DeviceModel alloc] init];
-    iphone15Plus.modelName = @"iPhone15,5";
-    iphone15Plus.name = @"iPhone 15 Plus";
-    iphone15Plus.resolution = @"2796x1290";
-    iphone15Plus.viewportResolution = @"2796x1290";
-    iphone15Plus.devicePixelRatio = @3.0;
-    iphone15Plus.screenDensity = @460;
-    iphone15Plus.cpuArchitecture = @"Apple A16 Bionic";
-    iphone15Plus.boardId = @"D38AP";
-    iphone15Plus.hwModel = @"D38AP";
-    // Additional specs from addSpecsForDevice
-    iphone15Plus.deviceMemory = @6;
-    iphone15Plus.cpuCoreCount = @6;
-    iphone15Plus.gpuFamily = @"Apple A16 GPU";
-    iphone15Plus.metalFeatureSet = @"Metal 3.0";
-    WebGLInfo *iphone15PlusWebGL = [[WebGLInfo alloc] init];
-    iphone15PlusWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone15PlusWebGL.unmaskedRenderer = @"Apple A16 GPU";
-    iphone15PlusWebGL.webglVendor = @"Apple";
-    iphone15PlusWebGL.webglRenderer = @"Apple GPU";
-    iphone15PlusWebGL.webglVersion = @"WebGL 2.0";
-    iphone15PlusWebGL.maxTextureSize = @16384;
-    iphone15PlusWebGL.maxRenderBufferSize = @16384;
-    iphone15Plus.webGLInfo = iphone15PlusWebGL;
-    [devices addObject:iphone15Plus];
-    
-    // iPhone 15 Pro
-    DeviceModel *iphone15Pro = [[DeviceModel alloc] init];
-    iphone15Pro.modelName = @"iPhone16,1";
-    iphone15Pro.name = @"iPhone 15 Pro";
-    iphone15Pro.resolution = @"2556x1179";
-    iphone15Pro.viewportResolution = @"2556x1179";
-    iphone15Pro.devicePixelRatio = @3.0;
-    iphone15Pro.screenDensity = @460;
-    iphone15Pro.cpuArchitecture = @"Apple A17 Pro";
-    iphone15Pro.boardId = @"D83AP";
-    iphone15Pro.hwModel = @"D83AP";
-    // Additional specs from addSpecsForDevice
-    iphone15Pro.deviceMemory = @8;
-    iphone15Pro.cpuCoreCount = @6;
-    iphone15Pro.gpuFamily = @"Apple A17 Pro GPU";
-    iphone15Pro.metalFeatureSet = @"Metal 3.1";
-    WebGLInfo *iphone15ProWebGL = [[WebGLInfo alloc] init];
-    iphone15ProWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone15ProWebGL.unmaskedRenderer = @"Apple A17 Pro GPU";
-    iphone15ProWebGL.webglVendor = @"Apple";
-    iphone15ProWebGL.webglRenderer = @"Apple GPU";
-    iphone15ProWebGL.webglVersion = @"WebGL 2.0";
-    iphone15ProWebGL.maxTextureSize = @16384;
-    iphone15ProWebGL.maxRenderBufferSize = @16384;
-    iphone15Pro.webGLInfo = iphone15ProWebGL;
-    [devices addObject:iphone15Pro];
-    
-    // iPhone 15 Pro Max
-    DeviceModel *iphone15ProMax = [[DeviceModel alloc] init];
-    iphone15ProMax.modelName = @"iPhone16,2";
-    iphone15ProMax.name = @"iPhone 15 Pro Max";
-    iphone15ProMax.resolution = @"2796x1290";
-    iphone15ProMax.viewportResolution = @"2796x1290";
-    iphone15ProMax.devicePixelRatio = @3.0;
-    iphone15ProMax.screenDensity = @460;
-    iphone15ProMax.cpuArchitecture = @"Apple A17 Pro";
-    iphone15ProMax.boardId = @"D84AP";
-    iphone15ProMax.hwModel = @"D84AP";
-    // Additional specs from addSpecsForDevice
-    iphone15ProMax.deviceMemory = @8;
-    iphone15ProMax.cpuCoreCount = @6;
-    iphone15ProMax.gpuFamily = @"Apple A17 Pro GPU";
-    iphone15ProMax.metalFeatureSet = @"Metal 3.1";
-    WebGLInfo *iphone15ProMaxWebGL = [[WebGLInfo alloc] init];
-    iphone15ProMaxWebGL.unmaskedVendor = @"Apple Inc.";
-    iphone15ProMaxWebGL.unmaskedRenderer = @"Apple A17 Pro GPU";
-    iphone15ProMaxWebGL.webglVendor = @"Apple";
-    iphone15ProMaxWebGL.webglRenderer = @"Apple GPU";
-    iphone15ProMaxWebGL.webglVersion = @"WebGL 2.0";
-    iphone15ProMaxWebGL.maxTextureSize = @16384;
-    iphone15ProMaxWebGL.maxRenderBufferSize = @16384;
-    iphone15ProMax.webGLInfo = iphone15ProMaxWebGL;
-    [devices addObject:iphone15ProMax];
-    
-    // Store all specifications
-    self.deviceModels = [devices copy];
-}
-
--(DeviceModel *) generateDeviceModel{
-    NSUInteger idx = arc4random_uniform((uint32_t)_deviceModels.count);
-    return _deviceModels[idx];
-}
 
 -(UpTimeInfo *)generateUpTimeInfo{
     UpTimeInfo * upTimeInfo = [[UpTimeInfo alloc]init];
@@ -1338,11 +625,8 @@
         }
     }
     
-    if ([self isValidDeviceName:deviceName]) {
-        return deviceName;
-    }
-    NSLog(@"Generated device name failed validation");
-    return nil;
+    return deviceName;
+  
 }
 
 - (NSString *)randomizeBatteryLevel {
@@ -1388,34 +672,19 @@
     return batteryInfo;
 }
 - (NetworkInfo *) generateNetworkInfo{
-    NSArray *carriers = @[
-        // Major Carriers
-        @{@"name": @"Verizon", @"mcc": @"310", @"mnc": @"004"},
-        @{@"name": @"Verizon", @"mcc": @"310", @"mnc": @"010"},
-        @{@"name": @"Verizon", @"mcc": @"311", @"mnc": @"480"},
-        
-        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"170"},
-        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"410"},
-        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"150"},
-        @{@"name": @"AT&T", @"mcc": @"310", @"mnc": @"680"},
-        
-        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"260"},
-        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"160"},
-        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"240"},
-        @{@"name": @"T-Mobile", @"mcc": @"310", @"mnc": @"800"},
-        
-        @{@"name": @"Sprint", @"mcc": @"310", @"mnc": @"120"},
-        @{@"name": @"Sprint", @"mcc": @"311", @"mnc": @"870"},
-        @{@"name": @"Sprint", @"mcc": @"312", @"mnc": @"530"},
-        
-        // Regional Carriers without spaces
-        @{@"name": @"Cellcom", @"mcc": @"311", @"mnc": @"210"}
-    ];
-    NSUInteger randomIndex = arc4random_uniform((uint32_t)carriers.count);
+    SettingManager * manager = [SettingManager sharedManager];
+    [manager loadFromPrefs];
+    NSString * carrierCountryCode = manager.carrierCountryCode;
+    NSString *sql = [NSString stringWithFormat:
+        @"SELECT * FROM operator where code = '%@' ORDER BY RANDOM() limit 1"
+    ,carrierCountryCode];
+    NSLog(@"[DEBUG] query sql: %@",sql);
+    NSDictionary * carrier = [[DBManager sharedManager] queryOne:sql];
+
     NetworkInfo *networkInfo = [[NetworkInfo alloc] init];
-    networkInfo.carrierName = carriers[randomIndex][@"name"];
-    networkInfo.mcc = carriers[randomIndex][@"mcc"];
-    networkInfo.mnc = carriers[randomIndex][@"mnc"];
+    networkInfo.carrierName = carrier[@"name"];
+    networkInfo.mcc = carrier[@"mcc"];
+    networkInfo.mnc = carrier[@"mnc"];
     networkInfo.localIPAddress = [self generateSpoofedLocalIPAddressFromCurrent];
     networkInfo.localIPv6Address = [self generateSpoofedLocalIPv6AddressFromCurrent];
     // 获取最小值和最大值
@@ -1545,12 +814,9 @@
         }
     }
     
-    // Validate the generated serial number
-    if ([self isValidSerialNumber:serialNumber]) {
-        return serialNumber;
-    }
-    NSLog(@"Generated serial number failed validation");
-    return nil;
+  
+    return serialNumber;
+  
 }
 
 - (NSString *)generateIMEI {
@@ -1587,180 +853,118 @@
     return meid;
 }
 
+// 把版本号转成 AAA.BBB.CCC
+NSString *NormalizeVersion(NSString *version)
+{
+    if (version.length == 0) return @"000.000.000";
 
--(IosVersion *) generateIOSVersion{
-    NSArray * versionBuildPairs = @[
-        // iOS 16.x versions (starting from 16.2)
-        @{@"version": @"16.2", @"build": @"20C65", 
-            @"kernel_version": @"Darwin Kernel Version 22.2.0: Mon Nov 28 20:10:47 PST 2022; root:xnu-8792.72.6~1/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.2.0", @"xnu": @"8792.72.6~1"},
-        @{@"version": @"16.3", @"build": @"20D47", 
-            @"kernel_version": @"Darwin Kernel Version 22.3.0: Wed Jan  4 21:25:36 PST 2023; root:xnu-8792.81.2~2/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.3.0", @"xnu": @"8792.81.2~2"},
-        @{@"version": @"16.3.1", @"build": @"20D67", 
-            @"kernel_version": @"Darwin Kernel Version 22.3.0: Mon Jan 30 20:07:53 PST 2023; root:xnu-8792.81.3~2/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.3.0", @"xnu": @"8792.81.3~2"},
-        @{@"version": @"16.4", @"build": @"20E247", 
-            @"kernel_version": @"Darwin Kernel Version 22.4.0: Wed Mar  8 22:11:50 PST 2023; root:xnu-8796.101.5~1/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.4.0", @"xnu": @"8796.101.5~1"},
-        @{@"version": @"16.4.1", @"build": @"20E252", 
-            @"kernel_version": @"Darwin Kernel Version 22.4.0: Mon Mar 20 22:14:42 PDT 2023; root:xnu-8796.101.5~3/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.4.0", @"xnu": @"8796.101.5~3"},
-        @{@"version": @"16.5", @"build": @"20F66", 
-            @"kernel_version": @"Darwin Kernel Version 22.5.0: Mon Apr 24 20:53:19 PDT 2023; root:xnu-8796.121.2~5/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.5.0", @"xnu": @"8796.121.2~5"},
-        @{@"version": @"16.5.1", @"build": @"20F75", 
-            @"kernel_version": @"Darwin Kernel Version 22.5.0: Thu May 18 20:37:29 PDT 2023; root:xnu-8796.121.3~1/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.5.0", @"xnu": @"8796.121.3~1"},
-        @{@"version": @"16.6", @"build": @"20G75", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Wed Jun 28 20:51:09 PDT 2023; root:xnu-8796.141.3~2/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~2"},
-        @{@"version": @"16.6.1", @"build": @"20G81", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Mon Jul 24 18:19:54 PDT 2023; root:xnu-8796.141.3~3/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~3"},
-        @{@"version": @"16.7", @"build": @"20H19", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Wed Aug 9 16:09:21 PDT 2023; root:xnu-8796.141.3~4/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~4"},
-        @{@"version": @"16.7.1", @"build": @"20H30", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Mon Aug 21 21:16:55 PDT 2023; root:xnu-8796.141.3~5/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~5"},
-        @{@"version": @"16.7.2", @"build": @"20H115", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Thu Sep 14 16:33:11 PDT 2023; root:xnu-8796.141.3~6/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~6"},
-        @{@"version": @"16.7.3", @"build": @"20H232", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Mon Oct 23 21:12:11 PDT 2023; root:xnu-8796.141.3~9/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~9"},
-        @{@"version": @"16.7.4", @"build": @"20H240", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Mon Nov 13 21:07:04 PST 2023; root:xnu-8796.141.3~10/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~10"},
-        @{@"version": @"16.7.5", @"build": @"20H307", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Mon Dec 11 16:54:15 PST 2023; root:xnu-8796.141.3~11/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~11"},
-        @{@"version": @"16.7.6", @"build": @"20H318", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Mon Jan 15 20:02:17 PST 2024; root:xnu-8796.141.3~12/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~12"},
-        @{@"version": @"16.7.7", @"build": @"20H325", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Mon Feb 12 19:59:45 PST 2024; root:xnu-8796.141.3~13/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~13"},
-        @{@"version": @"16.7.8", @"build": @"20H400", 
-            @"kernel_version": @"Darwin Kernel Version 22.6.0: Thu Mar 7 23:08:41 PST 2024; root:xnu-8796.141.3~15/RELEASE_ARM64_T8101", 
-            @"darwin": @"22.6.0", @"xnu": @"8796.141.3~15"},
-        
-        // iOS 17.x versions
-        @{@"version": @"17.0", @"build": @"21A326", 
-            @"kernel_version": @"Darwin Kernel Version 23.0.0: Wed Aug 16 17:19:24 PDT 2023; root:xnu-10002.1.13~1/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.0.0", @"xnu": @"10002.1.13~1"},
-        @{@"version": @"17.0.1", @"build": @"21A340", 
-            @"kernel_version": @"Darwin Kernel Version 23.0.0: Wed Aug 30 20:01:05 PDT 2023; root:xnu-10002.1.13~2/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.0.0", @"xnu": @"10002.1.13~2"},
-        @{@"version": @"17.0.2", @"build": @"21A351", 
-            @"kernel_version": @"Darwin Kernel Version 23.0.0: Thu Sep 7 20:57:46 PDT 2023; root:xnu-10002.1.13~3/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.0.0", @"xnu": @"10002.1.13~3"},
-        @{@"version": @"17.0.3", @"build": @"21A360", 
-            @"kernel_version": @"Darwin Kernel Version 23.0.0: Mon Sep 25 21:15:30 PDT 2023; root:xnu-10002.1.13~4/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.0.0", @"xnu": @"10002.1.13~4"},
-        @{@"version": @"17.1", @"build": @"21B74", 
-            @"kernel_version": @"Darwin Kernel Version 23.1.0: Wed Oct 11 17:53:11 PDT 2023; root:xnu-10002.41.9~7/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.1.0", @"xnu": @"10002.41.9~7"},
-        @{@"version": @"17.1.1", @"build": @"21B91", 
-            @"kernel_version": @"Darwin Kernel Version 23.1.0: Thu Oct 26 16:06:36 PDT 2023; root:xnu-10002.41.9~9/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.1.0", @"xnu": @"10002.41.9~9"},
-        @{@"version": @"17.1.2", @"build": @"21B101", 
-            @"kernel_version": @"Darwin Kernel Version 23.1.0: Wed Nov 8 11:56:31 PST 2023; root:xnu-10002.41.9~11/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.1.0", @"xnu": @"10002.41.9~11"},
-        @{@"version": @"17.2", @"build": @"21C62", 
-            @"kernel_version": @"Darwin Kernel Version 23.2.0: Wed Nov 15 21:56:45 PST 2023; root:xnu-10002.61.3~10/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.2.0", @"xnu": @"10002.61.3~10"},
-        @{@"version": @"17.2.1", @"build": @"21C66", 
-            @"kernel_version": @"Darwin Kernel Version 23.2.0: Wed Dec 6 20:07:48 PST 2023; root:xnu-10002.61.3~13/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.2.0", @"xnu": @"10002.61.3~13"},
-        @{@"version": @"17.3", @"build": @"21D50", 
-            @"kernel_version": @"Darwin Kernel Version 23.3.0: Wed Jan 10 18:16:15 PST 2024; root:xnu-10002.81.5~10/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.3.0", @"xnu": @"10002.81.5~10"},
-        @{@"version": @"17.3.1", @"build": @"21D61", 
-            @"kernel_version": @"Darwin Kernel Version 23.3.0: Mon Jan 22 21:19:52 PST 2024; root:xnu-10002.81.5~13/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.3.0", @"xnu": @"10002.81.5~13"},
-        @{@"version": @"17.4", @"build": @"21E219", 
-            @"kernel_version": @"Darwin Kernel Version 23.4.0: Wed Feb 21 15:44:29 PST 2024; root:xnu-10063.101.2~1/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.4.0", @"xnu": @"10063.101.2~1"},
-        @{@"version": @"17.4.1", @"build": @"21E236", 
-            @"kernel_version": @"Darwin Kernel Version 23.4.0: Mon Mar 4 20:10:59 PST 2024; root:xnu-10063.101.2~3/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.4.0", @"xnu": @"10063.101.2~3"},
-        @{@"version": @"17.5", @"build": @"21F79", 
-            @"kernel_version": @"Darwin Kernel Version 23.5.0: Mon Apr 8 21:39:26 PDT 2024; root:xnu-10063.121.1~2/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.5.0", @"xnu": @"10063.121.1~2"},
-        @{@"version": @"17.5.1", @"build": @"21F90", 
-            @"kernel_version": @"Darwin Kernel Version 23.5.0: Tue Apr 23 22:07:16 PDT 2024; root:xnu-10063.121.1~3/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.5.0", @"xnu": @"10063.121.1~3"},
-        @{@"version": @"17.6", @"build": @"21G83", 
-            @"kernel_version": @"Darwin Kernel Version 23.6.0: Tue May 21 19:58:21 PDT 2024; root:xnu-10063.141.2~2/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.6.0", @"xnu": @"10063.141.2~2"},
-        @{@"version": @"17.6.1", @"build": @"21G91", 
-            @"kernel_version": @"Darwin Kernel Version 23.6.0: Tue Jun 11 18:30:45 PDT 2024; root:xnu-10063.141.2~3/RELEASE_ARM64_T6000", 
-            @"darwin": @"23.6.0", @"xnu": @"10063.141.2~3"},
-        
-        // iOS 18.x versions with real corresponding kernel versions
-        @{@"version": @"18.0", @"build": @"22A326", 
-            @"kernel_version": @"Darwin Kernel Version 24.0.0: Fri Jun 7 20:30:42 PDT 2024; root:xnu-10461.1.13~1/RELEASE_ARM64_T6000", 
-            @"darwin": @"24.0.0", @"xnu": @"10461.1.13~1"},
-        @{@"version": @"18.0.1", @"build": @"22A340", 
-            @"kernel_version": @"Darwin Kernel Version 24.0.0: Thu Jun 20 21:35:16 PDT 2024; root:xnu-10461.1.13~3/RELEASE_ARM64_T6000", 
-            @"darwin": @"24.0.0", @"xnu": @"10461.1.13~3"},
-        @{@"version": @"18.0.2", @"build": @"22A351", 
-            @"kernel_version": @"Darwin Kernel Version 24.0.0: Mon Jul 8 20:21:40 PDT 2024; root:xnu-10461.1.13~5/RELEASE_ARM64_T6000", 
-            @"darwin": @"24.0.0", @"xnu": @"10461.1.13~5"},
-        @{@"version": @"18.1", @"build": @"22B74", 
-            @"kernel_version": @"Darwin Kernel Version 24.1.0: Wed Aug 14 18:43:29 PDT 2024; root:xnu-10461.41.5~1/RELEASE_ARM64_T6000", 
-            @"darwin": @"24.1.0", @"xnu": @"10461.41.5~1"},
-        @{@"version": @"18.1.1", @"build": @"22B91", 
-            @"kernel_version": @"Darwin Kernel Version 24.1.0: Tue Sep 3 19:26:17 PDT 2024; root:xnu-10461.41.5~3/RELEASE_ARM64_T6000", 
-            @"darwin": @"24.1.0", @"xnu": @"10461.41.5~3"},
-        @{@"version": @"18.2", @"build": @"22C62", 
-            @"kernel_version": @"Darwin Kernel Version 24.2.0: Mon Oct 14 20:27:31 PDT 2024; root:xnu-10461.61.1~4/RELEASE_ARM64_T6000", 
-            @"darwin": @"24.2.0", @"xnu": @"10461.61.1~4"},
-        @{@"version": @"18.3", @"build": @"22D50", 
-            @"kernel_version": @"Darwin Kernel Version 24.3.0: Wed Dec 4 22:48:55 PST 2024; root:xnu-10461.81.1~3/RELEASE_ARM64_T6000", 
-            @"darwin": @"24.3.0", @"xnu": @"10461.81.1~3"},
-        @{@"version": @"18.4", @"build": @"22E219", 
-            @"kernel_version": @"Darwin Kernel Version 24.4.0: Mon Feb 10 19:45:22 PST 2025; root:xnu-10461.101.2~4/RELEASE_ARM64_T6000", 
-            @"darwin": @"24.4.0", @"xnu": @"10461.101.2~4"},
-        @{@"version": @"18.5", @"build": @"22F79", 
-            @"kernel_version": @"Darwin Kernel Version 24.5.0: Wed Apr 9 21:24:17 PDT 2025; root:xnu-10461.121.1~2/RELEASE_ARM64_T6000", 
-            @"darwin": @"24.5.0", @"xnu": @"10461.121.1~2"}
-    ];
-    // Generate a random index within the array bounds
-    uint32_t randomIndex;
-    if (SecRandomCopyBytes(kSecRandomDefault, sizeof(randomIndex), (uint8_t *)&randomIndex) != errSecSuccess) {
-        NSLog(@"Failed to generate secure random number");
-        return nil;
-    }
+    // 拆分
+    NSArray<NSString *> *parts = [version componentsSeparatedByString:@"."];
     
-    // Get the version at the random index
-    NSUInteger index = randomIndex % versionBuildPairs.count;
-    NSDictionary *versionInfo = versionBuildPairs[index];
+    // 不足 3 段补 0（如 11.0 -> 11.0.0）
+    NSMutableArray<NSNumber *> *nums = [NSMutableArray array];
+    for (NSInteger i = 0; i < 3; i++) {
+        if (i < parts.count) {
+            [nums addObject:@(parts[i].intValue)];
+        } else {
+            [nums addObject:@0];
+        }
+    }
+
+    // 统一格式化：每段 3 位
+    return [NSString stringWithFormat:@"%03d.%03d.%03d",
+            nums[0].intValue,
+            nums[1].intValue,
+            nums[2].intValue];
+}
+
+-(IosVersion *) generateIOSVersion:(PhoneInfo *)phoneInfo{
+    SettingManager * manager = [SettingManager sharedManager];
+    [manager loadFromPrefs];
+    NSString * minVersion = manager.minVersion;
+    NSString * maxVersion = manager.maxVersion;
+    
+    NSMutableString *queryVersionSql =
+        [NSMutableString stringWithString:@"SELECT * FROM KMOS"];
+
+    NSMutableArray *conditions = [NSMutableArray array];
+    NSMutableArray *params = [NSMutableArray array];
+
+    if (minVersion.length > 0) {
+        [conditions addObject:[NSString stringWithFormat:@"sortVersion >= '%@'",NormalizeVersion(minVersion)]];
+    }
+
+    if (maxVersion.length > 0) {
+        [conditions addObject:[NSString stringWithFormat:@"sortVersion <= '%@'",NormalizeVersion(maxVersion)]];
+    }
+
+    if (conditions.count > 0) {
+        [queryVersionSql appendFormat:@" WHERE %@", [conditions componentsJoinedByString:@" AND "]];
+    }
+
+    [queryVersionSql appendString:@" ORDER BY RANDOM() LIMIT 1"];
+
+    NSLog(@"[DEBUG] query verion %@",queryVersionSql);
+    // 先随机一个版本号 再根据版本号找可选的设备 TODO 根据sortVersion筛选
+    NSDictionary * versionInfo = [[DBManager sharedManager] queryOne:queryVersionSql];
+    // @"kernel_version": @"Darwin Kernel Version ${KMOS.kernelversion}: ${KMOS.kernelversiontime}/RELEASE_ARM64_${cpu.mode}"
+    
     IosVersion * iosVersion = [[IosVersion alloc]init];
    
     iosVersion.version = versionInfo[@"version"];
-    iosVersion.build = versionInfo[@"build"];
-    iosVersion.kernelVersion = versionInfo[@"kernel_version"];
-    iosVersion.darwin = versionInfo[@"darwin"];
-    iosVersion.xnu = versionInfo[@"xnu"];
+    iosVersion.build = versionInfo[@"OSBuild"];
 
-    return iosVersion;
+
+    NSString *sql = [NSString stringWithFormat:
+        @"SELECT * FROM KMDevices d left join CPU c on d.CPU = c.name WHERE defaultOSV <= '%@' AND '%@' <= maxOSV ORDER BY RANDOM() limit 1"
+    ,versionInfo[@"sortVersion"],versionInfo[@"sortVersion"]];
+
+    NSDictionary * device = [[DBManager sharedManager] queryOne:sql];
+
+    iosVersion.kernelVersion = [NSString stringWithFormat:@"Darwin Kernel Version %@: %@/RELEASE_ARM64_%@",versionInfo[@"kernelversion"],versionInfo[@"kernelversiontime"],device[@"mode"]];
+    iosVersion.darwin = versionInfo[@"kernelversion"];
+    DeviceModel *deviceModel = [[DeviceModel alloc] init];
     
-}
-
-
-- (StorageInfo *)generateStorage{
-    // 50% chance for 64GB, 50% for 128GB
-    int randomValue = arc4random_uniform(100);
-    NSString *capacity;
-    if (randomValue < 50) {
-        capacity = @"64";
-    } else {
-        capacity = @"128";
+    
+    deviceModel.modelName = device[@"identifier"];
+    deviceModel.name = device[@"generation"];
+    deviceModel.resolution = device[@"sc_pixel_size"];
+    deviceModel.viewportResolution = device[@"sc_viewport"];
+    deviceModel.devicePixelRatio = @([device[@"sc_pixel_ratio"] doubleValue]);
+    deviceModel.screenDensity = device[@"sc_pixel"];
+    deviceModel.cpuArchitecture = device[@"cpuArchitecture"];
+    deviceModel.hwModel = device[@"internal_name"];
+    // Additional specs from addSpecsForDevice
+    deviceModel.deviceMemory = device[@"RAM"] ;
+    deviceModel.cpuCoreCount = device[@"count"];
+    deviceModel.gpuFamily = [NSString stringWithFormat:@"Apple %@ GPU",device[@"CPU"]];
+    WebGLInfo *webGL = [[WebGLInfo alloc] init];
+    webGL.unmaskedVendor = @"Apple Inc.";
+    webGL.unmaskedRenderer = [NSString stringWithFormat:@"Apple %@ GPU",device[@"CPU"]];
+    webGL.webglVendor = @"Apple";
+    webGL.webglRenderer = @"Apple GPU";
+    webGL.webglVersion = @"WebGL 2.0";
+    if([deviceModel.modelName hasPrefix:@"iPhone11"] || [deviceModel.modelName hasPrefix:@"iPhone10"] 
+        || [deviceModel.modelName hasPrefix:@"iPhone9"] || [deviceModel.modelName hasPrefix:@"iPhone8"]){
+        webGL.maxTextureSize = @8192;
+        webGL.maxRenderBufferSize = @8192;
+    }else{
+        webGL.maxTextureSize = @16384;
+        webGL.maxRenderBufferSize = @16384;
     }
+    deviceModel.webGLInfo = webGL;
+    // 假设字符串来自某个字典
+    NSString *value = device[@"storage"]; // @"64+256+512"
 
+    // 1. 以 "+" 号分隔字符串
+    NSArray *components = [value componentsSeparatedByString:@"+"];
+
+
+    // 3. 生成随机索引
+    NSInteger randomIndex = arc4random_uniform((uint32_t)components.count);
+    
+    // 4. 获取随机值并转换为整数（如果需要数字类型）
+    NSString *capacity = components[randomIndex];
     double totalGB = [capacity doubleValue];
     double freePercent;
     
@@ -1784,83 +988,12 @@
     StorageInfo * storageInfo = [[StorageInfo alloc]init];
     storageInfo.totalStorage = capacity;
     storageInfo.freeStorage = [NSString stringWithFormat:@"%.1f", freeGB];
-    storageInfo.filesystemType = @"0x1A"; // APFS for modern iOS
+    storageInfo.filesystemType = @"0x1A"; // APFS for modern iOS        
+    phoneInfo.storageInfo = storageInfo;
+    phoneInfo.deviceModel = deviceModel;
+    phoneInfo.iosVersion = iosVersion;
     
-    return storageInfo;
 }
 
-- (BOOL)isValidDeviceName:(NSString *)deviceName {
-    if (!deviceName) return NO;
-    
-    // Basic validation - ensure it's not empty and not too long
-    if (deviceName.length == 0 || deviceName.length > 50) {
-        return NO;
-    }
-    
-    // Ensure it doesn't contain any invalid characters
-    NSCharacterSet *invalidChars = [NSCharacterSet characterSetWithCharactersInString:@"<>:\"/\\|?*"];
-    if ([deviceName rangeOfCharacterFromSet:invalidChars].location != NSNotFound) {
-        return NO;
-    }
-    
-    return YES;
-}
-
-
-- (BOOL)isValidSerialNumber:(NSString *)serialNumber {
-    if (!serialNumber) return NO;
-    
-    // Check format using regex for various Apple device serial number formats
-    // Pattern matches common prefixes followed by 7-8 alphanumeric characters
-    NSString *pattern = @"^(C02|FVF|DLXJ|GG78|HC79)[0-9A-Z]{7,8}$";
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:pattern
-                                                                         options:0
-                                                                           error:nil];
-    NSUInteger matches = [regex numberOfMatchesInString:serialNumber
-                                               options:0
-                                                 range:NSMakeRange(0, serialNumber.length)];
-    
-    return matches == 1;
-}
-
-
-// IMEI validation: 15 digits, Luhn valid, US TAC
-- (BOOL)isValidIMEI:(NSString *)imei {
-    if (imei.length != 15) return NO;
-    if (![self isAllDigits:imei]) return NO;
-    // Check TAC
-    NSArray *usTACs = @[ @"353918", @"356938", @"359254", @"353915", @"353920", @"353929", @"353997", @"354994" ];
-    NSString *tac = [imei substringToIndex:6];
-    if (![usTACs containsObject:tac]) return NO;
-    // Luhn check
-    int sum = 0;
-    for (int i = 0; i < 14; i++) {
-        int digit = [imei characterAtIndex:i] - '0';
-        if (i % 2 == 1) digit *= 2;
-        if (digit > 9) digit -= 9;
-        sum += digit;
-    }
-    int checkDigit = (10 - (sum % 10)) % 10;
-    return (checkDigit == ([imei characterAtIndex:14] - '0'));
-}
-
-// MEID validation: 14 hex digits, US prefix
-- (BOOL)isValidMEID:(NSString *)meid {
-    if (meid.length != 14) return NO;
-    NSArray *usMEIDPrefixes = @[ @"A00000", @"A10000", @"990000" ];
-    NSString *prefix = [meid substringToIndex:6];
-    if (![usMEIDPrefixes containsObject:prefix]) return NO;
-    NSCharacterSet *hexSet = [NSCharacterSet characterSetWithCharactersInString:@"0123456789ABCDEFabcdef"];
-    for (NSUInteger i = 0; i < meid.length; i++) {
-        unichar c = [meid characterAtIndex:i];
-        if (![hexSet characterIsMember:c]) return NO;
-    }
-    return YES;
-}
-
-- (BOOL)isAllDigits:(NSString *)string {
-    NSCharacterSet *nonDigits = [[NSCharacterSet decimalDigitCharacterSet] invertedSet];
-    return ([string rangeOfCharacterFromSet:nonDigits].location == NSNotFound);
-}
 
 @end

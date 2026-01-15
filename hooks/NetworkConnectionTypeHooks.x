@@ -477,9 +477,7 @@ Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SC
 // Enable getifaddrs hook for local IP spoofing
 static int (*original_getifaddrs)(struct ifaddrs **);
 static int hooked_getifaddrs(struct ifaddrs **ifap) {
-    if (shouldShowAsWiFi()) {
-        return original_getifaddrs(ifap);
-    }
+    NSLog(@"[NetworkHook] hooked_getifaddrs");
     int result = original_getifaddrs(ifap);
     if (result == 0 && ifap && *ifap) {
         struct ifaddrs *ifa = *ifap;
@@ -487,6 +485,7 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
         NetworkConnectionType type = networkInfo.connectionType;
         NSString *spoofedIP = networkInfo.localIPAddress;
         NSString *spoofedIPv6 = networkInfo.localIPv6Address;
+
         if (!spoofedIPv6) {
             spoofedIPv6 = @"fe80::1234:abcd:5678:9abc";
         }
@@ -496,6 +495,12 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
         while (ifa) {
             if (ifa->ifa_addr) {
                 if (ifa->ifa_addr->sa_family == AF_INET) {
+                        struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
+
+                        char before[INET_ADDRSTRLEN];
+                        inet_ntop(AF_INET, &sin->sin_addr, before, sizeof(before));
+
+                        NSLog(@"[HOOK] BEFORE IPv4 %s -> %s", ifa->ifa_name, before);
                     if (type == NetworkConnectionTypeWiFi || (type == NetworkConnectionTypeAuto && shouldUseWiFiForAutoMode())) {
                         if (strcmp(ifa->ifa_name, "en0") == 0 && spoofedIP) {
                             struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
@@ -517,7 +522,22 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
                             sin->sin_addr.s_addr = 0;
                         }
                     }
+
+                    
+                    // 修改完后再打印
+                    char after[INET_ADDRSTRLEN];
+                    inet_ntop(AF_INET, &sin->sin_addr, after, sizeof(after));
+
+                    NSLog(@"[HOOK] AFTER  IPv4 %s -> %s", ifa->ifa_name, after);
                 } else if (ifa->ifa_addr->sa_family == AF_INET6) {
+                    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
+
+                    char before6[INET6_ADDRSTRLEN];
+                    inet_ntop(AF_INET6, &sin6->sin6_addr, before6, sizeof(before6));
+
+                    NSLog(@"[HOOK] BEFORE IPv6 %s -> %s (scope=%d)",
+                        ifa->ifa_name, before6, sin6->sin6_scope_id);
+           
                     if (type == NetworkConnectionTypeWiFi || (type == NetworkConnectionTypeAuto && shouldUseWiFiForAutoMode())) {
                         if (strcmp(ifa->ifa_name, "en0") == 0 && spoofedIPv6) {
                             struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
@@ -539,6 +559,11 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
                             memset(&sin6->sin6_addr, 0, sizeof(sin6->sin6_addr));
                         }
                     }
+                    char after6[INET6_ADDRSTRLEN];
+                    inet_ntop(AF_INET6, &sin6->sin6_addr, after6, sizeof(after6));
+
+                    NSLog(@"[HOOK] AFTER  IPv6 %s -> %s (scope=%d)",
+                    ifa->ifa_name, after6, sin6->sin6_scope_id);
                 }
             }
             ifa = ifa->ifa_next;
