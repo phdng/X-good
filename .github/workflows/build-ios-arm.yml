@@ -28,6 +28,21 @@ jobs:
           "$THEOS/bin/update-theos"
           echo "$THEOS/bin" >> "$GITHUB_PATH"
 
+      - name: Install AltList headers and libs
+        run: |
+          TMP_DIR="$(mktemp -d)"
+          curl -fsSL https://github.com/opa334/AltList/archive/refs/heads/master.zip -o "$TMP_DIR/AltList.zip"
+          unzip -q "$TMP_DIR/AltList.zip" -d "$TMP_DIR"
+          ALT_DIR="$TMP_DIR/AltList-master"
+          if [[ -d "$ALT_DIR/include/AltList" ]]; then
+            mkdir -p "$THEOS/include/AltList"
+            cp -R "$ALT_DIR/include/AltList/"* "$THEOS/include/AltList/"
+          fi
+          if [[ -d "$ALT_DIR/lib" ]]; then
+            mkdir -p "$THEOS/lib"
+            cp -R "$ALT_DIR/lib/"* "$THEOS/lib/"
+          fi
+
       - name: Select Xcode SDK
         run: |
           echo "SDKVERSION=$(xcrun --sdk iphoneos --show-sdk-version)" >> "$GITHUB_ENV"
