@@ -28,6 +28,10 @@ jobs:
           "$THEOS/bin/update-theos"
           echo "$THEOS/bin" >> "$GITHUB_PATH"
 
+      - name: Select Xcode SDK
+        run: |
+          echo "SDKVERSION=$(xcrun --sdk iphoneos --show-sdk-version)" >> "$GITHUB_ENV"
+
       - name: Ensure dm.pl is available
         run: |
           if ! command -v dm.pl >/dev/null; then
@@ -39,4 +43,4 @@ jobs:
 
       - name: Build
         run: |
-          make package
+          make package SDKVERSION="$SDKVERSION"
