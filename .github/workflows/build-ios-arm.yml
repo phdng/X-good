@@ -55,9 +55,13 @@ jobs:
             echo "AltList headers not found" >&2
             exit 1
           fi
-          if [[ -d "$ALT_DIR/lib" ]]; then
+          FRAMEWORK_PATH="$(find "$ALT_DIR" -name AltList.framework -print -quit)"
+          if [[ -n "$FRAMEWORK_PATH" ]]; then
             mkdir -p "$THEOS/lib"
-            cp -R "$ALT_DIR/lib/"* "$THEOS/lib/"
+            cp -R "$FRAMEWORK_PATH" "$THEOS/lib/"
+          else
+            echo "AltList.framework not found" >&2
+            exit 1
           fi
 
       - name: Ensure dm.pl is available
