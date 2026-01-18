@@ -34,6 +34,12 @@ jobs:
           git clone --depth=1 https://github.com/theos/sdks.git "$TMP_DIR/sdks"
           mkdir -p "$THEOS/sdks"
           cp -R "$TMP_DIR/sdks/"* "$THEOS/sdks/"
+          echo "THEOS_SDKS=$THEOS/sdks" >> "$GITHUB_ENV"
+          SDK_NAME="$(ls "$THEOS/sdks" | grep -E '^iPhoneOS[0-9]+\.[0-9]+\.sdk$' | sort -V | tail -n 1)"
+          SDK_VERSION="${SDK_NAME#iPhoneOS}"
+          SDK_VERSION="${SDK_VERSION%.sdk}"
+          echo "SDKVERSION=$SDK_VERSION" >> "$GITHUB_ENV"
+          echo "TARGET=iphone:clang:$SDK_VERSION:15.0" >> "$GITHUB_ENV"
 
       - name: Install AltList headers and libs
         run: |
@@ -53,11 +59,6 @@ jobs:
             mkdir -p "$THEOS/lib"
             cp -R "$ALT_DIR/lib/"* "$THEOS/lib/"
           fi
-
-      - name: Select Xcode SDK
-        run: |
-          echo "SDKVERSION=$(xcrun --sdk iphoneos --show-sdk-version)" >> "$GITHUB_ENV"
-          echo "TARGET=iphone:clang:$(xcrun --sdk iphoneos --show-sdk-version):15.0" >> "$GITHUB_ENV"
 
       - name: Ensure dm.pl is available
         run: |
