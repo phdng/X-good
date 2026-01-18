@@ -56,24 +56,13 @@ jobs:
             exit 1
           fi
           RELEASE_JSON="$TMP_DIR/altlist_release.json"
-          python3 - <<'PY' > "$RELEASE_JSON"
-import json
-import urllib.request
-with urllib.request.urlopen("https://api.github.com/repos/opa334/AltList/releases/latest") as resp:
-    print(resp.read().decode("utf-8"))
-PY
-          DEB_URL="$(python3 - <<'PY'
-import json
-with open("$RELEASE_JSON", "r") as f:
-    data = json.load(f)
-assets = data.get("assets", [])
-for asset in assets:
-    name = asset.get("name", "")
-    if name.endswith(".deb"):
-        print(asset.get("browser_download_url", ""))
-        break
-PY
-)"
+          python3 -c 'import urllib.request; print(urllib.request.urlopen("https://api.github.com/repos/opa334/AltList/releases/latest").read().decode("utf-8"))' > "$RELEASE_JSON"
+          DEB_URL="$(python3 -c 'import json; data=json.load(open("'"$RELEASE_JSON"'"));\
+for asset in data.get("assets", []):\
+    name=asset.get("name","");\
+    if name.endswith(".deb"):\
+        print(asset.get("browser_download_url",""));\
+        break')"
           if [[ -z "$DEB_URL" ]]; then
             echo "AltList release .deb not found" >&2
             exit 1
