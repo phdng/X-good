@@ -41,7 +41,7 @@ jobs:
           echo "SDKVERSION=$SDK_VERSION" >> "$GITHUB_ENV"
           echo "TARGET=iphone:clang:$SDK_VERSION:15.0" >> "$GITHUB_ENV"
 
-      - name: Install AltList headers and libs
+      - name: Install AltList headers and framework
         run: |
           TMP_DIR="$(mktemp -d)"
           git clone --depth=1 https://github.com/opa334/AltList.git "$TMP_DIR/AltList"
@@ -56,6 +56,10 @@ jobs:
             exit 1
           fi
           FRAMEWORK_PATH="$(find "$ALT_DIR" -name AltList.framework -print -quit)"
+          if [[ -z "$FRAMEWORK_PATH" ]]; then
+            make -C "$ALT_DIR" framework THEOS="$THEOS"
+            FRAMEWORK_PATH="$(find "$ALT_DIR" -name AltList.framework -print -quit)"
+          fi
           if [[ -n "$FRAMEWORK_PATH" ]]; then
             mkdir -p "$THEOS/lib"
             cp -R "$FRAMEWORK_PATH" "$THEOS/lib/"
