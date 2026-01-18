@@ -27,14 +27,16 @@ jobs:
 
       - name: Ensure dm.pl available
         run: |
-          DMPL="$(brew --prefix dpkg)/libexec/dpkg/dm.pl"
-          if [[ -f "$DMPL" ]]; then
-            sudo ln -sf "$DMPL" /usr/local/bin/dm.pl
+          DPKG_PREFIX="$(brew --prefix dpkg)"
+          DMPL="$(find "$DPKG_PREFIX" -name dm.pl -print -quit)"
+          if [[ -n "$DMPL" && -f "$DMPL" ]]; then
+            mkdir -p "$HOME/.local/bin"
+            ln -sf "$DMPL" "$HOME/.local/bin/dm.pl"
           else
-            echo "dm.pl not found at $DMPL" >&2
+            echo "dm.pl not found under $DPKG_PREFIX" >&2
             exit 1
           fi
-          echo "/usr/local/bin" >> "$GITHUB_PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build
         run: |
