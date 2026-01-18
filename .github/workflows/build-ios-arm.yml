@@ -1,0 +1,30 @@
+name: Build iphoneos-arm
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: macos-14
+    env:
+      THEOS: ${{ github.workspace }}/theos
+      ARCHS: arm64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Theos
+        run: |
+          git clone --depth=1 https://github.com/theos/theos.git "$THEOS"
+          echo "$THEOS/bin" >> "$GITHUB_PATH"
+
+      - name: Install dependencies
+        run: |
+          brew update
+          brew install ldid dpkg
+
+      - name: Build
+        run: |
+          make package
