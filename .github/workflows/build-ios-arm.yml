@@ -24,7 +24,17 @@ jobs:
         run: |
           brew update
           brew install ldid dpkg
-          echo "$(brew --prefix dpkg)/libexec/dpkg" >> "$GITHUB_PATH"
+
+      - name: Ensure dm.pl available
+        run: |
+          DMPL="$(brew --prefix dpkg)/libexec/dpkg/dm.pl"
+          if [[ -f "$DMPL" ]]; then
+            sudo ln -sf "$DMPL" /usr/local/bin/dm.pl
+          else
+            echo "dm.pl not found at $DMPL" >&2
+            exit 1
+          fi
+          echo "/usr/local/bin" >> "$GITHUB_PATH"
 
       - name: Build
         run: |
