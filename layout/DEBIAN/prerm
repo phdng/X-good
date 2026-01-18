@@ -5,8 +5,11 @@
 if [ -d "/var/jb" ]; then
     JBPREFIX="/var/jb"
     launchctl bootout system /var/jb/Library/LaunchDaemons/wangmc.projectx.plist
+    cp "/var/jb/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist" "/var/jb/Library/ProjectXTweak.plist"
+    # /var/jb/Library/MobileSubstrate/DynamicLibraries
 else
     JBPREFIX=""
     launchctl bootout system /Library/LaunchDaemons/wangmc.projectx.plist
+    cp "/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist" "/Library/ProjectXTweak.plist"
 fi
 exit 0 

@@ -17,7 +17,6 @@ NXGetLocalArchInfo 获取CPU架构
 
 
 启动时间和开机时间逻辑需要修改
-loadProfilesFromDisk刷新页面
 
 
 ProfileManager初始化读取所以备份到缓存 修改删除等都改缓存然后调用save方法将新缓存写入本地

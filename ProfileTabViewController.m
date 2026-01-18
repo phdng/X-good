@@ -90,15 +90,22 @@
                             NULL,
                             CFNotificationSuspensionBehaviorDeliverImmediately);
 }
-static void darwinNotificationCallback(CFNotificationCenterRef center,
-                                       void *observer,
-                                       CFStringRef name,
-                                       const void *object,
-                                       CFDictionaryRef userInfo) {
-    // 这里是 C 函数，需要处理桥接
-    ProfileTabViewController *selfInstance = (__bridge ProfileTabViewController *)observer;
-    [selfInstance loadProfilesFromDisk];
+static void darwinNotificationCallback(
+    CFNotificationCenterRef center,
+    void *observer,
+    CFStringRef name,
+    const void *object,
+    CFDictionaryRef userInfo
+) {
+    ProfileTabViewController *selfInstance =
+        (__bridge ProfileTabViewController *)observer;
+
+    // 立刻切回主线程
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [selfInstance loadProfilesFromDisk];
+    });
 }
+
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     // Load profiles directly from disk
@@ -1056,7 +1063,8 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
                 [self dismissViewControllerAnimated:YES completion:nil];
             }]];
             [self presentViewController:successAlert animated:YES completion:nil];
-       
+            [self loadProfilesFromDisk];
+
         });
     }];
 }

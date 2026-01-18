@@ -11,20 +11,13 @@ if [ -d /var/jb ]; then
     JBPREFIX="/var/jb"
     echo "✅ Rootless jailbreak detected, using prefix: $JBPREFIX"
     launchctl load /var/jb/Library/LaunchDaemons/wangmc.projectx.plist 
+    mv "/var/jb/Library/ProjectXTweak.plist" "/var/jb/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist"
 else
     JBPREFIX=""
     echo "✅ Traditional jailbreak detected, using no prefix"
     launchctl load /Library/LaunchDaemons/wangmc.projectx.plist 
+    mv "/Library/ProjectXTweak.plist" "/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist" 
 fi
-
-# Create required directories with proper permissions
-echo "📂 Creating required directories..."
-
-# Create WeaponX directory
-mkdir -p "$JBPREFIX/var/mobile/Library/WeaponX"
-chmod 755 "$JBPREFIX/var/mobile/Library/WeaponX"
-chown mobile:mobile "$JBPREFIX/var/mobile/Library/WeaponX"
-
 
 echo "✅ WeaponX installation completed!"
 exit 0 

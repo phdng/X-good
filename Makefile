@@ -53,12 +53,14 @@ ProjectX_EXTRA_FRAMEWORKS = AltList
 ProjectX_INSTALL_PATH = /Applications
 
 ProjectXDaemon_FILES = $(wildcard daemon/*.m) $(wildcard model/*.m) ./common/ProfileManager.m ./common/SettingManager.m
-ProjectXDaemon_CFLAGS = -fobjc-arc -I./model -I./common
+ProjectXDaemon_CFLAGS = -fobjc-arc -I./model -I./common -I./headers
 ProjectXDaemon_FRAMEWORKS = Foundation IOKit
 ProjectXDaemon_INSTALL_PATH = /usr/local/bin
 ProjectXDaemon_CODESIGN_FLAGS = -Sent.plist
 ProjectXDaemon_LDFLAGS = -framework IOKit
-ProjectXDaemon_EXTRA_FRAMEWORKS = GCDWebServers
+# ProjectXDaemon_EXTRA_FRAMEWORKS = GCDWebServers
+ProjectXDaemon_LDFLAGS += -L./libs
+ProjectXDaemon_LDFLAGS += -lGCDWebServers
 
 include $(THEOS_MAKE_PATH)/application.mk
 include $(THEOS_MAKE_PATH)/tweak.mk

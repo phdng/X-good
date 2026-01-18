@@ -71,7 +71,7 @@
 -(void) switchBackup:(NSString *) id{
     Profile *profile = [_profileManager getProfileById:id];
     // 不存在该备份直接返回
-    if(!profile) return;
+    if(!profile || [[ProfileManager sharedManager]isCurrent:profile]) return;
     // 加载所有被选中应用
     NSMutableSet * loadApps = [[AppScopeManager sharedManager] loadPreferences];
     // 获取当前生效备份
