@@ -24,6 +24,7 @@ jobs:
         run: |
           brew update
           brew install ldid dpkg
+          echo "$(brew --prefix dpkg)/libexec/dpkg" >> "$GITHUB_PATH"
 
       - name: Build
         run: |
