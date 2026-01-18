@@ -15,28 +15,27 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Theos
-        run: |
-          git clone --depth=1 https://github.com/theos/theos.git "$THEOS"
-          echo "$THEOS/bin" >> "$GITHUB_PATH"
-
-      - name: Install dependencies
+      - name: Install build dependencies
         run: |
           brew update
           brew install ldid dpkg
+          echo "DPKG_BIN=$(brew --prefix dpkg)/libexec/dpkg" >> "$GITHUB_ENV"
+          echo "$(brew --prefix dpkg)/libexec/dpkg" >> "$GITHUB_PATH"
 
-      - name: Ensure dm.pl available
+      - name: Set up Theos
         run: |
-          DPKG_PREFIX="$(brew --prefix dpkg)"
-          DMPL="$(find "$DPKG_PREFIX" -name dm.pl -print -quit)"
-          if [[ -n "$DMPL" && -f "$DMPL" ]]; then
+          git clone --depth=1 https://github.com/theos/theos.git "$THEOS"
+          "$THEOS/bin/update-theos"
+          echo "$THEOS/bin" >> "$GITHUB_PATH"
+
+      - name: Ensure dm.pl is available
+        run: |
+          if ! command -v dm.pl >/dev/null; then
             mkdir -p "$HOME/.local/bin"
-            ln -sf "$DMPL" "$HOME/.local/bin/dm.pl"
-          else
-            echo "dm.pl not found under $DPKG_PREFIX" >&2
-            exit 1
+            curl -fsSL https://raw.githubusercontent.com/theos/theos/master/bin/dm.pl -o "$HOME/.local/bin/dm.pl"
+            chmod +x "$HOME/.local/bin/dm.pl"
+            echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           fi
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Build
         run: |
