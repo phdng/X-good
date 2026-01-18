@@ -28,6 +28,13 @@ jobs:
           "$THEOS/bin/update-theos"
           echo "$THEOS/bin" >> "$GITHUB_PATH"
 
+      - name: Install Theos SDKs
+        run: |
+          TMP_DIR="$(mktemp -d)"
+          git clone --depth=1 https://github.com/theos/sdks.git "$TMP_DIR/sdks"
+          mkdir -p "$THEOS/sdks"
+          cp -R "$TMP_DIR/sdks/"* "$THEOS/sdks/"
+
       - name: Install AltList headers and libs
         run: |
           TMP_DIR="$(mktemp -d)"
