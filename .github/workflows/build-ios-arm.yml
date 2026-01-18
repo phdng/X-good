@@ -55,16 +55,41 @@ jobs:
             echo "AltList headers not found" >&2
             exit 1
           fi
-          FRAMEWORK_PATH="$(find "$ALT_DIR" -name AltList.framework -print -quit)"
-          if [[ -z "$FRAMEWORK_PATH" ]]; then
-            make -C "$ALT_DIR" framework THEOS="$THEOS"
-            FRAMEWORK_PATH="$(find "$ALT_DIR" -name AltList.framework -print -quit)"
+          RELEASE_JSON="$TMP_DIR/altlist_release.json"
+          python3 - <<'PY' > "$RELEASE_JSON"
+import json
+import urllib.request
+with urllib.request.urlopen("https://api.github.com/repos/opa334/AltList/releases/latest") as resp:
+    print(resp.read().decode("utf-8"))
+PY
+          DEB_URL="$(python3 - <<'PY'
+import json
+with open("$RELEASE_JSON", "r") as f:
+    data = json.load(f)
+assets = data.get("assets", [])
+for asset in assets:
+    name = asset.get("name", "")
+    if name.endswith(".deb"):
+        print(asset.get("browser_download_url", ""))
+        break
+PY
+)"
+          if [[ -z "$DEB_URL" ]]; then
+            echo "AltList release .deb not found" >&2
+            exit 1
           fi
+          curl -fsSL "$DEB_URL" -o "$TMP_DIR/AltList.deb"
+          dpkg-deb -x "$TMP_DIR/AltList.deb" "$TMP_DIR/altlist_extract"
+          FRAMEWORK_PATH="$(find "$TMP_DIR/altlist_extract" -name AltList.framework -print -quit)"
           if [[ -n "$FRAMEWORK_PATH" ]]; then
             mkdir -p "$THEOS/lib"
             cp -R "$FRAMEWORK_PATH" "$THEOS/lib/"
+            if [[ -d "$FRAMEWORK_PATH/Headers" ]]; then
+              mkdir -p "$THEOS/include/AltList"
+              cp -R "$FRAMEWORK_PATH/Headers/"* "$THEOS/include/AltList/"
+            fi
           else
-            echo "AltList.framework not found" >&2
+            echo "AltList.framework not found in release .deb" >&2
             exit 1
           fi
 
