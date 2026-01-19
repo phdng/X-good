@@ -4,6 +4,7 @@
 #import <arpa/inet.h>
 #import "DBManager.h"
 #import "SettingManager.h"
+#import <UIKit/UIKit.h>
 
 static NSString *ProjectXSysctlString(const char *name) {
     size_t size = 0;
@@ -904,8 +905,6 @@ NSString *NormalizeVersion(NSString *version)
         [NSMutableString stringWithString:@"SELECT * FROM KMOS"];
 
     NSMutableArray *conditions = [NSMutableArray array];
-    NSMutableArray *params = [NSMutableArray array];
-
     if (minVersion.length > 0) {
         [conditions addObject:[NSString stringWithFormat:@"sortVersion >= '%@'",NormalizeVersion(minVersion)]];
     }
@@ -951,7 +950,7 @@ NSString *NormalizeVersion(NSString *version)
         phoneInfo.iosVersion = fallbackVersion;
         phoneInfo.deviceModel = fallbackModel;
         phoneInfo.storageInfo = fallbackStorage;
-        return;
+        return fallbackVersion;
     }
     // @"kernel_version": @"Darwin Kernel Version ${KMOS.kernelversion}: ${KMOS.kernelversiontime}/RELEASE_ARM64_${cpu.mode}"
     
@@ -1045,7 +1044,8 @@ NSString *NormalizeVersion(NSString *version)
     phoneInfo.storageInfo = storageInfo;
     phoneInfo.deviceModel = deviceModel;
     phoneInfo.iosVersion = iosVersion;
-    
+
+    return iosVersion;
 }
 
 
