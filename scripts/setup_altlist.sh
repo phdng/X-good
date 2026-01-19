@@ -47,7 +47,7 @@ elif [[ -n "$PROJECT_PATH" ]]; then
 elif [[ -f "$ALT_DIR/Makefile" ]]; then
   if ! make -C "$ALT_DIR" framework; then
     echo "AltList Makefile has no 'framework' target; falling back to default build." >&2
-    make -C "$ALT_DIR"
+    make -C "$ALT_DIR" SUBPROJECTS=
   fi
 else
   echo "AltList Xcode project/workspace not found; cannot build framework." >&2

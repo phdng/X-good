@@ -4,7 +4,7 @@ AltList does not provide a prebuilt framework download, so the setup script buil
 the framework from source and installs the outputs into Theos. The script will use
 `xcodebuild` when an Xcode project/workspace is present, or fall back to
 `make framework` when the repo ships a Theos Makefile (falling back to a
-default `make` if that target is unavailable).
+default `make` with `SUBPROJECTS=` if that target is unavailable).
 
 ## Steps
 
