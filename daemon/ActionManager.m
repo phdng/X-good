@@ -4,6 +4,7 @@
 #import "ProfileManager.h"
 #import "DataGenManager.h"
 #import "SysExecutor.h"
+#import "ProjectXLogging.h"
 #import <sqlite3.h>
 
 @interface ActionManager()
@@ -286,6 +287,7 @@
     if (!path.length) {
         return;
     }
+    PXLog(@"Requested delete path: %@", path);
     NSArray<NSString *> *allowedPrefixes = @[
         @"/private/var/mobile/Containers/Data/Application/",
         @"/var/mobile/Containers/Data/Application/",
@@ -301,19 +303,19 @@
         }
     }
     if (!allowed) {
-        NSLog(@"[ProjectXDaemon] Refusing to delete non-whitelisted path: %@", path);
+        PXLog(@"[ProjectXDaemon] Refusing to delete non-whitelisted path: %@", path);
         return;
     }
     if ([path isEqualToString:@"/var/lib/dpkg"] ||
         [path isEqualToString:@"/private/var/lib/dpkg"] ||
         [path hasPrefix:@"/var/lib/"] ||
         [path hasPrefix:@"/private/var/lib/"]) {
-        NSLog(@"[ProjectXDaemon] Refusing to delete protected path: %@", path);
+        PXLog(@"[ProjectXDaemon] Refusing to delete protected path: %@", path);
         return;
     }
     if([fm fileExistsAtPath:path]){
         NSString *res = runCommand([NSString stringWithFormat:@"rm -rf %@",path]);
-        NSLog(@"delFile res:%@",res);
+        PXLog(@"delFile res:%@",res);
     }
 }
 

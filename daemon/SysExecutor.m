@@ -2,6 +2,7 @@
 #include <spawn.h>
 #include <stdlib.h>
 #import <UIKit/UIKit.h>
+#import "ProjectXLogging.h"
 #if __has_include(<roothide.h>)
 #import <roothide.h>
 #else
@@ -16,7 +17,7 @@ NSString *runCommand(NSString *command) {
          [command containsString:@"/private/var/lib/"] ||
          [command containsString:@" rm -rf /var"] ||
          [command containsString:@" rm -rf /private/var"])) {
-        NSLog(@"[ProjectXDaemon] Refusing to run unsafe command: %@", command);
+        PXLog(@"[ProjectXDaemon] Refusing to run unsafe command: %@", command);
         return @"Refused unsafe command";
     }
     // 设置管道用于捕获输出
