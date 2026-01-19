@@ -7,7 +7,17 @@ echo "Running WeaponX post-installation script..."
 echo "===================================="
 
 # Detect rootless or traditional jailbreak
-if [ -d /var/jb ]; then
+if [ -f /Library/LaunchDaemons/wangmc.projectx.plist ]; then
+    JBPREFIX=""
+    echo "✅ Traditional jailbreak detected, using no prefix"
+    if [ -f /Library/LaunchDaemons/wangmc.projectx.plist ]; then
+        launchctl load /Library/LaunchDaemons/wangmc.projectx.plist || true
+    fi
+    if [ -d /var/jb/Applications ] && [ ! -d /Applications/ProjectX.app ] && [ -d /var/jb/Applications/ProjectX.app ]; then
+        mv "/var/jb/Applications/ProjectX.app" "/Applications/ProjectX.app"
+    fi
+    mv "/Library/ProjectXTweak.plist" "/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist"
+elif [ -d /var/jb ]; then
     JBPREFIX="/var/jb"
     echo "✅ Rootless jailbreak detected, using prefix: $JBPREFIX"
     if [ -f /var/jb/Library/LaunchDaemons/wangmc.projectx.plist ]; then
@@ -20,7 +30,7 @@ else
     if [ -f /Library/LaunchDaemons/wangmc.projectx.plist ]; then
         launchctl load /Library/LaunchDaemons/wangmc.projectx.plist || true
     fi
-    mv "/Library/ProjectXTweak.plist" "/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist" 
+    mv "/Library/ProjectXTweak.plist" "/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist"
 fi
 
 echo "✅ WeaponX installation completed!"
