@@ -45,7 +45,10 @@ elif [[ -n "$PROJECT_PATH" ]]; then
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGNING_IDENTITY=""
 elif [[ -f "$ALT_DIR/Makefile" ]]; then
-  make -C "$ALT_DIR" framework
+  if ! make -C "$ALT_DIR" framework; then
+    echo "AltList Makefile has no 'framework' target; falling back to default build." >&2
+    make -C "$ALT_DIR"
+  fi
 else
   echo "AltList Xcode project/workspace not found; cannot build framework." >&2
   echo "Searched for *.xcworkspace and *.xcodeproj within $ALT_DIR." >&2
