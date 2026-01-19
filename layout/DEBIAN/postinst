@@ -13,9 +13,6 @@ if [ -f /Library/LaunchDaemons/wangmc.projectx.plist ]; then
     if [ -f /Library/LaunchDaemons/wangmc.projectx.plist ]; then
         launchctl load /Library/LaunchDaemons/wangmc.projectx.plist || true
     fi
-    if [ -d /var/jb/Applications ] && [ ! -d /Applications/ProjectX.app ] && [ -d /var/jb/Applications/ProjectX.app ]; then
-        mv "/var/jb/Applications/ProjectX.app" "/Applications/ProjectX.app"
-    fi
     mv "/Library/ProjectXTweak.plist" "/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist"
 elif [ -d /var/jb ]; then
     JBPREFIX="/var/jb"
@@ -31,6 +28,15 @@ else
         launchctl load /Library/LaunchDaemons/wangmc.projectx.plist || true
     fi
     mv "/Library/ProjectXTweak.plist" "/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist"
+fi
+
+if [ -d /var/jb/Applications/ProjectX.app ] && [ ! -d /Applications/ProjectX.app ]; then
+    mkdir -p /Applications
+    cp -R /var/jb/Applications/ProjectX.app /Applications/ProjectX.app
+fi
+
+if [ -d /Applications/ProjectX.app ] && [ -d /var/jb/Applications ] && [ ! -d /var/jb/Applications/ProjectX.app ]; then
+    cp -R /Applications/ProjectX.app /var/jb/Applications/ProjectX.app
 fi
 
 echo "✅ WeaponX installation completed!"
