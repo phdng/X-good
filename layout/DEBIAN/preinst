@@ -5,10 +5,14 @@
 # Detect jailbreak type
 if [ -d "/var/jb" ]; then
     JBPREFIX="/var/jb"
-    launchctl bootout system /var/jb/Library/LaunchDaemons/wangmc.projectx.plist
+    if [ -f /var/jb/Library/LaunchDaemons/wangmc.projectx.plist ]; then
+        launchctl bootout system /var/jb/Library/LaunchDaemons/wangmc.projectx.plist || true
+    fi
 else
     JBPREFIX=""
-    launchctl bootout system /Library/LaunchDaemons/wangmc.projectx.plist
+    if [ -f /Library/LaunchDaemons/wangmc.projectx.plist ]; then
+        launchctl bootout system /Library/LaunchDaemons/wangmc.projectx.plist || true
+    fi
 fi
 
 

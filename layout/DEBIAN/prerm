@@ -4,12 +4,16 @@
 # Do nothing that might interrupt dpkg
 if [ -d "/var/jb" ]; then
     JBPREFIX="/var/jb"
-    launchctl bootout system /var/jb/Library/LaunchDaemons/wangmc.projectx.plist
+    if [ -f /var/jb/Library/LaunchDaemons/wangmc.projectx.plist ]; then
+        launchctl bootout system /var/jb/Library/LaunchDaemons/wangmc.projectx.plist || true
+    fi
     cp "/var/jb/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist" "/var/jb/Library/ProjectXTweak.plist"
     # /var/jb/Library/MobileSubstrate/DynamicLibraries
 else
     JBPREFIX=""
-    launchctl bootout system /Library/LaunchDaemons/wangmc.projectx.plist
+    if [ -f /Library/LaunchDaemons/wangmc.projectx.plist ]; then
+        launchctl bootout system /Library/LaunchDaemons/wangmc.projectx.plist || true
+    fi
     cp "/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist" "/Library/ProjectXTweak.plist"
 fi
 exit 0 
