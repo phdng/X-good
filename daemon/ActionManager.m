@@ -30,6 +30,10 @@
     // // 加载所有被选中应用
     NSMutableSet * loadApps = [[AppScopeManager sharedManager] loadPreferences];
     PXLog(@"[newPhone] Scoped apps: %@", loadApps);
+    if (!loadApps || loadApps.count == 0) {
+        PXLog(@"[newPhone] No scoped apps; skipping data operations to avoid unintended deletes");
+        return;
+    }
     // 获取当前生效备份
     NSString * activeBackupPath = [_profileManager getActiveDataPath];
     if(!activeBackupPath){
@@ -164,6 +168,10 @@
     NSString *appDataPath = [self getAppDataPath:bundleId];
     NSString *savePath = [path stringByAppendingPathComponent:bundleId];
     PXLog(@"[backupFile] bundle=%@ appData=%@ savePath=%@", bundleId, appDataPath, savePath);
+    if (appDataPath.length == 0) {
+        PXLog(@"[backupFile] Missing appDataPath for %@; skipping backup to avoid relative deletes", bundleId);
+        return;
+    }
 
     NSFileManager *fm = [NSFileManager defaultManager];
     if(![fm fileExistsAtPath:savePath]){
@@ -231,6 +239,10 @@
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *savePath = [backupPath stringByAppendingPathComponent:bundleId];
     PXLog(@"[restoreBackup] bundle=%@ appData=%@ savePath=%@", bundleId, appDataPath, savePath);
+    if (appDataPath.length == 0) {
+        PXLog(@"[restoreBackup] Missing appDataPath for %@; skipping restore to avoid relative deletes", bundleId);
+        return;
+    }
 
     NSArray *folders = @[@"Documents", @"tmp", @"Library", @"SystemData"];
 
