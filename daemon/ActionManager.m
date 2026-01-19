@@ -56,8 +56,12 @@
     // 清理keychain内容
     [self clearKeyChain];
     // 保存旧参数
-    PhoneInfo * phoneInfo = [PhoneInfo loadFromPrefs];
-    [PhoneInfo saveDictionaryToFile:[phoneInfo toDictionary] toFile:[activeBackupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
+    PhoneInfo *phoneInfo = [PhoneInfo loadFromPrefs];
+    if (phoneInfo) {
+        [PhoneInfo saveDictionaryToFile:[phoneInfo toDictionary] toFile:[activeBackupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
+    } else {
+        NSLog(@"[ProjectXDaemon] No existing PhoneInfo to backup.");
+    }
     // 生成新参数
     PhoneInfo * newPhoneInfo = [[DataGenManager sharedManager] generatePhoneInfo];
     [PhoneInfo saveDictionaryToFile:[newPhoneInfo toDictionary] toFile:[backupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
