@@ -603,7 +603,11 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
         return phoneInfo.serialNumber ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"iosversion"]) {
-        return [phoneInfo.iosVersion versionAndBuild] ?: @"Not Set";
+        NSString *version = [phoneInfo.iosVersion versionAndBuild];
+        if (version.length > 0) {
+            return version;
+        }
+        return [[UIDevice currentDevice] systemVersion] ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"wifi"]) {
         return [phoneInfo.wifiInfo showInfo] ?: @"Not Set";
@@ -648,7 +652,11 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
         return phoneInfo.appContainerUUID ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"devicemodel"]) {
-        return phoneInfo.deviceModel.showInfo ?: @"Not Set";
+        NSString *modelName = phoneInfo.deviceModel.showInfo;
+        if (modelName.length > 0) {
+            return modelName;
+        }
+        return [[UIDevice currentDevice] model] ?: @"Not Set";
     }
     
     // 如果没有匹配的类型，返回 nil 或默认值

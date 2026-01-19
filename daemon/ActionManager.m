@@ -286,6 +286,24 @@
     if (!path.length) {
         return;
     }
+    NSArray<NSString *> *allowedPrefixes = @[
+        @"/private/var/mobile/Containers/Data/Application/",
+        @"/var/mobile/Containers/Data/Application/",
+        @"/private/var/mobile/Media/ProjectX/",
+        @"/var/mobile/Library/Safari",
+        @"/private/var/mobile/Library/Preferences/"
+    ];
+    BOOL allowed = NO;
+    for (NSString *prefix in allowedPrefixes) {
+        if ([path hasPrefix:prefix]) {
+            allowed = YES;
+            break;
+        }
+    }
+    if (!allowed) {
+        NSLog(@"[ProjectXDaemon] Refusing to delete non-whitelisted path: %@", path);
+        return;
+    }
     if ([path isEqualToString:@"/var/lib/dpkg"] ||
         [path isEqualToString:@"/private/var/lib/dpkg"] ||
         [path hasPrefix:@"/var/lib/"] ||

@@ -5,6 +5,22 @@
 #import "DBManager.h"
 #import "SettingManager.h"
 
+static NSString *ProjectXSysctlString(const char *name) {
+    size_t size = 0;
+    sysctlbyname(name, NULL, &size, NULL, 0);
+    if (size == 0) {
+        return @"";
+    }
+    char *value = malloc(size);
+    if (!value) {
+        return @"";
+    }
+    sysctlbyname(name, value, &size, NULL, 0);
+    NSString *result = [NSString stringWithUTF8String:value] ?: @"";
+    free(value);
+    return result;
+}
+
 @interface DataGenManager()
 @property (nonatomic, strong) NSError *error;
 @property (nonatomic, strong) NSMutableArray <DeviceModel *> *deviceModels;
@@ -907,6 +923,36 @@ NSString *NormalizeVersion(NSString *version)
     NSLog(@"[DEBUG] query verion %@",queryVersionSql);
     // 先随机一个版本号 再根据版本号找可选的设备 TODO 根据sortVersion筛选
     NSDictionary * versionInfo = [[DBManager sharedManager] queryOne:queryVersionSql];
+    if (!versionInfo) {
+        IosVersion *fallbackVersion = [[IosVersion alloc] init];
+        fallbackVersion.version = [[UIDevice currentDevice] systemVersion] ?: @"";
+        fallbackVersion.build = @"unknown";
+        fallbackVersion.kernelVersion = ProjectXSysctlString("kern.version");
+        fallbackVersion.darwin = ProjectXSysctlString("kern.osrelease");
+
+        DeviceModel *fallbackModel = [[DeviceModel alloc] init];
+        fallbackModel.modelName = ProjectXSysctlString("hw.machine");
+        fallbackModel.name = [[UIDevice currentDevice] model] ?: @"";
+        fallbackModel.cpuArchitecture = @"arm64";
+        fallbackModel.gpuFamily = @"Apple GPU";
+        fallbackModel.webGLInfo = [[WebGLInfo alloc] init];
+        fallbackModel.webGLInfo.unmaskedVendor = @"Apple Inc.";
+        fallbackModel.webGLInfo.webglVendor = @"Apple";
+        fallbackModel.webGLInfo.webglRenderer = @"Apple GPU";
+        fallbackModel.webGLInfo.webglVersion = @"WebGL 2.0";
+        fallbackModel.webGLInfo.maxTextureSize = @8192;
+        fallbackModel.webGLInfo.maxRenderBufferSize = @8192;
+
+        StorageInfo *fallbackStorage = [[StorageInfo alloc] init];
+        fallbackStorage.totalStorage = @"128";
+        fallbackStorage.freeStorage = @"32.0";
+        fallbackStorage.filesystemType = @"0x1A";
+
+        phoneInfo.iosVersion = fallbackVersion;
+        phoneInfo.deviceModel = fallbackModel;
+        phoneInfo.storageInfo = fallbackStorage;
+        return;
+    }
     // @"kernel_version": @"Darwin Kernel Version ${KMOS.kernelversion}: ${KMOS.kernelversiontime}/RELEASE_ARM64_${cpu.mode}"
     
     IosVersion * iosVersion = [[IosVersion alloc]init];
@@ -921,26 +967,30 @@ NSString *NormalizeVersion(NSString *version)
 
     NSDictionary * device = [[DBManager sharedManager] queryOne:sql];
 
-    iosVersion.kernelVersion = [NSString stringWithFormat:@"Darwin Kernel Version %@: %@/RELEASE_ARM64_%@",versionInfo[@"kernelversion"],versionInfo[@"kernelversiontime"],device[@"mode"]];
-    iosVersion.darwin = versionInfo[@"kernelversion"];
+    if (device) {
+        iosVersion.kernelVersion = [NSString stringWithFormat:@"Darwin Kernel Version %@: %@/RELEASE_ARM64_%@",versionInfo[@"kernelversion"],versionInfo[@"kernelversiontime"],device[@"mode"]];
+    } else {
+        iosVersion.kernelVersion = ProjectXSysctlString("kern.version");
+    }
+    iosVersion.darwin = versionInfo[@"kernelversion"] ?: ProjectXSysctlString("kern.osrelease");
     DeviceModel *deviceModel = [[DeviceModel alloc] init];
     
     
-    deviceModel.modelName = device[@"identifier"];
-    deviceModel.name = device[@"generation"];
-    deviceModel.resolution = device[@"sc_pixel_size"];
-    deviceModel.viewportResolution = device[@"sc_viewport"];
-    deviceModel.devicePixelRatio = @([device[@"sc_pixel_ratio"] doubleValue]);
-    deviceModel.screenDensity = device[@"sc_pixel"];
-    deviceModel.cpuArchitecture = device[@"cpuArchitecture"];
-    deviceModel.hwModel = device[@"internal_name"];
+    deviceModel.modelName = device[@"identifier"] ?: ProjectXSysctlString("hw.machine");
+    deviceModel.name = device[@"generation"] ?: [[UIDevice currentDevice] model];
+    deviceModel.resolution = device[@"sc_pixel_size"] ?: @"";
+    deviceModel.viewportResolution = device[@"sc_viewport"] ?: @"";
+    deviceModel.devicePixelRatio = device[@"sc_pixel_ratio"] ? @([device[@"sc_pixel_ratio"] doubleValue]) : @1;
+    deviceModel.screenDensity = device[@"sc_pixel"] ?: @"";
+    deviceModel.cpuArchitecture = device[@"cpuArchitecture"] ?: @"arm64";
+    deviceModel.hwModel = device[@"internal_name"] ?: ProjectXSysctlString("hw.model");
     // Additional specs from addSpecsForDevice
-    deviceModel.deviceMemory = device[@"RAM"] ;
-    deviceModel.cpuCoreCount = device[@"count"];
-    deviceModel.gpuFamily = [NSString stringWithFormat:@"Apple %@ GPU",device[@"CPU"]];
+    deviceModel.deviceMemory = device[@"RAM"] ?: @0;
+    deviceModel.cpuCoreCount = device[@"count"] ?: @0;
+    deviceModel.gpuFamily = device[@"CPU"] ? [NSString stringWithFormat:@"Apple %@ GPU",device[@"CPU"]] : @"Apple GPU";
     WebGLInfo *webGL = [[WebGLInfo alloc] init];
     webGL.unmaskedVendor = @"Apple Inc.";
-    webGL.unmaskedRenderer = [NSString stringWithFormat:@"Apple %@ GPU",device[@"CPU"]];
+    webGL.unmaskedRenderer = device[@"CPU"] ? [NSString stringWithFormat:@"Apple %@ GPU",device[@"CPU"]] : @"Apple GPU";
     webGL.webglVendor = @"Apple";
     webGL.webglRenderer = @"Apple GPU";
     webGL.webglVersion = @"WebGL 2.0";
@@ -957,14 +1007,17 @@ NSString *NormalizeVersion(NSString *version)
     NSString *value = device[@"storage"]; // @"64+256+512"
 
     // 1. 以 "+" 号分隔字符串
-    NSArray *components = [value componentsSeparatedByString:@"+"];
+    NSArray *components = value.length > 0 ? [value componentsSeparatedByString:@"+"] : @[];
 
 
     // 3. 生成随机索引
-    NSInteger randomIndex = arc4random_uniform((uint32_t)components.count);
+    NSString *capacity = @"128";
+    if (components.count > 0) {
+        NSInteger randomIndex = arc4random_uniform((uint32_t)components.count);
+        capacity = components[randomIndex];
+    }
     
     // 4. 获取随机值并转换为整数（如果需要数字类型）
-    NSString *capacity = components[randomIndex];
     double totalGB = [capacity doubleValue];
     double freePercent;
     

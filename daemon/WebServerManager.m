@@ -11,11 +11,11 @@
 #import "ProfileManager.h"
 #import "DBManager.h"
 
-NSDictionary* getJsonBody(GCDWebServerDataRequest *request,NSError *jsonError)
+NSDictionary* getJsonBody(GCDWebServerDataRequest *request, NSError **jsonError)
 {
     return [NSJSONSerialization JSONObjectWithData:request.data
                                                         options:kNilOptions
-                                                            error:&jsonError];
+                                                            error:jsonError];
 }
 NSMutableSet * getSet(GCDWebServerDataRequest *request, NSError *error) 
 {
@@ -138,12 +138,12 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
 
     [webServer addHandlerForMethod:@"POST"
                               path:SAVE_PHONE_INFO
-                   requestClass:[GCDWebServerDataRequest class] 
+                   requestClass:[GCDWebServerDataRequest class]
                       processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request){
 
-        NSError *error;
-        NSDictionary *dict = getJsonBody(request,error);
-        if (error && dict) {
+        NSError *error = nil;
+        NSDictionary *dict = getJsonBody(request, &error);
+        if (error || !dict) {
             return jsonFormatErrorResponse();
         }
        
@@ -159,11 +159,11 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
 
     [webServer addHandlerForMethod:@"POST"
                               path:REMOVE_BACKUP
-                        requestClass:[GCDWebServerDataRequest class] 
+                        requestClass:[GCDWebServerDataRequest class]
                         processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request){
-                NSError *error;
-        NSDictionary *dict = getJsonBody(request,error);
-        if (error && dict) {
+        NSError *error = nil;
+        NSDictionary *dict = getJsonBody(request, &error);
+        if (error || !dict) {
             return jsonFormatErrorResponse();
         }
         [[ActionManager sharedManager] removeBackup:dict[@"id"]];
@@ -171,11 +171,11 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
     }];
     [webServer addHandlerForMethod:@"POST"
                               path:RENAME_BACKUP
-                        requestClass:[GCDWebServerDataRequest class] 
+                        requestClass:[GCDWebServerDataRequest class]
                         processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request){
-        NSError *error;
-        NSDictionary *dict = getJsonBody(request,error);
-        if (error && dict) {
+        NSError *error = nil;
+        NSDictionary *dict = getJsonBody(request, &error);
+        if (error || !dict) {
             return jsonFormatErrorResponse();
         }
         [[ProfileManager sharedManager] renameProfile:dict[@"id"] to:dict[@"name"]];
@@ -184,11 +184,11 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
 
     [webServer addHandlerForMethod:@"POST"
                               path:SWITCH_BACKUP
-                        requestClass:[GCDWebServerDataRequest class] 
+                        requestClass:[GCDWebServerDataRequest class]
                         processBlock:^GCDWebServerResponse *(GCDWebServerDataRequest *request){
-        NSError *error;
-        NSDictionary *dict = getJsonBody(request,error);
-        if (error && dict) {
+        NSError *error = nil;
+        NSDictionary *dict = getJsonBody(request, &error);
+        if (error || !dict) {
             return jsonFormatErrorResponse();
         }
         [[ActionManager sharedManager] switchBackup:dict[@"id"]];
