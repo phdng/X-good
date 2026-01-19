@@ -1,6 +1,7 @@
 THEOS_DEVICE_IP = localhost
 THEOS_DEVICE_PORT = 2222
 ARCHS = arm64
+PACKAGE_ARCH = iphoneos-arm
 LOGOS_DEFAULT_GENERATOR = internal
 INSTALL_TARGET_PROCESSES = SpringBoard
 DEBUG=0
@@ -70,4 +71,3 @@ include $(THEOS_MAKE_PATH)/tool.mk
 
 
 export CFLAGS = -fobjc-arc -Wno-error
-
