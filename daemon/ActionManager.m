@@ -26,8 +26,10 @@
     return self;
 }
 - (void) newPhone{
+    PXLog(@"[newPhone] Starting newPhone flow");
     // // 加载所有被选中应用
     NSMutableSet * loadApps = [[AppScopeManager sharedManager] loadPreferences];
+    PXLog(@"[newPhone] Scoped apps: %@", loadApps);
     // 获取当前生效备份
     NSString * activeBackupPath = [_profileManager getActiveDataPath];
     if(!activeBackupPath){
@@ -35,65 +37,84 @@
         activeBackupPath = [_profileManager genBackupDirectory];
         
     }
+    PXLog(@"[newPhone] Active backup path: %@", activeBackupPath);
     // 创建备份存放目录
     NSString * backupPath = [_profileManager genBackupDirectory];
     if(!backupPath){
         NSLog(@"create Backup directory error");
+        PXLog(@"[newPhone] Failed to create backup directory");
         return;
     }
+    PXLog(@"[newPhone] New backup path: %@", backupPath);
     for (NSString * bundleId in loadApps){
+        PXLog(@"[newPhone] Processing bundle: %@", bundleId);
         // 强制关停应用
         [self killApp:bundleId];
          // 判断应用中是否存在 safari 额外清理 /var/mobile/Library/Safari 
         if([bundleId isEqualToString:@"com.apple.mobilesafari"]){
+            PXLog(@"[newPhone] Clearing Safari data");
             [self delFile:@"/var/mobile/Library/Safari"];
         }
         // 清理 prefernce /private/var/mobile/Library/Preferences   
+        PXLog(@"[newPhone] Clearing prefs for %@", bundleId);
         [self delFile:[NSString stringWithFormat:@"/private/var/mobile/Library/Preferences/%@.plist",bundleId]];
        
         // 清理or备份沙盒数据到activeBackUp中
+        PXLog(@"[newPhone] Backup data to active path for %@", bundleId);
         [self backupFileToPath:bundleId toPath:activeBackupPath];
     }
     // 清理keychain内容
+    PXLog(@"[newPhone] Clearing keychain");
     [self clearKeyChain];
     // 保存旧参数
     PhoneInfo *phoneInfo = [PhoneInfo loadFromPrefs];
     if (phoneInfo) {
+        PXLog(@"[newPhone] Backing up existing PhoneInfo");
         [PhoneInfo saveDictionaryToFile:[phoneInfo toDictionary] toFile:[activeBackupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
     } else {
-        NSLog(@"[ProjectXDaemon] No existing PhoneInfo to backup.");
+        PXLog(@"[ProjectXDaemon] No existing PhoneInfo to backup.");
     }
     // 生成新参数
     PhoneInfo * newPhoneInfo = [[DataGenManager sharedManager] generatePhoneInfo];
+    PXLog(@"[newPhone] Generated new PhoneInfo");
     [PhoneInfo saveDictionaryToFile:[newPhoneInfo toDictionary] toFile:[backupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
     [newPhoneInfo saveToPrefs];
     // 通知页面刷新显示
     CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
     CFNotificationCenterPostNotification(darwinCenter, CFSTR("projectx.newPhoneFinish"), NULL, NULL, YES);
+    PXLog(@"[newPhone] Finished newPhone flow");
 
 }
 
 -(void) switchBackup:(NSString *) id{
+    PXLog(@"[switchBackup] Requested profile: %@", id);
     Profile *profile = [_profileManager getProfileById:id];
     // 不存在该备份直接返回
     if(!profile || [[ProfileManager sharedManager]isCurrent:profile]) return;
     // 加载所有被选中应用
     NSMutableSet * loadApps = [[AppScopeManager sharedManager] loadPreferences];
+    PXLog(@"[switchBackup] Scoped apps: %@", loadApps);
     // 获取当前生效备份
     NSString * activeBackupPath = [_profileManager getActiveDataPath];
     [_profileManager switchToProfile:profile];
     NSString * waitActiveBackupPath = [_profileManager getActiveDataPath];
+    PXLog(@"[switchBackup] Active backup path: %@", activeBackupPath);
+    PXLog(@"[switchBackup] Target backup path: %@", waitActiveBackupPath);
 
     for (NSString * bundleId in loadApps){
+        PXLog(@"[switchBackup] Processing bundle: %@", bundleId);
         // 强制关停应用
         [self killApp:bundleId];
        
         // 清理or备份沙盒数据到activeBackUp中
+        PXLog(@"[switchBackup] Backup current data for %@", bundleId);
         [self backupFileToPath:bundleId toPath:activeBackupPath];
 
+        PXLog(@"[switchBackup] Restoring data for %@", bundleId);
         [self restoreBackupFromPath:waitActiveBackupPath toBundle:bundleId];
     }
     
+    PXLog(@"[switchBackup] Clearing keychain");
     [self clearKeyChain];
 
     // 加载备份下PhoneInfo
@@ -106,6 +127,7 @@
                                             NULL, 
                                             NULL, 
                                             YES);
+    PXLog(@"[switchBackup] Finished switchBackup");
                 
 }
 
@@ -141,6 +163,7 @@
 - (void)backupFileToPath:(NSString *)bundleId toPath:(NSString *)path {
     NSString *appDataPath = [self getAppDataPath:bundleId];
     NSString *savePath = [path stringByAppendingPathComponent:bundleId];
+    PXLog(@"[backupFile] bundle=%@ appData=%@ savePath=%@", bundleId, appDataPath, savePath);
 
     NSFileManager *fm = [NSFileManager defaultManager];
     if(![fm fileExistsAtPath:savePath]){
@@ -168,11 +191,13 @@
         NSString *dst = [savePath stringByAppendingPathComponent:folder];
 
         if (![fm fileExistsAtPath:src]) continue;
+        PXLog(@"[backupFile] Moving %@ -> %@", src, dst);
         [self delFile:dst];
 
         NSError *moveErr = nil;
         if (![fm moveItemAtPath:src toPath:dst error:&moveErr]) {
             NSLog(@"[ERROR] move %@ -> %@ failed: %@", src, dst, moveErr);
+            PXLog(@"[backupFile] Move failed %@ -> %@ (%@)", src, dst, moveErr);
         }
     }
 
@@ -191,6 +216,7 @@
     for (NSString *folder in recreate) {
         NSString *dst = [appDataPath stringByAppendingPathComponent:folder];
 
+        PXLog(@"[backupFile] Ensuring directory %@", dst);
         [fm createDirectoryAtPath:dst
       withIntermediateDirectories:YES
                        attributes:nil
@@ -204,6 +230,7 @@
     NSString *appDataPath = [self getAppDataPath:bundleId];
     NSFileManager *fm = [NSFileManager defaultManager];
     NSString *savePath = [backupPath stringByAppendingPathComponent:bundleId];
+    PXLog(@"[restoreBackup] bundle=%@ appData=%@ savePath=%@", bundleId, appDataPath, savePath);
 
     NSArray *folders = @[@"Documents", @"tmp", @"Library", @"SystemData"];
 
@@ -220,13 +247,16 @@
         }
 
         // 目标存在，先删除
+        PXLog(@"[restoreBackup] Removing existing %@", dst);
         [self delFile:dst];
 
         NSError *copyErr = nil;
         if (![fm copyItemAtPath:src toPath:dst error:&copyErr]) {
             NSLog(@"[ERROR] copy %@ -> %@ failed: %@", src, dst, copyErr);
+            PXLog(@"[restoreBackup] Copy failed %@ -> %@ (%@)", src, dst, copyErr);
         } else {
             NSLog(@"[DEBUG] Restored %@ -> %@", src, dst);
+            PXLog(@"[restoreBackup] Restored %@ -> %@", src, dst);
         }
 
         // 统一权限（递归）
@@ -249,6 +279,7 @@
         NSString *dst = [appDataPath stringByAppendingPathComponent:folder];
 
         if (![fm fileExistsAtPath:dst]) {
+            PXLog(@"[restoreBackup] Creating missing directory %@", dst);
             [fm createDirectoryAtPath:dst
           withIntermediateDirectories:YES
                            attributes:nil
