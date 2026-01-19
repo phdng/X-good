@@ -18,52 +18,35 @@ else
   exit 1
 fi
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-LOCAL_DEB_PATH="${ALTLIST_DEB_PATH:-$REPO_ROOT/libs/AltList.deb}"
+DERIVED_DATA_PATH="$TMP_DIR/altlist_derived"
+BUILD_CONFIGURATION="Release"
 
-DEB_URL=""
-if [[ -f "$LOCAL_DEB_PATH" ]]; then
-  DEB_URL="file://$LOCAL_DEB_PATH"
+if [[ -d "$ALT_DIR/AltList.xcworkspace" ]]; then
+  xcodebuild \
+    -workspace "$ALT_DIR/AltList.xcworkspace" \
+    -scheme "AltList" \
+    -configuration "$BUILD_CONFIGURATION" \
+    -sdk iphoneos \
+    -derivedDataPath "$DERIVED_DATA_PATH" \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGNING_IDENTITY=""
+elif [[ -d "$ALT_DIR/AltList.xcodeproj" ]]; then
+  xcodebuild \
+    -project "$ALT_DIR/AltList.xcodeproj" \
+    -scheme "AltList" \
+    -configuration "$BUILD_CONFIGURATION" \
+    -sdk iphoneos \
+    -derivedDataPath "$DERIVED_DATA_PATH" \
+    CODE_SIGNING_ALLOWED=NO \
+    CODE_SIGNING_REQUIRED=NO \
+    CODE_SIGNING_IDENTITY=""
 else
-  DEB_URL="$(python3 - <<'PY'
-import json
-import urllib.request
-import os
-import urllib.error
-
-url = "https://api.github.com/repos/opa334/AltList/releases/latest"
-request = urllib.request.Request(url)
-token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
-if token:
-    request.add_header("Authorization", f"Bearer {token}")
-    request.add_header("X-GitHub-Api-Version", "2022-11-28")
-    request.add_header("Accept", "application/vnd.github+json")
-try:
-    with urllib.request.urlopen(request) as response:
-        data = json.load(response)
-    for asset in data.get("assets", []):
-        name = asset.get("name", "")
-        if name.endswith(".deb"):
-            print(asset.get("browser_download_url", ""))
-            break
-except urllib.error.URLError:
-    print("")
-PY
-  )"
-fi
-
-if [[ -z "$DEB_URL" ]]; then
-  echo "AltList release .deb not found in GitHub API response." >&2
-  echo "Download AltList.deb manually and place it at $REPO_ROOT/libs/AltList.deb," >&2
-  echo "or set ALTLIST_DEB_PATH to its location." >&2
+  echo "AltList Xcode project/workspace not found; cannot build framework." >&2
   exit 1
 fi
 
-curl -fsSL "$DEB_URL" -o "$TMP_DIR/AltList.deb"
-
-dpkg-deb -x "$TMP_DIR/AltList.deb" "$TMP_DIR/altlist_extract"
-FRAMEWORK_PATH="$(find "$TMP_DIR/altlist_extract" -name AltList.framework -print -quit)"
+FRAMEWORK_PATH="$(find "$DERIVED_DATA_PATH" -name AltList.framework -print -quit)"
 if [[ -n "$FRAMEWORK_PATH" ]]; then
   mkdir -p "$THEOS/lib"
   cp -R "$FRAMEWORK_PATH" "$THEOS/lib/"
@@ -72,6 +55,6 @@ if [[ -n "$FRAMEWORK_PATH" ]]; then
     cp -R "$FRAMEWORK_PATH/Headers/"* "$THEOS/include/AltList/"
   fi
 else
-  echo "AltList.framework not found in release .deb" >&2
+  echo "AltList.framework not found in build output." >&2
   exit 1
 fi

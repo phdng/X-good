@@ -44,8 +44,6 @@ jobs:
       - name: Install AltList headers and framework
         run: |
           bash scripts/setup_altlist.sh
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Ensure dm.pl is available
         run: |
