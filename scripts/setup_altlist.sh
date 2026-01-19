@@ -64,7 +64,9 @@ fi
 FRAMEWORK_PATH="$(find "${SEARCH_PATHS[@]}" -name AltList.framework -print -quit)"
 if [[ -n "$FRAMEWORK_PATH" ]]; then
   mkdir -p "$THEOS/lib"
-  cp -R "$FRAMEWORK_PATH" "$THEOS/lib/"
+  DEST_FRAMEWORK="$THEOS/lib/AltList.framework"
+  rm -rf "$DEST_FRAMEWORK"
+  cp -R "$FRAMEWORK_PATH" "$DEST_FRAMEWORK"
   if [[ -d "$FRAMEWORK_PATH/Headers" ]]; then
     mkdir -p "$THEOS/include/AltList"
     cp -R "$FRAMEWORK_PATH/Headers/"* "$THEOS/include/AltList/"
