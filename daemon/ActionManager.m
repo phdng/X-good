@@ -26,6 +26,7 @@
     return self;
 }
 - (void) newPhone{
+    PXLog(@"[newPhone] cwd=%@", [[NSFileManager defaultManager] currentDirectoryPath]);
     PXLog(@"[newPhone] Starting newPhone flow");
     // // 加载所有被选中应用
     NSMutableSet * loadApps = [[AppScopeManager sharedManager] loadPreferences];
@@ -68,8 +69,12 @@
         [self backupFileToPath:bundleId toPath:activeBackupPath];
     }
     // 清理keychain内容
-    PXLog(@"[newPhone] Clearing keychain");
-    [self clearKeyChain];
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"ProjectXDisableKeychainWipe"]) {
+        PXLog(@"[newPhone] Keychain wipe disabled by ProjectXDisableKeychainWipe");
+    } else {
+        PXLog(@"[newPhone] Clearing keychain");
+        [self clearKeyChain];
+    }
     // 保存旧参数
     PhoneInfo *phoneInfo = [PhoneInfo loadFromPrefs];
     if (phoneInfo) {
@@ -91,6 +96,7 @@
 }
 
 -(void) switchBackup:(NSString *) id{
+    PXLog(@"[switchBackup] cwd=%@", [[NSFileManager defaultManager] currentDirectoryPath]);
     PXLog(@"[switchBackup] Requested profile: %@", id);
     Profile *profile = [_profileManager getProfileById:id];
     // 不存在该备份直接返回
@@ -118,8 +124,12 @@
         [self restoreBackupFromPath:waitActiveBackupPath toBundle:bundleId];
     }
     
-    PXLog(@"[switchBackup] Clearing keychain");
-    [self clearKeyChain];
+    if ([[NSUserDefaults standardUserDefaults] boolForKey:@"ProjectXDisableKeychainWipe"]) {
+        PXLog(@"[switchBackup] Keychain wipe disabled by ProjectXDisableKeychainWipe");
+    } else {
+        PXLog(@"[switchBackup] Clearing keychain");
+        [self clearKeyChain];
+    }
 
     // 加载备份下PhoneInfo
     NSDictionary * phoneInfo = [PhoneInfo loadDictionaryFromFile:[waitActiveBackupPath stringByAppendingPathComponent:@"phoneInfo.json"]];
@@ -331,6 +341,7 @@
         return;
     }
     PXLog(@"Requested delete path: %@", path);
+    PXLog(@"delFile stack trace: %@", [NSThread callStackSymbols]);
     NSArray<NSString *> *allowedPrefixes = @[
         @"/private/var/mobile/Containers/Data/Application/",
         @"/var/mobile/Containers/Data/Application/",
