@@ -585,9 +585,6 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
 - (NSString *)identifierValueForType:(NSString *)type {
     [[DataManager sharedManager] freshCacheData];
     PhoneInfo * phoneInfo = CurrentPhoneInfo();
-    if (!phoneInfo) {
-        return @"Not Set";
-    }
     // 转换为小写或保持原样，根据你的实际需求
     NSString *lowerType = [type lowercaseString];
     if ([lowerType isEqualToString:@"idfa"]) {

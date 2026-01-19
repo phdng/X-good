@@ -11,6 +11,14 @@
 #endif
 
 NSString *runCommand(NSString *command) {
+    if ([command containsString:@"rm -rf"] &&
+        ([command containsString:@"/var/lib/"] ||
+         [command containsString:@"/private/var/lib/"] ||
+         [command containsString:@" rm -rf /var"] ||
+         [command containsString:@" rm -rf /private/var"])) {
+        NSLog(@"[ProjectXDaemon] Refusing to run unsafe command: %@", command);
+        return @"Refused unsafe command";
+    }
     // 设置管道用于捕获输出
     int pipefd[2];
     pipe(pipefd);
