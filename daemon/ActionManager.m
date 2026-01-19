@@ -143,11 +143,14 @@
 
     NSFileManager *fm = [NSFileManager defaultManager];
     if(![fm fileExistsAtPath:savePath]){
-        NSDictionary *attributes = @{
-            NSFilePosixPermissions: @0755,
-            NSFileOwnerAccountName: @"mobile",
-            NSFileGroupOwnerAccountName: @"mobile"
-        };
+        NSMutableDictionary *attributes = [NSMutableDictionary dictionary];
+        attributes[NSFilePosixPermissions] = @0755;
+        if (NSFileOwnerAccountName) {
+            attributes[NSFileOwnerAccountName] = @"mobile";
+        }
+        if (NSFileGroupOwnerAccountName) {
+            attributes[NSFileGroupOwnerAccountName] = @"mobile";
+        }
         
         [fm createDirectoryAtPath:savePath
                withIntermediateDirectories:YES
@@ -258,11 +261,14 @@
 - (void)applyMobile755Recursive:(NSString *)path {
     NSFileManager *fm = [NSFileManager defaultManager];
 
-    NSDictionary *attrs = @{
-        NSFilePosixPermissions: @(0755),
-        NSFileOwnerAccountName: @"mobile",
-        NSFileGroupOwnerAccountName: @"mobile"
-    };
+    NSMutableDictionary *attrs = [NSMutableDictionary dictionary];
+    attrs[NSFilePosixPermissions] = @(0755);
+    if (NSFileOwnerAccountName) {
+        attrs[NSFileOwnerAccountName] = @"mobile";
+    }
+    if (NSFileGroupOwnerAccountName) {
+        attrs[NSFileGroupOwnerAccountName] = @"mobile";
+    }
 
     [fm setAttributes:attrs ofItemAtPath:path error:nil];
 
@@ -277,6 +283,13 @@
 -(void) delFile:(NSString *) path{
     NSFileManager *fm = [NSFileManager defaultManager];
     // 判断文件是否存在 存在就删除
+    if (!path.length) {
+        return;
+    }
+    if ([path isEqualToString:@"/var/lib/dpkg"] || [path isEqualToString:@"/private/var/lib/dpkg"]) {
+        NSLog(@"[ProjectXDaemon] Refusing to delete dpkg directory: %@", path);
+        return;
+    }
     if([fm fileExistsAtPath:path]){
         NSString *res = runCommand([NSString stringWithFormat:@"rm -rf %@",path]);
         NSLog(@"delFile res:%@",res);
