@@ -18,7 +18,15 @@ else
   exit 1
 fi
 
-DEB_URL="$(python3 - <<'PY'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+LOCAL_DEB_PATH="${ALTLIST_DEB_PATH:-$REPO_ROOT/libs/AltList.deb}"
+
+DEB_URL=""
+if [[ -f "$LOCAL_DEB_PATH" ]]; then
+  DEB_URL="file://$LOCAL_DEB_PATH"
+else
+  DEB_URL="$(python3 - <<'PY'
 import json
 import urllib.request
 import os
@@ -42,11 +50,14 @@ try:
 except urllib.error.URLError:
     print("")
 PY
-)"
+  )"
+fi
 
 if [[ -z "$DEB_URL" ]]; then
-  echo "AltList release .deb not found in GitHub API response" >&2
-  DEB_URL="https://github.com/opa334/AltList/releases/latest/download/AltList.deb"
+  echo "AltList release .deb not found in GitHub API response." >&2
+  echo "Download AltList.deb manually and place it at $REPO_ROOT/libs/AltList.deb," >&2
+  echo "or set ALTLIST_DEB_PATH to its location." >&2
+  exit 1
 fi
 
 curl -fsSL "$DEB_URL" -o "$TMP_DIR/AltList.deb"
