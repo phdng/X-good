@@ -2,7 +2,13 @@
 #include <spawn.h>
 #include <stdlib.h>
 #import <UIKit/UIKit.h>
+#if __has_include(<roothide.h>)
 #import <roothide.h>
+#else
+#ifndef jbroot
+#define jbroot(path) (path)
+#endif
+#endif
 
 NSString *runCommand(NSString *command) {
     // 设置管道用于捕获输出
@@ -45,4 +51,3 @@ NSString *runCommand(NSString *command) {
     
     return rawOutput;
 }
-

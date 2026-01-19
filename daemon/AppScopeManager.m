@@ -1,5 +1,11 @@
 #import "AppScopeManager.h"
+#if __has_include(<roothide.h>)
 #import <roothide.h>
+#else
+#ifndef jbroot
+#define jbroot(path) (path)
+#endif
+#endif
 @interface AppScopeManager()
 @property (nonatomic, strong) NSMutableSet *scopedApps;
 @end

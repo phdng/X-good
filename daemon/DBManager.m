@@ -1,5 +1,11 @@
 #import "DBManager.h"
+#if __has_include(<roothide.h>)
 #import <roothide.h>
+#else
+#ifndef jbroot
+#define jbroot(path) (path)
+#endif
+#endif
 
 @implementation DBManager
 
