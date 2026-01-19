@@ -49,5 +49,14 @@ if [ -n "$APP_SOURCE" ]; then
     fi
 fi
 
+if command -v uicache >/dev/null; then
+    if [ -d /Applications/ProjectX.app ]; then
+        uicache -p /Applications/ProjectX.app || true
+    fi
+    if [ -d /var/jb/Applications/ProjectX.app ]; then
+        uicache -p /var/jb/Applications/ProjectX.app || true
+    fi
+fi
+
 echo "✅ WeaponX installation completed!"
 exit 0 
