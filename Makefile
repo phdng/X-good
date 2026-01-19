@@ -70,6 +70,31 @@ include $(THEOS_MAKE_PATH)/application.mk
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/tool.mk
 
+after-package::
+	@set -e; \
+	if ! command -v dpkg-deb >/dev/null; then \
+		echo "dpkg-deb not found; skipping package architecture rewrite."; \
+		exit 0; \
+	fi; \
+	deb=$$(ls -t packages/*.deb 2>/dev/null | head -n 1); \
+	if [ -z "$$deb" ]; then \
+		echo "No package found to rewrite."; \
+		exit 0; \
+	fi; \
+	case "$$deb" in \
+		*iphoneos-arm64*) ;; \
+		*) exit 0 ;; \
+	esac; \
+	tmp=$$(mktemp -d); \
+	dpkg-deb -R "$$deb" "$$tmp"; \
+	sed -i.bak -E 's/^Architecture:.*/Architecture: iphoneos-arm/' "$$tmp/DEBIAN/control"; \
+	newdeb="$${deb/iphoneos-arm64/iphoneos-arm}"; \
+	dpkg-deb -b "$$tmp" "$$newdeb" >/dev/null; \
+	rm -rf "$$tmp"; \
+	if [ "$$deb" != "$$newdeb" ]; then \
+		rm -f "$$deb"; \
+	fi;
+
 
 
 export CFLAGS = -fobjc-arc -Wno-error
