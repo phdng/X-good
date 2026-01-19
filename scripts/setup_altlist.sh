@@ -21,9 +21,12 @@ fi
 DERIVED_DATA_PATH="$TMP_DIR/altlist_derived"
 BUILD_CONFIGURATION="Release"
 
-if [[ -d "$ALT_DIR/AltList.xcworkspace" ]]; then
+WORKSPACE_PATH="$(find "$ALT_DIR" -maxdepth 4 -name "*.xcworkspace" -print -quit)"
+PROJECT_PATH="$(find "$ALT_DIR" -maxdepth 4 -name "*.xcodeproj" -print -quit)"
+
+if [[ -n "$WORKSPACE_PATH" ]]; then
   xcodebuild \
-    -workspace "$ALT_DIR/AltList.xcworkspace" \
+    -workspace "$WORKSPACE_PATH" \
     -scheme "AltList" \
     -configuration "$BUILD_CONFIGURATION" \
     -sdk iphoneos \
@@ -31,9 +34,9 @@ if [[ -d "$ALT_DIR/AltList.xcworkspace" ]]; then
     CODE_SIGNING_ALLOWED=NO \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGNING_IDENTITY=""
-elif [[ -d "$ALT_DIR/AltList.xcodeproj" ]]; then
+elif [[ -n "$PROJECT_PATH" ]]; then
   xcodebuild \
-    -project "$ALT_DIR/AltList.xcodeproj" \
+    -project "$PROJECT_PATH" \
     -scheme "AltList" \
     -configuration "$BUILD_CONFIGURATION" \
     -sdk iphoneos \
@@ -43,6 +46,7 @@ elif [[ -d "$ALT_DIR/AltList.xcodeproj" ]]; then
     CODE_SIGNING_IDENTITY=""
 else
   echo "AltList Xcode project/workspace not found; cannot build framework." >&2
+  echo "Searched for *.xcworkspace and *.xcodeproj within $ALT_DIR." >&2
   exit 1
 fi
 
