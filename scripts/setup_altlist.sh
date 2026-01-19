@@ -21,8 +21,8 @@ fi
 DERIVED_DATA_PATH="$TMP_DIR/altlist_derived"
 BUILD_CONFIGURATION="Release"
 
-WORKSPACE_PATH="$(find "$ALT_DIR" -maxdepth 4 -name "*.xcworkspace" -print -quit)"
-PROJECT_PATH="$(find "$ALT_DIR" -maxdepth 4 -name "*.xcodeproj" -print -quit)"
+WORKSPACE_PATH="$(find "$ALT_DIR" -maxdepth 6 -name "*.xcworkspace" -print -quit)"
+PROJECT_PATH="$(find "$ALT_DIR" -maxdepth 6 -name "*.xcodeproj" -print -quit)"
 
 if [[ -n "$WORKSPACE_PATH" ]]; then
   xcodebuild \
@@ -44,13 +44,16 @@ elif [[ -n "$PROJECT_PATH" ]]; then
     CODE_SIGNING_ALLOWED=NO \
     CODE_SIGNING_REQUIRED=NO \
     CODE_SIGNING_IDENTITY=""
+elif [[ -f "$ALT_DIR/Makefile" ]]; then
+  make -C "$ALT_DIR"
 else
   echo "AltList Xcode project/workspace not found; cannot build framework." >&2
   echo "Searched for *.xcworkspace and *.xcodeproj within $ALT_DIR." >&2
+  echo "Also looked for a Makefile at $ALT_DIR/Makefile." >&2
   exit 1
 fi
 
-FRAMEWORK_PATH="$(find "$DERIVED_DATA_PATH" -name AltList.framework -print -quit)"
+FRAMEWORK_PATH="$(find "$DERIVED_DATA_PATH" "$ALT_DIR" -name AltList.framework -print -quit)"
 if [[ -n "$FRAMEWORK_PATH" ]]; then
   mkdir -p "$THEOS/lib"
   cp -R "$FRAMEWORK_PATH" "$THEOS/lib/"
