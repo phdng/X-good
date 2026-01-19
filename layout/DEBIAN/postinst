@@ -30,13 +30,23 @@ else
     mv "/Library/ProjectXTweak.plist" "/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.plist"
 fi
 
-if [ -d /var/jb/Applications/ProjectX.app ] && [ ! -d /Applications/ProjectX.app ]; then
-    mkdir -p /Applications
-    cp -R /var/jb/Applications/ProjectX.app /Applications/ProjectX.app
+APP_SOURCE=""
+if [ -d /Applications/ProjectX.app ]; then
+    APP_SOURCE="/Applications/ProjectX.app"
+elif [ -d /var/jb/Applications/ProjectX.app ]; then
+    APP_SOURCE="/var/jb/Applications/ProjectX.app"
+else
+    APP_SOURCE="$(find /var/jb/Applications /Applications -maxdepth 3 -name ProjectX.app -print -quit 2>/dev/null)"
 fi
 
-if [ -d /Applications/ProjectX.app ] && [ -d /var/jb/Applications ] && [ ! -d /var/jb/Applications/ProjectX.app ]; then
-    cp -R /Applications/ProjectX.app /var/jb/Applications/ProjectX.app
+if [ -n "$APP_SOURCE" ]; then
+    if [ ! -d /Applications/ProjectX.app ]; then
+        mkdir -p /Applications
+        cp -R "$APP_SOURCE" /Applications/ProjectX.app
+    fi
+    if [ -d /var/jb/Applications ] && [ ! -d /var/jb/Applications/ProjectX.app ]; then
+        cp -R "$APP_SOURCE" /var/jb/Applications/ProjectX.app
+    fi
 fi
 
 echo "✅ WeaponX installation completed!"
