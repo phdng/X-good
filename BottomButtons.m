@@ -217,13 +217,20 @@
     
     // Create kill button with soft minimalistic style
     UIButton *newPhoneButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    UIButtonConfiguration *newPhoneBtnConfig = [UIButtonConfiguration plainButtonConfiguration];
-    newPhoneBtnConfig.title = @"一键新机";
-    newPhoneBtnConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    newPhoneBtnConfig.background.backgroundColor = [UIColor.systemGreenColor colorWithAlphaComponent:0.15];
-    newPhoneBtnConfig.baseForegroundColor = [UIColor systemGreenColor];
-    newPhoneBtnConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
-    newPhoneButton.configuration = newPhoneBtnConfig;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *newPhoneBtnConfig = [UIButtonConfiguration plainButtonConfiguration];
+        newPhoneBtnConfig.title = @"一键新机";
+        newPhoneBtnConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        newPhoneBtnConfig.background.backgroundColor = [UIColor.systemGreenColor colorWithAlphaComponent:0.15];
+        newPhoneBtnConfig.baseForegroundColor = [UIColor systemGreenColor];
+        newPhoneBtnConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
+        newPhoneButton.configuration = newPhoneBtnConfig;
+    } else {
+        [newPhoneButton setTitle:@"一键新机" forState:UIControlStateNormal];
+        [newPhoneButton setTitleColor:[UIColor systemGreenColor] forState:UIControlStateNormal];
+        newPhoneButton.backgroundColor = [[UIColor systemGreenColor] colorWithAlphaComponent:0.15];
+        newPhoneButton.contentEdgeInsets = UIEdgeInsetsMake(6, 8, 6, 8);
+    }
     [newPhoneButton addTarget:self action:@selector(newPhoneTap) forControlEvents:UIControlEventTouchUpInside];
     newPhoneButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     newPhoneButton.layer.cornerRadius = 10;
@@ -231,13 +238,20 @@
     
     // Create respring button with soft minimalistic style
     UIButton *applyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    UIButtonConfiguration *applyConfig = [UIButtonConfiguration plainButtonConfiguration];
-    applyConfig.title = @"注销";
-    applyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    applyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
-    applyConfig.baseForegroundColor = [UIColor systemBlueColor];
-    applyConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
-    applyButton.configuration = applyConfig;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *applyConfig = [UIButtonConfiguration plainButtonConfiguration];
+        applyConfig.title = @"注销";
+        applyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        applyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
+        applyConfig.baseForegroundColor = [UIColor systemBlueColor];
+        applyConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
+        applyButton.configuration = applyConfig;
+    } else {
+        [applyButton setTitle:@"注销" forState:UIControlStateNormal];
+        [applyButton setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
+        applyButton.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.15];
+        applyButton.contentEdgeInsets = UIEdgeInsetsMake(6, 8, 6, 8);
+    }
     [applyButton addTarget:self action:@selector(applyChangesAndRespring) forControlEvents:UIControlEventTouchUpInside];
     applyButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     applyButton.layer.cornerRadius = 10;

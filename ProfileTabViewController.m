@@ -728,27 +728,34 @@ static void darwinNotificationCallback(
         NSString *importExportTitle = @"导入/导出";
         
         // Create configuration for button with smaller text
-        UIButtonConfiguration *importExportConfig = [UIButtonConfiguration filledButtonConfiguration];
-        importExportConfig.title = importExportTitle;
-        importExportConfig.image = importExportIcon;
-        importExportConfig.imagePlacement = NSDirectionalRectEdgeLeading;
-        importExportConfig.imagePadding = 4; // Reduced from 8
-        importExportConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-        importExportConfig.baseBackgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.1];
-        importExportConfig.baseForegroundColor = [UIColor systemBlueColor];
-        
-        // Set smaller font size
         UIFont *smallerFont = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium]; // Reduced font size
-        importExportConfig.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *textAttributes) {
-            NSMutableDictionary *newAttributes = [textAttributes mutableCopy];
-            newAttributes[NSFontAttributeName] = smallerFont;
-            return newAttributes;
-        };
-        
-        // Reduce content insets to make button more compact
-        importExportConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 8, 4, 8);
-        
-        importExportButton.configuration = importExportConfig;
+        if (@available(iOS 15.0, *)) {
+            UIButtonConfiguration *importExportConfig = [UIButtonConfiguration filledButtonConfiguration];
+            importExportConfig.title = importExportTitle;
+            importExportConfig.image = importExportIcon;
+            importExportConfig.imagePlacement = NSDirectionalRectEdgeLeading;
+            importExportConfig.imagePadding = 4; // Reduced from 8
+            importExportConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+            importExportConfig.baseBackgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.1];
+            importExportConfig.baseForegroundColor = [UIColor systemBlueColor];
+
+            importExportConfig.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *textAttributes) {
+                NSMutableDictionary *newAttributes = [textAttributes mutableCopy];
+                newAttributes[NSFontAttributeName] = smallerFont;
+                return newAttributes;
+            };
+
+            importExportConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 8, 4, 8);
+            importExportButton.configuration = importExportConfig;
+        } else {
+            [importExportButton setTitle:importExportTitle forState:UIControlStateNormal];
+            [importExportButton setImage:importExportIcon forState:UIControlStateNormal];
+            importExportButton.titleLabel.font = smallerFont;
+            importExportButton.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.1];
+            [importExportButton setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
+            importExportButton.contentEdgeInsets = UIEdgeInsetsMake(4, 8, 4, 8);
+            importExportButton.imageEdgeInsets = UIEdgeInsetsMake(0, -4, 0, 4);
+        }
         importExportButton.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleRightMargin;
         [importExportButton addTarget:self action:@selector(importExportButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
         
@@ -767,27 +774,33 @@ static void darwinNotificationCallback(
         UIImage *trashIcon = [UIImage systemImageNamed:@"trash"];
         NSString *trashTitle = @"清空备份";
         
-        // Create configuration for button with smaller text
-        UIButtonConfiguration *trashConfig = [UIButtonConfiguration filledButtonConfiguration];
-        trashConfig.title = trashTitle;
-        trashConfig.image = trashIcon;
-        trashConfig.imagePlacement = NSDirectionalRectEdgeLeading;
-        trashConfig.imagePadding = 4; // Reduced from 8
-        trashConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-        trashConfig.baseBackgroundColor = [[UIColor systemRedColor] colorWithAlphaComponent:0.1];
-        trashConfig.baseForegroundColor = [UIColor systemRedColor];
-        
-        // Set smaller font size
-        trashConfig.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *textAttributes) {
-            NSMutableDictionary *newAttributes = [textAttributes mutableCopy];
-            newAttributes[NSFontAttributeName] = smallerFont;
-            return newAttributes;
-        };
-        
-        // Reduce content insets to make button more compact
-        trashConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 8, 4, 8);
-        
-        trashAllButton.configuration = trashConfig;
+        if (@available(iOS 15.0, *)) {
+            UIButtonConfiguration *trashConfig = [UIButtonConfiguration filledButtonConfiguration];
+            trashConfig.title = trashTitle;
+            trashConfig.image = trashIcon;
+            trashConfig.imagePlacement = NSDirectionalRectEdgeLeading;
+            trashConfig.imagePadding = 4; // Reduced from 8
+            trashConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+            trashConfig.baseBackgroundColor = [[UIColor systemRedColor] colorWithAlphaComponent:0.1];
+            trashConfig.baseForegroundColor = [UIColor systemRedColor];
+
+            trashConfig.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *textAttributes) {
+                NSMutableDictionary *newAttributes = [textAttributes mutableCopy];
+                newAttributes[NSFontAttributeName] = smallerFont;
+                return newAttributes;
+            };
+
+            trashConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 8, 4, 8);
+            trashAllButton.configuration = trashConfig;
+        } else {
+            [trashAllButton setTitle:trashTitle forState:UIControlStateNormal];
+            [trashAllButton setImage:trashIcon forState:UIControlStateNormal];
+            trashAllButton.titleLabel.font = smallerFont;
+            trashAllButton.backgroundColor = [[UIColor systemRedColor] colorWithAlphaComponent:0.1];
+            [trashAllButton setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
+            trashAllButton.contentEdgeInsets = UIEdgeInsetsMake(4, 8, 4, 8);
+            trashAllButton.imageEdgeInsets = UIEdgeInsetsMake(0, -4, 0, 4);
+        }
         trashAllButton.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleLeftMargin;
         [trashAllButton addTarget:self action:@selector(trashAllButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
         
@@ -1489,12 +1502,17 @@ static void darwinNotificationCallback(
     self.renameButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self.renameButton.frame = CGRectMake(200, 22, 30, 30);
     
-    // Use modern UIButtonConfiguration API for iOS 15+
-    UIButtonConfiguration *renameConfig = [UIButtonConfiguration plainButtonConfiguration];
-    renameConfig.image = [UIImage systemImageNamed:@"pencil"];
-    renameConfig.baseForegroundColor = [UIColor secondaryLabelColor];
-    renameConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-    self.renameButton.configuration = renameConfig;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *renameConfig = [UIButtonConfiguration plainButtonConfiguration];
+        renameConfig.image = [UIImage systemImageNamed:@"pencil"];
+        renameConfig.baseForegroundColor = [UIColor secondaryLabelColor];
+        renameConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
+        self.renameButton.configuration = renameConfig;
+    } else {
+        [self.renameButton setImage:[UIImage systemImageNamed:@"pencil"] forState:UIControlStateNormal];
+        [self.renameButton setTitleColor:[UIColor secondaryLabelColor] forState:UIControlStateNormal];
+        self.renameButton.contentEdgeInsets = UIEdgeInsetsMake(5, 5, 5, 5);
+    }
     
     self.renameButton.userInteractionEnabled = YES;
     [self.innerCard addSubview:self.renameButton];
@@ -1503,12 +1521,17 @@ static void darwinNotificationCallback(
     self.infoButton = [UIButton buttonWithType:UIButtonTypeSystem];
     self.infoButton.frame = CGRectMake(self.innerCard.bounds.size.width - 44, 13, 32, 32);
     
-    // Use modern UIButtonConfiguration API for iOS 15+
-    UIButtonConfiguration *infoConfig = [UIButtonConfiguration plainButtonConfiguration];
-    infoConfig.image = [UIImage systemImageNamed:@"info.circle"];
-    infoConfig.baseForegroundColor = [UIColor systemBlueColor];
-    infoConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-    self.infoButton.configuration = infoConfig;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *infoConfig = [UIButtonConfiguration plainButtonConfiguration];
+        infoConfig.image = [UIImage systemImageNamed:@"info.circle"];
+        infoConfig.baseForegroundColor = [UIColor systemBlueColor];
+        infoConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
+        self.infoButton.configuration = infoConfig;
+    } else {
+        [self.infoButton setImage:[UIImage systemImageNamed:@"info.circle"] forState:UIControlStateNormal];
+        [self.infoButton setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
+        self.infoButton.contentEdgeInsets = UIEdgeInsetsMake(5, 5, 5, 5);
+    }
     
     self.infoButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
     self.infoButton.userInteractionEnabled = YES;
@@ -1537,13 +1560,18 @@ static void darwinNotificationCallback(
     CGFloat switchX = buttonSize + buttonSpacing;
     self.switchButton.frame = CGRectMake(switchX, 5, buttonSize, buttonSize);
     
-    // Use modern UIButtonConfiguration API for iOS 15+
-    UIButtonConfiguration *switchConfig = [UIButtonConfiguration plainButtonConfiguration];
-    // Use a simpler SF Symbol that's definitely available in iOS 15+
-    switchConfig.image = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"];
-    switchConfig.baseForegroundColor = [UIColor systemBlueColor];
-    switchConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-    self.switchButton.configuration = switchConfig;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *switchConfig = [UIButtonConfiguration plainButtonConfiguration];
+        // Use a simpler SF Symbol that's definitely available in iOS 15+
+        switchConfig.image = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"];
+        switchConfig.baseForegroundColor = [UIColor systemBlueColor];
+        switchConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
+        self.switchButton.configuration = switchConfig;
+    } else {
+        [self.switchButton setImage:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"] forState:UIControlStateNormal];
+        [self.switchButton setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
+        self.switchButton.contentEdgeInsets = UIEdgeInsetsMake(5, 5, 5, 5);
+    }
     
     self.switchButton.userInteractionEnabled = YES;
     [actionContainer addSubview:self.switchButton];
@@ -1553,12 +1581,17 @@ static void darwinNotificationCallback(
     CGFloat deleteX = switchX + buttonSize + buttonSpacing;
     self.deleteButton.frame = CGRectMake(deleteX, 5, buttonSize, buttonSize);
     
-    // Use modern UIButtonConfiguration API for iOS 15+
-    UIButtonConfiguration *deleteConfig = [UIButtonConfiguration plainButtonConfiguration];
-    deleteConfig.image = [UIImage systemImageNamed:@"trash"];
-    deleteConfig.baseForegroundColor = [UIColor systemRedColor];
-    deleteConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-    self.deleteButton.configuration = deleteConfig;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *deleteConfig = [UIButtonConfiguration plainButtonConfiguration];
+        deleteConfig.image = [UIImage systemImageNamed:@"trash"];
+        deleteConfig.baseForegroundColor = [UIColor systemRedColor];
+        deleteConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
+        self.deleteButton.configuration = deleteConfig;
+    } else {
+        [self.deleteButton setImage:[UIImage systemImageNamed:@"trash"] forState:UIControlStateNormal];
+        [self.deleteButton setTitleColor:[UIColor systemRedColor] forState:UIControlStateNormal];
+        self.deleteButton.contentEdgeInsets = UIEdgeInsetsMake(5, 5, 5, 5);
+    }
     
     self.deleteButton.userInteractionEnabled = YES;
     [actionContainer addSubview:self.deleteButton];
@@ -1589,14 +1622,16 @@ static void darwinNotificationCallback(
     // without trying to customize too much
     
     // Set up a simple handler that handles the pressed state
-    button.configurationUpdateHandler = ^(__kindof UIButton *btn) {
-        // Apply a simple background when pressed
-        if (btn.isHighlighted) {
-            btn.backgroundColor = [UIColor systemGray5Color];
-        } else {
-            btn.backgroundColor = nil;
-        }
-    };
+    if (@available(iOS 15.0, *)) {
+        button.configurationUpdateHandler = ^(__kindof UIButton *btn) {
+            // Apply a simple background when pressed
+            if (btn.isHighlighted) {
+                btn.backgroundColor = [UIColor systemGray5Color];
+            } else {
+                btn.backgroundColor = nil;
+            }
+        };
+    }
 }
 
 - (void)layoutSubviews {
