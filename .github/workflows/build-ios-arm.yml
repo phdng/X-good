@@ -55,13 +55,7 @@ jobs:
             echo "AltList headers not found" >&2
             exit 1
           fi
-          RELEASE_JSON="$TMP_DIR/altlist_release.json"
-          python3 -c 'import urllib.request; print(urllib.request.urlopen("https://api.github.com/repos/opa334/AltList/releases/latest").read().decode("utf-8"))' > "$RELEASE_JSON"
-          DEB_URL="$(python3 -c 'import json; data=json.load(open("'"$RELEASE_JSON"'")); assets=data.get("assets", []); print(next((a.get("browser_download_url","") for a in assets if a.get("name","").endswith(".deb")), ""))')"
-          if [[ -z "$DEB_URL" ]]; then
-            echo "AltList release .deb not found" >&2
-            exit 1
-          fi
+          DEB_URL="https://github.com/opa334/AltList/releases/latest/download/AltList.deb"
           curl -fsSL "$DEB_URL" -o "$TMP_DIR/AltList.deb"
           dpkg-deb -x "$TMP_DIR/AltList.deb" "$TMP_DIR/altlist_extract"
           FRAMEWORK_PATH="$(find "$TMP_DIR/altlist_extract" -name AltList.framework -print -quit)"
