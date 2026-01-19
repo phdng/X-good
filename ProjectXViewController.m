@@ -359,16 +359,16 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
     // Add basic identifier sections
     [self addIdentifierSection:@"IDFA" title:@"IDFA"];
     [self addIdentifierSection:@"IDFV" title:@"IDFV"];
-    [self addIdentifierSection:@"DeviceModel" title:@"机型"];
-    [self addIdentifierSection:@"DeviceName" title:@"设备名"];
-    [self addIdentifierSection:@"IOSVersion" title:@"版本号"];
-    [self addIdentifierSection:@"WiFi" title:@"WiFi信息"];
-    [self addIdentifierSection:@"StorageSystem" title:@"存储信息"];
-    [self addIdentifierSection:@"Battery" title:@"电池信息"];
+    [self addIdentifierSection:@"DeviceModel" title:@"Device Model"];
+    [self addIdentifierSection:@"DeviceName" title:@"Device Name"];
+    [self addIdentifierSection:@"IOSVersion" title:@"iOS Version"];
+    [self addIdentifierSection:@"WiFi" title:@"Wi-Fi Info"];
+    [self addIdentifierSection:@"StorageSystem" title:@"Storage Info"];
+    [self addIdentifierSection:@"Battery" title:@"Battery Info"];
     
     // Add basic UUID sections - moved System Uptime and Boot Time from advanced to basic
-    [self addIdentifierSection:@"SystemUptime" title:@"开机时长"];
-    [self addIdentifierSection:@"BootTime" title:@"启动时间"];
+    [self addIdentifierSection:@"SystemUptime" title:@"Uptime"];
+    [self addIdentifierSection:@"BootTime" title:@"Boot Time"];
     
     
     // Add advanced identifier sections (will be initially hidden)
@@ -585,71 +585,74 @@ static void darwinNotificationCallback(CFNotificationCenterRef center,
 - (NSString *)identifierValueForType:(NSString *)type {
     [[DataManager sharedManager] freshCacheData];
     PhoneInfo * phoneInfo = CurrentPhoneInfo();
+    if (!phoneInfo) {
+        return @"Not Set";
+    }
     // 转换为小写或保持原样，根据你的实际需求
     NSString *lowerType = [type lowercaseString];
     if ([lowerType isEqualToString:@"idfa"]) {
-        return phoneInfo.idfa;
+        return phoneInfo.idfa ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"idfv"]) {
-        return phoneInfo.idfv;
+        return phoneInfo.idfv ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"devicename"]) {
-        return phoneInfo.deviceName;
+        return phoneInfo.deviceName ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"serialnumber"]) {
-        return phoneInfo.serialNumber;
+        return phoneInfo.serialNumber ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"iosversion"]) {
-        return [phoneInfo.iosVersion versionAndBuild];
+        return [phoneInfo.iosVersion versionAndBuild] ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"wifi"]) {
-        return [phoneInfo.wifiInfo showInfo];
+        return [phoneInfo.wifiInfo showInfo] ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"storagesystem"]) {
-        return [phoneInfo.storageInfo showInfo];
+        return [phoneInfo.storageInfo showInfo] ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"battery"]) {
-        return phoneInfo.batteryInfo.batteryLevel;
+        return phoneInfo.batteryInfo.batteryLevel ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"systembootuuid"]) {
-        return phoneInfo.systemBootUUID;
+        return phoneInfo.systemBootUUID ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"dyldcacheuuid"]) {
-        return phoneInfo.dyldCacheUUID;
+        return phoneInfo.dyldCacheUUID ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"pasteboarduuid"]) {
-        return phoneInfo.pasteboardUUID;
+        return phoneInfo.pasteboardUUID ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"keychainuuid"]) {
-        return phoneInfo.keychainUUID;
+        return phoneInfo.keychainUUID ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"userdefaultsuuid"]) {
-        return phoneInfo.userDefaultsUUID;
+        return phoneInfo.userDefaultsUUID ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"appgroupuuid"]) {
-        return phoneInfo.appGroupUUID;
+        return phoneInfo.appGroupUUID ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"systemuptime"]) {
-        return phoneInfo.upTimeInfo.upTimeStr;
+        return phoneInfo.upTimeInfo.upTimeStr ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"boottime"]) {
-        return phoneInfo.upTimeInfo.bootTimeStr;
+        return phoneInfo.upTimeInfo.bootTimeStr ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"coredatauuid"]) {
-        return phoneInfo.coreDataUUID;
+        return phoneInfo.coreDataUUID ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"appinstalluuid"]) {
-        return phoneInfo.appInstallUUID;
+        return phoneInfo.appInstallUUID ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"appcontaineruuid"]) {
-        return phoneInfo.appContainerUUID;
+        return phoneInfo.appContainerUUID ?: @"Not Set";
     }
     else if ([lowerType isEqualToString:@"devicemodel"]) {
-        return phoneInfo.deviceModel.showInfo;
+        return phoneInfo.deviceModel.showInfo ?: @"Not Set";
     }
     
     // 如果没有匹配的类型，返回 nil 或默认值
-    return nil;
+    return @"Not Set";
 }
 - (NSArray<NSString *> *)allIdentifierTypes {
     return  @[

@@ -93,9 +93,10 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
 
         [[ActionManager sharedManager] newPhone];
         NSMutableSet *scopeSet = [[AppScopeManager sharedManager] loadPreferences];
+        NSArray *scopedApps = scopeSet ? [scopeSet allObjects] : @[];
         return dataResponse(@{
             @"status": @"success",
-            @"data": [scopeSet allObjects]
+            @"data": scopedApps
         });
     }];
 
@@ -107,7 +108,7 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
 
         NSError *error;
         NSMutableSet *scopeSet = getSet(request,error);
-        if (error && scopeSet) {
+        if (error || !scopeSet) {
             return jsonFormatErrorResponse();
         }
         [[AppScopeManager sharedManager] savePreferences:scopeSet];
@@ -119,10 +120,10 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
                       requestClass:[GCDWebServerRequest class] 
                       processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
         NSMutableSet *scopeSet = [[AppScopeManager sharedManager] loadPreferences];
-
+        NSArray *scopedApps = scopeSet ? [scopeSet allObjects] : @[];
         return dataResponse(@{
             @"status": @"success",
-            @"data": [scopeSet allObjects]
+            @"data": scopedApps
         });
     }];
 
@@ -131,7 +132,8 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
                       requestClass:[GCDWebServerRequest class] 
                       processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
         PhoneInfo * phoneInfo = [PhoneInfo loadFromPrefs];
-        return dataResponse([phoneInfo toDictionary]);
+        NSDictionary *phoneDict = phoneInfo ? [phoneInfo toDictionary] : @{};
+        return dataResponse(phoneDict);
     }];
 
     [webServer addHandlerForMethod:@"POST"
@@ -198,9 +200,10 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
                       requestClass:[GCDWebServerRequest class] 
                       processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
         NSArray<NSDictionary *> * data = [[DBManager sharedManager] query:@"select DISTINCT code from operator"];
-         return dataResponse(@{
+        NSArray *codes = data ? [data valueForKey:@"code"] : @[];
+        return dataResponse(@{
             @"status": @"success",
-            @"data": [data valueForKey:@"code"]
+            @"data": codes
         });
     }];
 
@@ -209,9 +212,10 @@ GCDWebServerErrorResponse* jsonFormatErrorResponse()
                       requestClass:[GCDWebServerRequest class] 
                       processBlock:^GCDWebServerResponse *(GCDWebServerRequest *request) {
         NSArray<NSDictionary *> * data = [[DBManager sharedManager] query:@"select version from KMOS"];
+        NSArray *versions = data ? [data valueForKey:@"version"] : @[];
         return dataResponse(@{
             @"status": @"success",
-            @"data": [data valueForKey:@"version"]
+            @"data": versions
         });
     }];
 

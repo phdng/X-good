@@ -79,15 +79,15 @@
                                                         image:[UIImage systemImageNamed:@"house.fill"] 
                                                             tag:0];
 
-    profileNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"备份" 
+    profileNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Backups" 
                                                         image:[UIImage systemImageNamed:@"arrow.up.doc.on.clipboard"] 
                                                         tag:1];
 
-    appNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"应用" 
+    appNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Apps" 
                                                     image:[UIImage systemImageNamed:@"square.grid.2x2"] 
                                                     tag:2];
 
-    securityNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"设置" 
+    securityNav.tabBarItem = [[UITabBarItem alloc] initWithTitle:@"Settings" 
                                                         image:[UIImage systemImageNamed:@"gear"] 
                                                             tag:3];
 

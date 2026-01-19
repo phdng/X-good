@@ -22,7 +22,7 @@
 
 - (void)refreshPinnedCoordinates {
     // Set the main title directly
-    self.title = @"设置";
+    self.title = @"Settings";
     
     // Remove any existing barButtonItems to prevent duplication
     self.navigationItem.rightBarButtonItems = nil;
@@ -79,7 +79,7 @@
 
     // 运营商标题
     UILabel *carrierLabel = [[UILabel alloc] init];
-    carrierLabel.text = @"运营商";
+    carrierLabel.text = @"Carrier";
     carrierLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
     carrierLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:carrierLabel];
@@ -93,14 +93,14 @@
 
     // 系统版本标题
     UILabel *versionLabel = [[UILabel alloc] init];
-    versionLabel.text = @"系统版本";
+    versionLabel.text = @"System Version";
     versionLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
     versionLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:versionLabel];
 
     // 最低版本标题
     UILabel *minLabel = [[UILabel alloc] init];
-    minLabel.text = @"最低版本";
+    minLabel.text = @"Minimum Version";
     minLabel.font = [UIFont systemFontOfSize:14];
     minLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:minLabel];
@@ -114,7 +114,7 @@
 
     // 最高版本标题
     UILabel *maxLabel = [[UILabel alloc] init];
-    maxLabel.text = @"最高版本";
+    maxLabel.text = @"Maximum Version";
     maxLabel.font = [UIFont systemFontOfSize:14];
     maxLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [contentView addSubview:maxLabel];
@@ -129,7 +129,7 @@
 
     // 保存按钮
     UIButton *saveButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [saveButton setTitle:@"保存设置" forState:UIControlStateNormal];
+    [saveButton setTitle:@"Save Settings" forState:UIControlStateNormal];
     saveButton.titleLabel.font = [UIFont boldSystemFontOfSize:17];
     saveButton.translatesAutoresizingMaskIntoConstraints = NO;
     [saveButton addTarget:self action:@selector(saveSettings) forControlEvents:UIControlEventTouchUpInside];
@@ -255,7 +255,7 @@
     settingManager.minVersion = system1;
     settingManager.maxVersion = system2;
     [settingManager saveToPrefs];
-    [self showSuccessMessage:@"保存成功"];
+    [self showSuccessMessage:@"Settings saved"];
 }
 - (void)showSuccessMessage:(NSString *)message {
     // 方法1：使用 UIAlertController（iOS 8+）

@@ -18,7 +18,7 @@
 }
 
 - (void)showInView:(UIView *)view {
-    [self showInView:view withMessage:@"加载中..."];
+    [self showInView:view withMessage:@"Loading..."];
 }
 
 - (void)showInView:(UIView *)view withMessage:(NSString *)message {
@@ -80,7 +80,7 @@
 }
 
 - (void)show {
-    [self showWithMessage:@"加载中..."];
+    [self showWithMessage:@"Loading..."];
 }
 
 // 获取 keyWindow 的辅助方法

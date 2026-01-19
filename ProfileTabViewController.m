@@ -200,7 +200,7 @@ static void darwinNotificationCallback(
     
     // "Profiles" text - centered in the title view
     UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(50, 0, 100, 44)];
-    titleLabel.text = @"备份";
+    titleLabel.text = @"Backups";
     titleLabel.font = [UIFont systemFontOfSize:18 weight:UIFontWeightBold];
     titleLabel.textColor = [UIColor labelColor];
     titleLabel.textAlignment = NSTextAlignmentCenter;
@@ -220,7 +220,7 @@ static void darwinNotificationCallback(
     
     // "Current" text (top line)
     UILabel *currentLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 2, 40, 14)];
-    currentLabel.text = @"当前";
+    currentLabel.text = @"Current";
     currentLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightRegular];
     currentLabel.textColor = [UIColor secondaryLabelColor];
     currentLabel.textAlignment = NSTextAlignmentRight;
@@ -230,7 +230,7 @@ static void darwinNotificationCallback(
     
     // "Profile" text (bottom line)
     UILabel *profileSubLabel = [[UILabel alloc] initWithFrame:CGRectMake(0, 16, 40, 14)];
-    profileSubLabel.text = @"备份";
+    profileSubLabel.text = @"Backup";
     profileSubLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightRegular];
     profileSubLabel.textColor = [UIColor secondaryLabelColor];
     profileSubLabel.textAlignment = NSTextAlignmentRight;
@@ -434,13 +434,13 @@ static void darwinNotificationCallback(
 
 - (NSString *)tableView:(UITableView *)tableView titleForHeaderInSection:(NSInteger)section {
     if (section == 0) {
-        return @"存储空间";
+        return @"Storage";
     } else if (section == 1) {
-        return @"搜索备份";
+        return @"Search Backups";
     } else if (section == 2) {
-        return @"操作";
+        return @"Actions";
     } else {
-        return @"备份";
+        return @"Backups";
     }
 }
 
@@ -452,7 +452,7 @@ static void darwinNotificationCallback(
         
         // Create the label
         UILabel *titleLabel = [[UILabel alloc] initWithFrame:CGRectMake(15, 8, 150, 30)];
-        titleLabel.text = @"搜索备份";
+        titleLabel.text = @"Search Backups";
         titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         titleLabel.textColor = [UIColor secondaryLabelColor];
         [headerView addSubview:titleLabel];
@@ -543,7 +543,7 @@ static void darwinNotificationCallback(
             
             // "AVAILABLE" text positioned below the primary storage label
             UILabel *availableLabel = [[UILabel alloc] initWithFrame:CGRectMake(20, 45, 100, 16)];
-            availableLabel.text = @"可用";
+            availableLabel.text = @"Available";
             availableLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium];
             availableLabel.textColor = [UIColor secondaryLabelColor];
             [cardView addSubview:availableLabel];
@@ -646,7 +646,7 @@ static void darwinNotificationCallback(
         
         // Create a modern search text field
         UITextField *searchField = [[UITextField alloc] initWithFrame:CGRectMake(15, 10, searchContainer.bounds.size.width - 80, 40)];
-        searchField.placeholder = @"通过备份名或ID搜索";
+        searchField.placeholder = @"Search by backup name or ID";
         searchField.font = [UIFont systemFontOfSize:16];
         searchField.backgroundColor = [UIColor tertiarySystemBackgroundColor];
         searchField.layer.cornerRadius = 10;
@@ -725,7 +725,7 @@ static void darwinNotificationCallback(
         
         // Configure button with icon and text - smaller font
         UIImage *importExportIcon = [UIImage systemImageNamed:@"square.and.arrow.up.on.square"];
-        NSString *importExportTitle = @"导入/导出";
+        NSString *importExportTitle = @"Import/Export";
         
         // Create configuration for button with smaller text
         UIFont *smallerFont = [UIFont systemFontOfSize:12 weight:UIFontWeightMedium]; // Reduced font size
@@ -752,7 +752,7 @@ static void darwinNotificationCallback(
         
         // Configure button with icon and text - smaller text
         UIImage *trashIcon = [UIImage systemImageNamed:@"trash"];
-        NSString *trashTitle = @"清空备份";
+        NSString *trashTitle = @"Delete All Backups";
         
         [trashAllButton setTitle:trashTitle forState:UIControlStateNormal];
         [trashAllButton setImage:trashIcon forState:UIControlStateNormal];
@@ -1014,7 +1014,7 @@ static void darwinNotificationCallback(
 
 - (void)switchToProfile:(Profile *)profile {
     // Show loading indicator
-    [[LoadingView sharedInstance] showWithMessage:@"切换备份中"];
+    [[LoadingView sharedInstance] showWithMessage:@"Switching backup..."];
     
     // Switch to the selected profile
     [[DaemonApiManager sharedManager] switchBackup:profile comp:^(id response, NSError *error) {
@@ -1049,7 +1049,7 @@ static void darwinNotificationCallback(
     
     [alert addTextFieldWithConfigurationHandler:^(UITextField * _Nonnull textField) {
         textField.text = profile.name;
-        textField.placeholder = @"备份名";
+        textField.placeholder = @"Backup name";
     }];
     
     [alert addAction:[UIAlertAction actionWithTitle:@"Cancel"
@@ -1062,7 +1062,7 @@ static void darwinNotificationCallback(
         NSString *newName = [alert.textFields.firstObject.text stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
         if (newName.length > 0) {
             // Show loading indicator
-            [[LoadingView sharedInstance] showWithMessage:@"处理中"];
+            [[LoadingView sharedInstance] showWithMessage:@"Processing..."];
 
             profile.name = newName;
             // profile 修改为newName
@@ -1136,7 +1136,7 @@ static void darwinNotificationCallback(
                                             style:UIAlertActionStyleDestructive
                                           handler:^(UIAlertAction * _Nonnull action) {
         // Show loading indicator
-        [[LoadingView sharedInstance] showWithMessage:@"处理中"];
+        [[LoadingView sharedInstance] showWithMessage:@"Processing..."];
         
         [manager remove:profile];
         [[DaemonApiManager sharedManager] removeBackup:profile comp:^(id response, NSError *error){
@@ -1305,7 +1305,7 @@ static void darwinNotificationCallback(
 
 - (void)importExportButtonTapped:(UIButton *)sender {
     // To be implemented later
-    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"导入/导出"
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Import/Export"
                                                                message:@"Import/Export functionality will be configured later."
                                                         preferredStyle:UIAlertControllerStyleAlert];
     
@@ -1330,7 +1330,7 @@ static void darwinNotificationCallback(
 
 - (void)deleteAllProfiles {
     // Show loading indicator
-    [[LoadingView sharedInstance] showWithMessage:@"处理中"];
+    [[LoadingView sharedInstance] showWithMessage:@"Processing..."];
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
         NSError *error = nil;
         

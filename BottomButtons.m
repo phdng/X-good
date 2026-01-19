@@ -217,7 +217,7 @@
     
     // Create kill button with soft minimalistic style
     UIButton *newPhoneButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [newPhoneButton setTitle:@"一键新机" forState:UIControlStateNormal];
+    [newPhoneButton setTitle:@"New Phone" forState:UIControlStateNormal];
     [newPhoneButton setTitleColor:[UIColor systemGreenColor] forState:UIControlStateNormal];
     newPhoneButton.backgroundColor = [[UIColor systemGreenColor] colorWithAlphaComponent:0.15];
     newPhoneButton.contentEdgeInsets = UIEdgeInsetsMake(6, 8, 6, 8);
@@ -228,7 +228,7 @@
     
     // Create respring button with soft minimalistic style
     UIButton *applyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [applyButton setTitle:@"注销" forState:UIControlStateNormal];
+    [applyButton setTitle:@"Respring" forState:UIControlStateNormal];
     [applyButton setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
     applyButton.backgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.15];
     applyButton.contentEdgeInsets = UIEdgeInsetsMake(6, 8, 6, 8);
@@ -284,7 +284,7 @@
 }
 - (void)newPhoneTap {
     // 显示在窗口上
-    [[LoadingView sharedInstance] showWithMessage:@"正在处理..."];
+    [[LoadingView sharedInstance] showWithMessage:@"Processing..."];
     
     // 延时关闭
      [[DaemonApiManager sharedManager] newPhone:^(id response, NSError *error) {
