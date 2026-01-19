@@ -48,6 +48,7 @@ ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit 
 ProjectX_CODESIGN_FLAGS = -Sent.plist
 ProjectX_CFLAGS = -fobjc-arc -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1  -I./common -I./model
 ProjectX_EXTRA_FRAMEWORKS = AltList
+ProjectX_LDFLAGS += -F$(THEOS)/lib
 
 # Ensure app is installed to the correct location with proper permissions
 ProjectX_INSTALL_PATH = /Applications
@@ -69,5 +70,4 @@ include $(THEOS_MAKE_PATH)/tool.mk
 
 
 export CFLAGS = -fobjc-arc -Wno-error
-
 
