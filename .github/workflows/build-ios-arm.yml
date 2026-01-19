@@ -57,3 +57,14 @@ jobs:
       - name: Build
         run: |
           make package SDKVERSION="$SDKVERSION" TARGET="$TARGET"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: projectx-build
+          path: |
+            packages/*.deb
+            .theos/obj/**/ProjectX.app
+            .theos/obj/**/ProjectXTweak.dylib
+            .theos/obj/**/ProjectXDaemon
+          if-no-files-found: warn
