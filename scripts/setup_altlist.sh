@@ -56,7 +56,12 @@ else
   exit 1
 fi
 
-FRAMEWORK_PATH="$(find "$DERIVED_DATA_PATH" "$ALT_DIR" -name AltList.framework -print -quit)"
+SEARCH_PATHS=("$ALT_DIR")
+if [[ -d "$DERIVED_DATA_PATH" ]]; then
+  SEARCH_PATHS+=("$DERIVED_DATA_PATH")
+fi
+
+FRAMEWORK_PATH="$(find "${SEARCH_PATHS[@]}" -name AltList.framework -print -quit)"
 if [[ -n "$FRAMEWORK_PATH" ]]; then
   mkdir -p "$THEOS/lib"
   cp -R "$FRAMEWORK_PATH" "$THEOS/lib/"
