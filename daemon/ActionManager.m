@@ -286,8 +286,11 @@
     if (!path.length) {
         return;
     }
-    if ([path isEqualToString:@"/var/lib/dpkg"] || [path isEqualToString:@"/private/var/lib/dpkg"]) {
-        NSLog(@"[ProjectXDaemon] Refusing to delete dpkg directory: %@", path);
+    if ([path isEqualToString:@"/var/lib/dpkg"] ||
+        [path isEqualToString:@"/private/var/lib/dpkg"] ||
+        [path hasPrefix:@"/var/lib/"] ||
+        [path hasPrefix:@"/private/var/lib/"]) {
+        NSLog(@"[ProjectXDaemon] Refusing to delete protected path: %@", path);
         return;
     }
     if([fm fileExistsAtPath:path]){

@@ -704,13 +704,22 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
     @try {
         // Pre-cache version info only once
         IosVersion *cachedVersionInfo = CurrentPhoneInfo().iosVersion;
+        if (!cachedVersionInfo) {
+            return original_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+        }
+        NSString *buildString = cachedVersionInfo.build;
+        NSString *kernelVersionString = cachedVersionInfo.kernelVersion;
+        if (!buildString.length || !kernelVersionString.length) {
+            return original_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+        }
+
         static char cachedBuildStr[32] = {0}; // Cache the build string
         static size_t cachedBuildStrLen = 0;
-        strlcpy(cachedBuildStr, [cachedVersionInfo.build UTF8String], sizeof(cachedBuildStr));
+        strlcpy(cachedBuildStr, [buildString UTF8String], sizeof(cachedBuildStr));
         cachedBuildStrLen = strlen(cachedBuildStr) + 1; // +1 for null terminator
 
         static char cachedKernelVersionStr[256] = {0}; // Cache the kernel version string
-        strlcpy(cachedKernelVersionStr, [cachedVersionInfo.kernelVersion UTF8String], sizeof(cachedKernelVersionStr));
+        strlcpy(cachedKernelVersionStr, [kernelVersionString UTF8String], sizeof(cachedKernelVersionStr));
         static size_t cachedKernelVersionStrLen = 0;
         cachedKernelVersionStrLen = strlen(cachedKernelVersionStr) + 1; // +1 for null terminator
 
