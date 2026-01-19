@@ -21,7 +21,7 @@
 	<string>wangmc.projectx</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/var/jb/usr/local/bin/ProjectXDaemon</string>
+		<string>/usr/local/bin/ProjectXDaemon</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
