@@ -18,11 +18,19 @@ else
   exit 1
 fi
 
-DEB_URL="$(python3 - <<'PY'
+DEB_URL="$(python3 - <<'PY' || true
 import json
 import urllib.request
+import os
+
 url = "https://api.github.com/repos/opa334/AltList/releases/latest"
-with urllib.request.urlopen(url) as response:
+request = urllib.request.Request(url)
+token = os.environ.get("GITHUB_TOKEN")
+if token:
+    request.add_header("Authorization", f"Bearer {token}")
+    request.add_header("X-GitHub-Api-Version", "2022-11-28")
+    request.add_header("Accept", "application/vnd.github+json")
+with urllib.request.urlopen(request) as response:
     data = json.load(response)
 for asset in data.get("assets", []):
     name = asset.get("name", "")
@@ -33,8 +41,7 @@ PY
 )"
 
 if [[ -z "$DEB_URL" ]]; then
-  echo "AltList release .deb not found" >&2
-  exit 1
+  DEB_URL="https://github.com/opa334/AltList/releases/latest/download/AltList.deb"
 fi
 
 curl -fsSL "$DEB_URL" -o "$TMP_DIR/AltList.deb"
