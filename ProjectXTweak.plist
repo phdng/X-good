@@ -8,6 +8,7 @@
 		<array>
 			<string>io.idb.deviceinfo</string>
 			<string>com.finalwire.aida64</string>
+			<string>com.suwen.DeviceInfo</string>
 		</array>	
 	</dict>
 </dict>
