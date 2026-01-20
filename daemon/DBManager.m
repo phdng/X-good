@@ -9,6 +9,13 @@
 
 @implementation DBManager
 
+static NSString *PXNullableStringFromCString(const char *value) {
+    if (!value) {
+        return nil;
+    }
+    return [NSString stringWithUTF8String:value];
+}
+
 + (instancetype)sharedManager {
     static DBManager *sharedManager = nil;
     static dispatch_once_t onceToken;
@@ -57,7 +64,10 @@
             const char *colNameC = sqlite3_column_name(stmt, i);
             if (!colNameC) continue;
 
-            NSString *colName = [NSString stringWithUTF8String:colNameC];
+            NSString *colName = PXNullableStringFromCString(colNameC);
+            if (!colName) {
+                continue;
+            }
             id value = [NSNull null];
 
             switch (sqlite3_column_type(stmt, i)) {
@@ -68,7 +78,7 @@
                     value = @(sqlite3_column_double(stmt, i));
                     break;
                 case SQLITE_TEXT:
-                    value = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, i)];
+                    value = PXNullableStringFromCString((const char *)sqlite3_column_text(stmt, i)) ?: [NSNull null];
                     break;
                 case SQLITE_NULL:
                     value = [NSNull null];
@@ -107,7 +117,10 @@
             const char *colNameC = sqlite3_column_name(stmt, i);
             if (!colNameC) continue;
 
-            NSString *colName = [NSString stringWithUTF8String:colNameC];
+            NSString *colName = PXNullableStringFromCString(colNameC);
+            if (!colName) {
+                continue;
+            }
             id value = [NSNull null];
 
             switch (sqlite3_column_type(stmt, i)) {
@@ -118,7 +131,7 @@
                     value = @(sqlite3_column_double(stmt, i));
                     break;
                 case SQLITE_TEXT:
-                    value = [NSString stringWithUTF8String:(const char *)sqlite3_column_text(stmt, i)];
+                    value = PXNullableStringFromCString((const char *)sqlite3_column_text(stmt, i)) ?: [NSNull null];
                     break;
                 case SQLITE_NULL:
                     value = [NSNull null];
