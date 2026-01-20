@@ -17,9 +17,46 @@
 
 %hook NSString
 
+static void PXAppendCStringLog(NSString *message) {
+    if (!message.length) {
+        return;
+    }
+    NSString *path = @"/tmp/projectx_cstring.log";
+    NSString *line = [message stringByAppendingString:@"\n"];
+    NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
+    if (!data) {
+        return;
+    }
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (!handle) {
+        [[NSFileManager defaultManager] createFileAtPath:path contents:data attributes:nil];
+        return;
+    }
+    @try {
+        [handle seekToEndOfFile];
+        [handle writeData:data];
+    } @catch (NSException *exception) {
+        PXLog(@"[WeaponX] ⚠️ Failed to write cstring log: %@", exception);
+    } @finally {
+        [handle closeFile];
+    }
+}
+
 + (instancetype)stringWithCString:(const char *)cString encoding:(NSStringEncoding)enc {
     if (!cString) {
-        PXLog(@"[WeaponX] ⚠️ stringWithCString:encoding: received NULL. Stack: %@", [NSThread callStackSymbols]);
+        NSString *message = [NSString stringWithFormat:@"[WeaponX] ⚠️ stringWithCString:encoding: received NULL. Stack: %@", [NSThread callStackSymbols]];
+        PXLog(@"%@", message);
+        PXAppendCStringLog(message);
+        return @"";
+    }
+    return %orig;
+}
+
++ (instancetype)stringWithUTF8String:(const char *)nullTerminatedCString {
+    if (!nullTerminatedCString) {
+        NSString *message = [NSString stringWithFormat:@"[WeaponX] ⚠️ stringWithUTF8String: received NULL. Stack: %@", [NSThread callStackSymbols]];
+        PXLog(@"%@", message);
+        PXAppendCStringLog(message);
         return @"";
     }
     return %orig;
