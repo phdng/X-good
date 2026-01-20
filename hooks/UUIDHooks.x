@@ -21,7 +21,12 @@ static void PXAppendCStringLog(NSString *message) {
     if (!message.length) {
         return;
     }
-    NSString *path = @"/tmp/projectx_cstring.log";
+    NSString *directory = @"/var/mobile/Library/Logs/ProjectX";
+    NSString *path = [directory stringByAppendingPathComponent:@"projectx_cstring.log"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                              withIntermediateDirectories:YES
+                                               attributes:nil
+                                                    error:nil];
     NSString *line = [message stringByAppendingString:@"\n"];
     NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
     if (!data) {
