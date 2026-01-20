@@ -23,10 +23,15 @@ static void PXAppendCStringLog(NSString *message) {
     }
     NSString *directory = @"/var/mobile/Library/Logs/ProjectX";
     NSString *path = [directory stringByAppendingPathComponent:@"projectx_cstring.log"];
+    NSError *dirError = nil;
     [[NSFileManager defaultManager] createDirectoryAtPath:directory
                               withIntermediateDirectories:YES
                                                attributes:nil
-                                                    error:nil];
+                                                    error:&dirError];
+    if (dirError) {
+        PXLog(@"[WeaponX] ⚠️ Failed to create log directory %@: %@", directory, dirError);
+        return;
+    }
     NSString *line = [message stringByAppendingString:@"\n"];
     NSData *data = [line dataUsingEncoding:NSUTF8StringEncoding];
     if (!data) {
@@ -34,7 +39,9 @@ static void PXAppendCStringLog(NSString *message) {
     }
     NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:path];
     if (!handle) {
-        [[NSFileManager defaultManager] createFileAtPath:path contents:data attributes:nil];
+        if (![[NSFileManager defaultManager] createFileAtPath:path contents:data attributes:nil]) {
+            PXLog(@"[WeaponX] ⚠️ Failed to create log file at %@", path);
+        }
         return;
     }
     @try {
@@ -74,7 +81,9 @@ static void PXAppendCStringLog(NSString *message) {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         NSString *processName = [[NSProcessInfo processInfo] processName];
         PXLog(@"[WeaponX] ✅ UUIDHooks loaded in process=%@ bundle=%@", processName, bundleID);
-        PXAppendCStringLog([NSString stringWithFormat:@"[WeaponX] ✅ UUIDHooks loaded in process=%@ bundle=%@", processName, bundleID]);
+        NSString *logMessage = [NSString stringWithFormat:@"[WeaponX] ✅ UUIDHooks loaded in process=%@ bundle=%@", processName, bundleID];
+        PXAppendCStringLog(logMessage);
+        PXLog(@"[WeaponX] 📄 Cstring log path: /var/mobile/Library/Logs/ProjectX/projectx_cstring.log");
     }
 }
 
