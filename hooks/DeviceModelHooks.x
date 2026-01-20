@@ -92,16 +92,16 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     if (!orig_sysctlbyname) {
         return -1;
     }
-    if (!name) {
-        // Some apps (intentionally or due to bugs) may pass a NULL name.
-        // Calling sysctlbyname(NULL, ...) is undefined and can crash (EXC_BAD_ACCESS)
-        // inside libc/kernel. Return an error instead.
+
+    // Defensive programming:
+    // Some apps (or anti-tamper code) can intentionally call sysctlbyname with NULL
+    // parameters to probe hooks. The real sysctlbyname implementation expects
+    // `name` and `oldlenp` to be non-NULL; calling through can crash.
+    if (!name || !oldlenp) {
         errno = EINVAL;
         return -1;
     }
-    if (!oldlenp) {
-        return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
-    }
+
     if (px_sysctlbyname_in_hook) {
         return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
     }
@@ -579,6 +579,15 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
         PXLog(@"[model] ⚠️ sysctl received NULL name; returning -1 to avoid crash");
         return -1;
     }
+
+    // sysctl(3) requires oldlenp to be non-NULL for output queries.
+    // Some apps can pass NULL to probe hooks; calling through and/or
+    // dereferencing would crash. Fail fast instead.
+    if (!oldlenp) {
+        errno = EINVAL;
+        return -1;
+    }
+
     // Get the bundle ID first to determine if we should spoof
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if (!bundleID) {
