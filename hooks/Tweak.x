@@ -250,6 +250,10 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
     }
     
     // For all other cases, pass through to the original function
+    if (!orig_IORegistryEntryCreateCFProperty) {
+        PXLog(@"[WeaponX] ⚠️ IORegistryEntryCreateCFProperty original is NULL; returning NULL to avoid crash");
+        return NULL;
+    }
     return orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
 }
 
@@ -286,6 +290,10 @@ static char* hook_GSSystemGetSerialNo(void) {
     }
     
     
+    if (!orig_GSSystemGetSerialNo) {
+        PXLog(@"[WeaponX] ⚠️ GSSystemGetSerialNo original is NULL; returning NULL to avoid crash");
+        return NULL;
+    }
     return orig_GSSystemGetSerialNo();
 }
 

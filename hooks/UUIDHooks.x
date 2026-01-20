@@ -480,6 +480,10 @@ static NSMutableDictionary *threadLocalCaches() {
 // Create a copy of the image infos structure with spoofed UUID
 static const struct dyld_all_image_infos* replaced_dyld_get_all_image_infos(void) {
     @try {
+        if (!orig_dyld_get_all_image_infos) {
+            PXLog(@"[WeaponX] ⚠️ _dyld_get_all_image_infos original is NULL; returning NULL to avoid crash");
+            return NULL;
+        }
         const struct dyld_all_image_infos *original = orig_dyld_get_all_image_infos();
         if (!original) return NULL;
         
