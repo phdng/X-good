@@ -1,4 +1,5 @@
 #import "PhoneInfo.h"
+#import "ProjectXLogging.h"
 
 @implementation PhoneInfo
 #pragma mark - JSON 序列化
@@ -124,12 +125,22 @@
         );
 
     if (!value || CFGetTypeID(value) != CFDictionaryGetTypeID()) {
+        PXLog(@"[PhoneInfo] ⚠️ CFPreferencesCopyValue returned %@ or non-dictionary.", value ? @"non-dictionary" : @"nil");
         if (value) CFRelease(value);
         return nil;
     }
 
     NSDictionary *dict = (__bridge NSDictionary *)value;
     PhoneInfo *info = [PhoneInfo fromDictionary:dict];
+    if (!info) {
+        PXLog(@"[PhoneInfo] ⚠️ Failed to decode PhoneInfo dictionary.");
+    } else {
+        NSString *modelName = info.deviceModel.modelName;
+        NSString *build = info.iosVersion.build;
+        if (modelName.length == 0 || build.length == 0) {
+            PXLog(@"[PhoneInfo] ⚠️ Loaded with missing values model=%@ build=%@", modelName ?: @"<nil>", build ?: @"<nil>");
+        }
+    }
     CFRelease(value);
     return info;
 }

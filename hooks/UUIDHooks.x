@@ -21,15 +21,26 @@ static void PXAppendCStringLog(NSString *message) {
     if (!message.length) {
         return;
     }
-    NSString *directory = @"/var/mobile/Library/Logs/ProjectX";
-    NSString *path = [directory stringByAppendingPathComponent:@"projectx_cstring.log"];
-    NSError *dirError = nil;
-    [[NSFileManager defaultManager] createDirectoryAtPath:directory
-                              withIntermediateDirectories:YES
-                                               attributes:nil
-                                                    error:&dirError];
-    if (dirError) {
-        PXLog(@"[WeaponX] ⚠️ Failed to create log directory %@: %@", directory, dirError);
+    NSArray<NSString *> *directories = @[
+        @"/var/mobile/Library/Logs/ProjectX",
+        [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/ProjectX"]
+    ];
+    NSString *path = nil;
+    for (NSString *directory in directories) {
+        NSError *dirError = nil;
+        BOOL created = [[NSFileManager defaultManager] createDirectoryAtPath:directory
+                                                 withIntermediateDirectories:YES
+                                                                  attributes:nil
+                                                                       error:&dirError];
+        if (!created && dirError) {
+            PXLog(@"[WeaponX] ⚠️ Failed to create log directory %@: %@", directory, dirError);
+            continue;
+        }
+        path = [directory stringByAppendingPathComponent:@"projectx_cstring.log"];
+        break;
+    }
+    if (!path) {
+        PXLog(@"[WeaponX] ⚠️ Failed to resolve cstring log path.");
         return;
     }
     NSString *line = [message stringByAppendingString:@"\n"];
@@ -83,7 +94,8 @@ static void PXAppendCStringLog(NSString *message) {
         PXLog(@"[WeaponX] ✅ UUIDHooks loaded in process=%@ bundle=%@", processName, bundleID);
         NSString *logMessage = [NSString stringWithFormat:@"[WeaponX] ✅ UUIDHooks loaded in process=%@ bundle=%@", processName, bundleID];
         PXAppendCStringLog(logMessage);
-        PXLog(@"[WeaponX] 📄 Cstring log path: /var/mobile/Library/Logs/ProjectX/projectx_cstring.log");
+        PXLog(@"[WeaponX] 📄 Cstring log paths: /var/mobile/Library/Logs/ProjectX/projectx_cstring.log or %@",
+              [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/ProjectX/projectx_cstring.log"]);
     }
 }
 

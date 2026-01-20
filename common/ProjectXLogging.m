@@ -28,17 +28,21 @@ void PXLog(NSString *format, ...) {
         
         BOOL hasRootfulLaunchd = [[NSFileManager defaultManager] fileExistsAtPath:@"/Library/LaunchDaemons/wangmc.projectx.plist"];
         BOOL hasRootlessPrefix = [[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"];
+        NSString *sandboxLogPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Logs/ProjectX"];
         NSArray *possiblePaths = hasRootfulLaunchd ? @[
+            sandboxLogPath,
             @"/var/mobile/Library/Logs/ProjectX",
             @"/var/jb/var/mobile/Library/Logs/ProjectX",
             @"/var/jb/private/var/mobile/Library/Logs/ProjectX",
             @"/var/LIB/var/mobile/Library/Logs/ProjectX"
         ] : (hasRootlessPrefix ? @[
+            sandboxLogPath,
             @"/var/jb/var/mobile/Library/Logs/ProjectX",
             @"/var/jb/private/var/mobile/Library/Logs/ProjectX",
             @"/var/LIB/var/mobile/Library/Logs/ProjectX",
             @"/var/mobile/Library/Logs/ProjectX"
         ] : @[
+            sandboxLogPath,
             @"/var/mobile/Library/Logs/ProjectX",
             @"/var/jb/var/mobile/Library/Logs/ProjectX",
             @"/var/jb/private/var/mobile/Library/Logs/ProjectX",

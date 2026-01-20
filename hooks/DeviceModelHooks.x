@@ -19,6 +19,13 @@ static int (*orig_uname)(struct utsname *);
 static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
 
+%ctor {
+    @autoreleasepool {
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSString *processName = [[NSProcessInfo processInfo] processName];
+        PXLog(@"[DeviceModelHooks] ✅ loaded in process=%@ bundle=%@", processName, bundleID);
+    }
+}
 
 #pragma mark - Hook Implementations
 

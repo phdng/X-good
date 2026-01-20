@@ -42,6 +42,14 @@ static NSData* (*original_NSData_dataWithContentsOfFile)(Class self, SEL _cmd, N
 static NSDictionary* (*original_NSDictionary_dictionaryWithContentsOfFile)(Class self, SEL _cmd, NSString *path);
 static id (*original_NSString_stringWithContentsOfFile)(Class self, SEL _cmd, NSString *path, NSStringEncoding enc, NSError **error);
 
+%ctor {
+    @autoreleasepool {
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSString *processName = [[NSProcessInfo processInfo] processName];
+        PXLog(@"[IOSVersionHooks] ✅ loaded in process=%@ bundle=%@", processName, bundleID);
+    }
+}
+
 
 // Throttling variables to prevent excessive function calls
 static uint64_t lastSystemVersionCallTime = 0;
