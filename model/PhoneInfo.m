@@ -1,5 +1,6 @@
 #import "PhoneInfo.h"
 #import "ProjectXLogging.h"
+#import <sys/sysctl.h>
 
 static CFPropertyListRef PXCopyPhoneInfoPrefs(CFStringRef user, CFStringRef host) {
     return CFPreferencesCopyValue(
@@ -19,6 +20,44 @@ static NSDictionary *PXLoadPhoneInfoFromPlistPath(NSString *path) {
         return nil;
     }
     return dict;
+}
+
+static NSString *PXSysctlString(const char *name) {
+    size_t size = 0;
+    if (sysctlbyname(name, NULL, &size, NULL, 0) != 0 || size == 0) {
+        return nil;
+    }
+    char *value = malloc(size);
+    if (!value) {
+        return nil;
+    }
+    if (sysctlbyname(name, value, &size, NULL, 0) != 0) {
+        free(value);
+        return nil;
+    }
+    NSString *result = [NSString stringWithUTF8String:value];
+    free(value);
+    return result;
+}
+
+static PhoneInfo *PXFallbackPhoneInfo(void) {
+    PhoneInfo *info = [[PhoneInfo alloc] init];
+    NSString *hwMachine = PXSysctlString("hw.machine");
+    NSString *osVersion = [[UIDevice currentDevice] systemVersion];
+    NSString *build = PXSysctlString("kern.osversion");
+
+    DeviceModel *model = [[DeviceModel alloc] init];
+    model.modelName = hwMachine ?: @"";
+    model.hwModel = hwMachine ?: @"";
+    info.deviceModel = model;
+
+    IosVersion *iosVersion = [[IosVersion alloc] init];
+    iosVersion.version = osVersion ?: @"";
+    iosVersion.build = build ?: @"";
+    info.iosVersion = iosVersion;
+
+    PXLog(@"[PhoneInfo] ⚠️ Using fallback PhoneInfo hw.machine=%@ build=%@", hwMachine ?: @"<nil>", build ?: @"<nil>");
+    return info;
 }
 
 @implementation PhoneInfo
@@ -197,8 +236,8 @@ static NSDictionary *PXLoadPhoneInfoFromPlistPath(NSString *path) {
         return info;
     }
 
-    PXLog(@"[PhoneInfo] ⚠️ All prefs/plist attempts failed; returning nil.");
-    return nil;
+    PXLog(@"[PhoneInfo] ⚠️ All prefs/plist attempts failed; using fallback values.");
+    return PXFallbackPhoneInfo();
 }
 
 #pragma mark - 直接字典存储和读取
