@@ -69,6 +69,14 @@ static void PXAppendCStringLog(NSString *message) {
 
 %end
 
+%ctor {
+    @autoreleasepool {
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSString *processName = [[NSProcessInfo processInfo] processName];
+        PXLog(@"[WeaponX] ✅ UUIDHooks loaded in process=%@ bundle=%@", processName, bundleID);
+        PXAppendCStringLog([NSString stringWithFormat:@"[WeaponX] ✅ UUIDHooks loaded in process=%@ bundle=%@", processName, bundleID]);
+    }
+}
 
 #pragma mark - NSUUID Hooks
 
@@ -85,6 +93,8 @@ static void PXAppendCStringLog(NSString *message) {
                 PXLog(@"[WeaponX] 🔄 Spoofing NSUUID with: %@", bootUUID);
                 return uuid;
             }
+        } else {
+            PXLog(@"[WeaponX] ⚠️ NSUUID+UUID missing bootUUID; using original.");
         }
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] ❌ Exception in NSUUID+UUID: %@", exception);
