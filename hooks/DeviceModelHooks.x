@@ -18,6 +18,7 @@ typedef struct xsw_usage xsw_usage;
 static int (*orig_uname)(struct utsname *);
 static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
+static __thread BOOL px_sysctlbyname_in_hook = NO;
 
 %ctor {
     @autoreleasepool {
@@ -79,7 +80,17 @@ static int hook_uname(struct utsname *buf) {
 
 // Hook for sysctlbyname - another common way to get device model
 static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
-    // First, we need to log that this call happened
+    if (!orig_sysctlbyname) {
+        return -1;
+    }
+    if (!name) {
+        return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    }
+    if (px_sysctlbyname_in_hook) {
+        return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    }
+    px_sysctlbyname_in_hook = YES;
+
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     // if (isHWMachine || isHWModel || isOSVersion) {
         // Make a copy of the original value for logging purposes
@@ -88,14 +99,12 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
 
     // Get the original value first to show before/after in logs
     int origResult = orig_sysctlbyname(name, originalValue, &originalLen, NULL, 0);
-    if(!name){
-        return origResult;
-    }
 
 
     // Get device specs
     DeviceModel *model = CurrentPhoneInfo().deviceModel;
     if (!model) {
+        px_sysctlbyname_in_hook = NO;
         return origResult;
     }
 
@@ -406,6 +415,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             boottime.tv_usec = 0;
             memcpy(oldp, &boottime, sizeof(boottime));
             *oldlenp = sizeof(boottime);
+            px_sysctlbyname_in_hook = NO;
             return 0; // Success
         }
     }
@@ -431,6 +441,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
                     PXLog(@"[model] Spoofed sysctlbyname %s to: %s for app: %@", 
                             name, valueToUse, bundleID);
                 }
+                px_sysctlbyname_in_hook = NO;
                 return 0;
             } else {
                 PXLog(@"[model] WARNING: Spoofed value too long for sysctlbyname buffer");
@@ -440,7 +451,9 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
         PXLog(@"[model] WARNING: Cannot spoof sysctlbyname, missing required params or spoofed value");
     }
     // For all other cases, pass through to the original function
-    return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    int result = orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    px_sysctlbyname_in_hook = NO;
+    return result;
 }
 
 
