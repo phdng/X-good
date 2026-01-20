@@ -345,18 +345,18 @@ static PhoneInfo *PXFallbackPhoneInfo(void) {
     }
     
     NSError *error = nil;
-    NSData *jsonData = [NSJSONSerialization dataWithJSONObject:dict 
-                                                       options:NSJSONWritingPrettyPrinted 
-                                                         error:&error];
-    
-    if (error) {
-        NSLog(@"JSON 序列化失败: %@", error);
+    NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:dict
+                                                                   format:NSPropertyListXMLFormat_v1_0
+                                                                  options:0
+                                                                    error:&error];
+    if (error || !plistData) {
+        NSLog(@"Plist 序列化失败: %@", error);
         return NO;
     }
     
-    BOOL success = [jsonData writeToFile:filePath 
-                                 options:NSDataWritingAtomic 
-                                   error:&error];
+    BOOL success = [plistData writeToFile:filePath
+                                  options:NSDataWritingAtomic
+                                    error:&error];
     
     if (!success) {
         NSLog(@"写入文件失败: %@, error: %@", filePath, error);
