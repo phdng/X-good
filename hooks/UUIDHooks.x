@@ -89,6 +89,10 @@ static void PXAppendCStringLog(NSString *message) {
 
 %hook NSProcessInfo
 
+- (BOOL)isMacCatalystApp {
+    return NO;
+}
+
 - (BOOL)isiOSAppOnMac {
     return NO;
 }
