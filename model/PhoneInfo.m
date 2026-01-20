@@ -139,7 +139,8 @@ static NSDictionary *PXLoadPhoneInfoFromPlistPath(NSString *path) {
     NSArray<NSDictionary *> *domains = @[
         @{@"user": (__bridge id)kCFPreferencesAnyUser, @"host": (__bridge id)kCFPreferencesCurrentHost, @"label": @"AnyUser/CurrentHost"},
         @{@"user": (__bridge id)kCFPreferencesCurrentUser, @"host": (__bridge id)kCFPreferencesAnyHost, @"label": @"CurrentUser/AnyHost"},
-        @{@"user": (__bridge id)kCFPreferencesCurrentUser, @"host": (__bridge id)kCFPreferencesCurrentHost, @"label": @"CurrentUser/CurrentHost"}
+        @{@"user": (__bridge id)kCFPreferencesCurrentUser, @"host": (__bridge id)kCFPreferencesCurrentHost, @"label": @"CurrentUser/CurrentHost"},
+        @{@"user": (__bridge id)kCFPreferencesAnyUser, @"host": (__bridge id)kCFPreferencesAnyHost, @"label": @"AnyUser/AnyHost"}
     ];
 
     for (NSDictionary *entry in domains) {
@@ -173,6 +174,7 @@ static NSDictionary *PXLoadPhoneInfoFromPlistPath(NSString *path) {
 
     NSArray<NSString *> *plistPaths = @[
         @"/var/mobile/Library/Preferences/com.projectx.phoneinfo.plist",
+        [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Preferences/com.projectx.phoneinfo.plist"],
         @"/var/jb/var/mobile/Library/Preferences/com.projectx.phoneinfo.plist",
         @"/var/jb/private/var/mobile/Library/Preferences/com.projectx.phoneinfo.plist"
     ];
@@ -231,6 +233,18 @@ static NSDictionary *PXLoadPhoneInfoFromPlistPath(NSString *path) {
         CFSTR("PhoneInfo"),
         (__bridge CFPropertyListRef)dict,
         CFSTR("com.projectx.phoneinfo"),
+        kCFPreferencesAnyUser,
+        kCFPreferencesAnyHost
+    );
+    CFPreferencesSynchronize(
+        CFSTR("com.projectx.phoneinfo"),
+        kCFPreferencesAnyUser,
+        kCFPreferencesAnyHost
+    );
+    CFPreferencesSetValue(
+        CFSTR("PhoneInfo"),
+        (__bridge CFPropertyListRef)dict,
+        CFSTR("com.projectx.phoneinfo"),
         kCFPreferencesCurrentUser,
         kCFPreferencesAnyHost
     );
@@ -239,6 +253,14 @@ static NSDictionary *PXLoadPhoneInfoFromPlistPath(NSString *path) {
         kCFPreferencesCurrentUser,
         kCFPreferencesAnyHost
     );
+    NSString *primaryPath = @"/var/mobile/Library/Preferences/com.projectx.phoneinfo.plist";
+    if (![PhoneInfo saveDictionaryToFile:dict toFile:primaryPath]) {
+        PXLog(@"[PhoneInfo] ⚠️ Failed to write plist to %@", primaryPath);
+    }
+    NSString *jbPath = @"/var/jb/var/mobile/Library/Preferences/com.projectx.phoneinfo.plist";
+    if (![PhoneInfo saveDictionaryToFile:dict toFile:jbPath]) {
+        PXLog(@"[PhoneInfo] ⚠️ Failed to write plist to %@", jbPath);
+    }
     return YES;
 }
 /**
