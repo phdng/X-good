@@ -547,6 +547,17 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 
 #pragma mark - CoreFoundation Version Dictionary Hook
 
+static CFStringRef PXCreateCFStringFromNSString(NSString *value) {
+    if (!value) {
+        return NULL;
+    }
+    const char *cString = [value UTF8String];
+    if (!cString) {
+        return NULL;
+    }
+    return CFStringCreateWithCString(NULL, cString, kCFStringEncodingUTF8);
+}
+
 // Hook CFCopySystemVersionDictionary to spoof iOS version information at the CoreFoundation level
 static CFDictionaryRef (*original_CFCopySystemVersionDictionary)(void);
 CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
@@ -577,8 +588,8 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
                 // Use a default build number based on version
                 NSString *actualBuild = [NSString stringWithFormat:@"%@000", [actualVersion stringByReplacingOccurrencesOfString:@"." withString:@""]];
                 
-                CFStringRef versionValue = CFStringCreateWithCString(NULL, [actualVersion UTF8String], kCFStringEncodingUTF8);
-                CFStringRef buildValue = CFStringCreateWithCString(NULL, [actualBuild UTF8String], kCFStringEncodingUTF8);
+                CFStringRef versionValue = PXCreateCFStringFromNSString(actualVersion);
+                CFStringRef buildValue = PXCreateCFStringFromNSString(actualBuild);
                 
                 CFMutableDictionaryRef fallbackDict = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
                 
@@ -645,8 +656,8 @@ CFDictionaryRef replaced_CFCopySystemVersionDictionary(void) {
             CFStringRef versionKey = CFSTR("ProductVersion");
             CFStringRef buildKey = CFSTR("ProductBuildVersion");
             
-            CFStringRef versionValue = CFStringCreateWithCString(NULL, [spoofedVersion UTF8String], kCFStringEncodingUTF8);
-            CFStringRef buildValue = CFStringCreateWithCString(NULL, [spoofedBuild UTF8String], kCFStringEncodingUTF8);
+            CFStringRef versionValue = PXCreateCFStringFromNSString(spoofedVersion);
+            CFStringRef buildValue = PXCreateCFStringFromNSString(spoofedBuild);
             
             if (versionValue) {
                 CFDictionarySetValue(mutableDict, versionKey, versionValue);
@@ -870,11 +881,11 @@ CFTypeRef replaced_CFBundleGetValueForInfoDictionaryKey(CFBundleRef bundle, CFSt
                     
                     if (![spoofedVersion hasPrefix:@"iOS"]) {
                         NSString *prefixedVersion = [NSString stringWithFormat:@"iOS%@", spoofedVersion];
-                        return CFStringCreateWithCString(NULL, [prefixedVersion UTF8String], kCFStringEncodingUTF8);
+                        return PXCreateCFStringFromNSString(prefixedVersion);
                     }
                 }
                 
-                return CFStringCreateWithCString(NULL, [spoofedVersion UTF8String], kCFStringEncodingUTF8);
+                return PXCreateCFStringFromNSString(spoofedVersion);
             }
         }
         
@@ -890,7 +901,7 @@ CFTypeRef replaced_CFBundleGetValueForInfoDictionaryKey(CFBundleRef bundle, CFSt
         if (key && (CFEqual(key, CFSTR("MinimumOSVersion")))) {
             // Return the current device's actual iOS version for MinimumOSVersion
             NSString *actualVersion = [[UIDevice currentDevice] systemVersion];
-            return CFStringCreateWithCString(NULL, [actualVersion UTF8String], kCFStringEncodingUTF8);
+            return PXCreateCFStringFromNSString(actualVersion);
         }
         
         NSLog(@"[iosversion] ℹ️ No original function for CFBundleGetValueForInfoDictionaryKey, returning NULL");
