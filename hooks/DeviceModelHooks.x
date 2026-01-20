@@ -86,6 +86,9 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     if (!name) {
         return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
     }
+    if (!oldlenp) {
+        return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    }
     if (px_sysctlbyname_in_hook) {
         return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
     }
@@ -123,7 +126,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     // Handle CPU-related sysctls
     else if (strcmp(name, "hw.ncpu") == 0 || strcmp(name, "hw.activecpu") == 0) {
         // Number of CPUs / Active CPUs
-        if (cpuCoreCount > 0) {
+        if (cpuCoreCount > 0 && oldp && oldlenp) {
             if (*oldlenp == sizeof(uint32_t)) {
                 *(uint32_t *)oldp = (uint32_t)cpuCoreCount;
             } else if (*oldlenp == sizeof(int)) {
@@ -131,18 +134,22 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             } else if (*oldlenp == sizeof(unsigned long)) {
                 *(unsigned long *)oldp = (unsigned long)cpuCoreCount;
             }
+            px_sysctlbyname_in_hook = NO;
+            return 0;
         }
     }
     else if (strcmp(name, "hw.cpu.brand_string") == 0 || strcmp(name, "hw.cpubrand") == 0 || strcmp(name, "hw.model") == 0) {
         // CPU Brand/Model Name - return the processor name like "Apple A11 Bionic"
         if (cpuArchitecture && cpuArchitecture.length > 0) {
             const char *cpuBrand = [cpuArchitecture UTF8String];
-            if (cpuBrand && *oldlenp > 0) {
+            if (cpuBrand && oldp && oldlenp && *oldlenp > 0) {
                 size_t brandLen = strlen(cpuBrand);
                 if (brandLen < *oldlenp) {
                     *oldlenp = brandLen + 1;
                     memset(oldp, 0, *oldlenp);
                     strcpy(oldp, cpuBrand);
+                    px_sysctlbyname_in_hook = NO;
+                    return 0;
                 } else {
                     PXLog(@"[DeviceSpec] WARNING: CPU brand string too long for buffer");
                 }
@@ -151,8 +158,10 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     }
     else if (strcmp(name, "hw.cputype") == 0) {
         // CPU Type - ARM64 is already defined as CPU_TYPE_ARM64 in system headers
-        if (*oldlenp >= sizeof(uint32_t)) {
+        if (oldp && oldlenp && *oldlenp >= sizeof(uint32_t)) {
             *(uint32_t *)oldp = CPU_TYPE_ARM64;
+            px_sysctlbyname_in_hook = NO;
+            return 0;
         }
     }
     else if (strcmp(name, "hw.cpusubtype") == 0) {
