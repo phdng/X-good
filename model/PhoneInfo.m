@@ -1,6 +1,26 @@
 #import "PhoneInfo.h"
 #import "ProjectXLogging.h"
 
+static CFPropertyListRef PXCopyPhoneInfoPrefs(CFStringRef user, CFStringRef host) {
+    return CFPreferencesCopyValue(
+        CFSTR("PhoneInfo"),
+        CFSTR("com.projectx.phoneinfo"),
+        user,
+        host
+    );
+}
+
+static NSDictionary *PXLoadPhoneInfoFromPlistPath(NSString *path) {
+    if (path.length == 0) {
+        return nil;
+    }
+    NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+    if (dict.count == 0) {
+        return nil;
+    }
+    return dict;
+}
+
 @implementation PhoneInfo
 #pragma mark - JSON 序列化
 
@@ -116,33 +136,67 @@
 }
 
 + (instancetype)loadFromPrefs{
-    CFPropertyListRef value =
-        CFPreferencesCopyValue(
-            CFSTR("PhoneInfo"),
-            CFSTR("com.projectx.phoneinfo"),
-            kCFPreferencesAnyUser,
-            kCFPreferencesCurrentHost
-        );
+    NSArray<NSDictionary *> *domains = @[
+        @{@"user": (__bridge id)kCFPreferencesAnyUser, @"host": (__bridge id)kCFPreferencesCurrentHost, @"label": @"AnyUser/CurrentHost"},
+        @{@"user": (__bridge id)kCFPreferencesCurrentUser, @"host": (__bridge id)kCFPreferencesAnyHost, @"label": @"CurrentUser/AnyHost"},
+        @{@"user": (__bridge id)kCFPreferencesCurrentUser, @"host": (__bridge id)kCFPreferencesCurrentHost, @"label": @"CurrentUser/CurrentHost"}
+    ];
 
-    if (!value || CFGetTypeID(value) != CFDictionaryGetTypeID()) {
-        PXLog(@"[PhoneInfo] ⚠️ CFPreferencesCopyValue returned %@ or non-dictionary.", value ? @"non-dictionary" : @"nil");
-        if (value) CFRelease(value);
-        return nil;
-    }
+    for (NSDictionary *entry in domains) {
+        CFStringRef user = (__bridge CFStringRef)entry[@"user"];
+        CFStringRef host = (__bridge CFStringRef)entry[@"host"];
+        NSString *label = entry[@"label"];
+        CFPropertyListRef value = PXCopyPhoneInfoPrefs(user, host);
+        if (!value) {
+            PXLog(@"[PhoneInfo] ⚠️ CFPreferencesCopyValue (%@) returned nil.", label);
+            continue;
+        }
+        if (CFGetTypeID(value) != CFDictionaryGetTypeID()) {
+            PXLog(@"[PhoneInfo] ⚠️ CFPreferencesCopyValue (%@) returned non-dictionary.", label);
+            CFRelease(value);
+            continue;
+        }
 
-    NSDictionary *dict = (__bridge NSDictionary *)value;
-    PhoneInfo *info = [PhoneInfo fromDictionary:dict];
-    if (!info) {
-        PXLog(@"[PhoneInfo] ⚠️ Failed to decode PhoneInfo dictionary.");
-    } else {
+        NSDictionary *dict = (__bridge_transfer NSDictionary *)value;
+        PhoneInfo *info = [PhoneInfo fromDictionary:dict];
+        if (!info) {
+            PXLog(@"[PhoneInfo] ⚠️ Failed to decode PhoneInfo dictionary (%@).", label);
+            continue;
+        }
         NSString *modelName = info.deviceModel.modelName;
         NSString *build = info.iosVersion.build;
         if (modelName.length == 0 || build.length == 0) {
-            PXLog(@"[PhoneInfo] ⚠️ Loaded with missing values model=%@ build=%@", modelName ?: @"<nil>", build ?: @"<nil>");
+            PXLog(@"[PhoneInfo] ⚠️ Loaded with missing values model=%@ build=%@ (%@).", modelName ?: @"<nil>", build ?: @"<nil>", label);
         }
+        return info;
     }
-    CFRelease(value);
-    return info;
+
+    NSArray<NSString *> *plistPaths = @[
+        @"/var/mobile/Library/Preferences/com.projectx.phoneinfo.plist",
+        @"/var/jb/var/mobile/Library/Preferences/com.projectx.phoneinfo.plist",
+        @"/var/jb/private/var/mobile/Library/Preferences/com.projectx.phoneinfo.plist"
+    ];
+    for (NSString *path in plistPaths) {
+        NSDictionary *dict = PXLoadPhoneInfoFromPlistPath(path);
+        if (!dict) {
+            PXLog(@"[PhoneInfo] ⚠️ No plist data at %@", path);
+            continue;
+        }
+        PhoneInfo *info = [PhoneInfo fromDictionary:dict];
+        if (!info) {
+            PXLog(@"[PhoneInfo] ⚠️ Failed to decode PhoneInfo plist at %@", path);
+            continue;
+        }
+        NSString *modelName = info.deviceModel.modelName;
+        NSString *build = info.iosVersion.build;
+        if (modelName.length == 0 || build.length == 0) {
+            PXLog(@"[PhoneInfo] ⚠️ Loaded plist with missing values model=%@ build=%@ path=%@", modelName ?: @"<nil>", build ?: @"<nil>", path);
+        }
+        return info;
+    }
+
+    PXLog(@"[PhoneInfo] ⚠️ All prefs/plist attempts failed; returning nil.");
+    return nil;
 }
 
 #pragma mark - 直接字典存储和读取
@@ -172,6 +226,18 @@
         CFSTR("com.projectx.phoneinfo"),
         kCFPreferencesAnyUser,
         kCFPreferencesCurrentHost
+    );
+    CFPreferencesSetValue(
+        CFSTR("PhoneInfo"),
+        (__bridge CFPropertyListRef)dict,
+        CFSTR("com.projectx.phoneinfo"),
+        kCFPreferencesCurrentUser,
+        kCFPreferencesAnyHost
+    );
+    CFPreferencesSynchronize(
+        CFSTR("com.projectx.phoneinfo"),
+        kCFPreferencesCurrentUser,
+        kCFPreferencesAnyHost
     );
     return YES;
 }
