@@ -92,17 +92,15 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     if (!orig_sysctlbyname) {
         return -1;
     }
-
-    // Defensive programming:
-    // Some apps (or anti-tamper code) can intentionally call sysctlbyname with NULL
-    // parameters to probe hooks. The real sysctlbyname implementation expects
-    // `name` and `oldlenp` to be non-NULL; calling through can crash.
-    if (!name || !oldlenp) {
+    if (px_sysctlbyname_in_hook) {
+        return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+    }
+    if (!name) {
         errno = EINVAL;
         return -1;
     }
-
-    if (px_sysctlbyname_in_hook) {
+    // Safety: if caller passes NULL out pointers, do not spoof or touch them
+    if (!oldp || !oldlenp) {
         return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
     }
     px_sysctlbyname_in_hook = YES;
@@ -211,7 +209,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             }
         }
         
-        if (*oldlenp >= sizeof(uint32_t)) {
+        if (oldp && oldlenp && *oldlenp >= sizeof(uint32_t)) {
             *(uint32_t *)oldp = cpuSubtype;
         }
     }
@@ -249,7 +247,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             }
         }
         
-        if (*oldlenp >= sizeof(uint32_t)) {
+        if (oldp && oldlenp && *oldlenp >= sizeof(uint32_t)) {
             *(uint32_t *)oldp = cpuFamily;
         }
     }
@@ -292,7 +290,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             }
         }
         
-        if (*oldlenp >= sizeof(uint64_t)) {
+        if (oldp && oldlenp && *oldlenp >= sizeof(uint64_t)) {
             *(uint64_t *)oldp = cpuFrequency;
         } else if (*oldlenp >= sizeof(uint32_t)) {
             *(uint32_t *)oldp = (uint32_t)cpuFrequency;
@@ -302,7 +300,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
         // Cache line size - typically 64 bytes for ARM64
         uint32_t cacheLineSize = 64;
         
-        if (*oldlenp >= sizeof(uint32_t)) {
+        if (oldp && oldlenp && *oldlenp >= sizeof(uint32_t)) {
             *(uint32_t *)oldp = cacheLineSize;
         }
     }
@@ -356,7 +354,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
         unsigned long long totalMemory = deviceMemoryGB * 1024 * 1024 * 1024;
         
         // Different sysctls might return different size types
-        if (*oldlenp == sizeof(uint64_t)) {
+        if (oldp && oldlenp && *oldlenp == sizeof(uint64_t)) {
             *(uint64_t *)oldp = totalMemory;
         } else if (*oldlenp == sizeof(uint32_t)) {
             *(uint32_t *)oldp = (uint32_t)totalMemory;
@@ -401,7 +399,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             }
         }
         
-        if (*oldlenp >= sizeof(uint32_t)) {
+        if (oldp && oldlenp && *oldlenp >= sizeof(uint32_t)) {
             *(uint32_t *)oldp = featureSupported ? 1 : 0;
         }
     }
@@ -421,7 +419,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
         }
         
         const char *featuresStr = [cpuFeatures UTF8String];
-        if (featuresStr && *oldlenp > 0) {
+        if (featuresStr && oldp && oldlenp && *oldlenp > 0) {
             size_t featuresLen = strlen(featuresStr);
             if (featuresLen < *oldlenp) {
                 *oldlenp = featuresLen + 1;
@@ -579,18 +577,14 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
         PXLog(@"[model] ⚠️ sysctl received NULL name; returning -1 to avoid crash");
         return -1;
     }
-
-    // sysctl(3) requires oldlenp to be non-NULL for output queries.
-    // Some apps can pass NULL to probe hooks; calling through and/or
-    // dereferencing would crash. Fail fast instead.
-    if (!oldlenp) {
-        errno = EINVAL;
-        return -1;
-    }
-
     // Get the bundle ID first to determine if we should spoof
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if (!bundleID) {
+        return orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen);
+    }
+
+    // Safety: if caller passes NULL out pointers (common anti-tamper probe), do not spoof or touch them
+    if (!oldp || !oldlenp) {
         return orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen);
     }
     
