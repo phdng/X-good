@@ -296,10 +296,20 @@ static PhoneInfo *PXFallbackPhoneInfo(void) {
     NSString *primaryPath = @"/var/mobile/Library/Preferences/com.projectx.phoneinfo.plist";
     if (![PhoneInfo saveDictionaryToFile:dict toFile:primaryPath]) {
         PXLog(@"[PhoneInfo] ⚠️ Failed to write plist to %@", primaryPath);
+    } else {
+        PXLog(@"[PhoneInfo] ✅ Wrote plist to %@", primaryPath);
     }
     NSString *jbPath = @"/var/jb/var/mobile/Library/Preferences/com.projectx.phoneinfo.plist";
     if (![PhoneInfo saveDictionaryToFile:dict toFile:jbPath]) {
         PXLog(@"[PhoneInfo] ⚠️ Failed to write plist to %@", jbPath);
+    } else {
+        PXLog(@"[PhoneInfo] ✅ Wrote plist to %@", jbPath);
+    }
+    NSString *sandboxPath = [NSHomeDirectory() stringByAppendingPathComponent:@"Library/Preferences/com.projectx.phoneinfo.plist"];
+    if (![PhoneInfo saveDictionaryToFile:dict toFile:sandboxPath]) {
+        PXLog(@"[PhoneInfo] ⚠️ Failed to write plist to %@", sandboxPath);
+    } else {
+        PXLog(@"[PhoneInfo] ✅ Wrote plist to %@", sandboxPath);
     }
     return YES;
 }
