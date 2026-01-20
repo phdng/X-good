@@ -906,6 +906,9 @@ static void getConsistentMemoryStats(unsigned long long totalMemory,
 }
 static NXArchInfo* hook_nx_get_local_arch_info()
 {
+    if (!orig_nx_get_local_arch_info) {
+        return NULL;
+    }
     NXArchInfo* original = orig_nx_get_local_arch_info();
     
     DeviceModel *model = CurrentPhoneInfo().deviceModel;
@@ -986,6 +989,9 @@ static NXArchInfo* hook_nx_get_local_arch_info()
 // Host statistics hook for memory stats
 static kern_return_t hook_host_statistics64(host_t host, host_flavor_t flavor, host_info64_t info, mach_msg_type_number_t *count) {
     // Call original function first
+    if (!orig_host_statistics64) {
+        return KERN_FAILURE;
+    }
     kern_return_t result = orig_host_statistics64(host, flavor, info, count);
     
     // Check if we should modify the result

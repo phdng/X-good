@@ -62,6 +62,9 @@ static NSTimeInterval hook_systemUptime(NSProcessInfo *self, SEL _cmd) {
         return upTime;
     }
     
+    if (!orig_systemUptime) {
+        return 0;
+    }
     return orig_systemUptime(self, _cmd);
 }
 

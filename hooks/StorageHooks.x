@@ -294,6 +294,9 @@ static int replaced_statfs(const char *path, struct statfs *buf) {
     if (!path || !buf) {
         return -1; // EINVAL
     }
+    if (!orig_statfs) {
+        return -1;
+    }
     
     // Call original function
     int ret = orig_statfs(path, buf);
@@ -324,6 +327,9 @@ static int replaced_statfs64(const char *path, struct statfs64 *buf) {
     if (!path || !buf) {
         return -1; // EINVAL
     }
+    if (!orig_statfs64) {
+        return -1;
+    }
     
     // Call original function
     int ret = orig_statfs64(path, buf);
@@ -353,6 +359,9 @@ static int replaced_getfsstat(struct statfs *buf, int bufsize, int flags) {
     // Check for null pointer or invalid size
     if (!buf || bufsize <= 0) {
         return -1; // EINVAL
+    }
+    if (!orig_getfsstat) {
+        return -1;
     }
     
     // Call original function
@@ -388,6 +397,9 @@ static int replaced_getfsstat64(struct statfs64 *buf, int bufsize, int flags) {
     if (!buf || bufsize <= 0) {
         return -1; // EINVAL
     }
+    if (!orig_getfsstat64) {
+        return -1;
+    }
     
     // Call original function
     int ret = orig_getfsstat64(buf, bufsize, flags);
@@ -419,6 +431,9 @@ static int replaced_getfsstat64(struct statfs64 *buf, int bufsize, int flags) {
 // Replacement for IORegistryEntryCreateCFProperty - used for IOKit property lookups
 static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
     // Call original first
+    if (!orig_IORegistryEntryCreateCFProperty) {
+        return NULL;
+    }
     CFTypeRef result = orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
     
     if (!result || !key ) {

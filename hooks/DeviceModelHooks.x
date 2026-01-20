@@ -33,6 +33,10 @@ static __thread BOOL px_sysctlbyname_in_hook = NO;
 // Hook for uname() system call - used by many apps to detect device model
 static int hook_uname(struct utsname *buf) {
     // Call the original first
+    if (!orig_uname) {
+        PXLog(@"[model] ⚠️ uname original is NULL; returning -1 to avoid crash");
+        return -1;
+    }
     int ret = orig_uname(buf);
     
     if (ret != 0) {
@@ -558,6 +562,10 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
 // static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
 
 static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    if (!orig_sysctl) {
+        PXLog(@"[model] ⚠️ sysctl original is NULL; returning -1 to avoid crash");
+        return -1;
+    }
     // Get the bundle ID first to determine if we should spoof
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if (!bundleID) {
