@@ -99,8 +99,27 @@ static void PXAppendCStringLog(NSString *message) {
 
 %end
 
+static BOOL PXNSProcessInfoReturnNo(id self, SEL _cmd) {
+    return NO;
+}
+
 %ctor {
     @autoreleasepool {
+        Class processInfoClass = objc_getClass("NSProcessInfo");
+        if (processInfoClass) {
+            SEL iosAppOnMacSel = @selector(isiOSAppOnMac);
+            if (![processInfoClass instancesRespondToSelector:iosAppOnMacSel]) {
+                class_addMethod(processInfoClass, iosAppOnMacSel, (IMP)PXNSProcessInfoReturnNo, "c@:");
+                PXLog(@"[WeaponX] ✅ Added isiOSAppOnMac fallback to NSProcessInfo");
+            }
+            SEL catalystSel = @selector(isMacCatalystApp);
+            if (![processInfoClass instancesRespondToSelector:catalystSel]) {
+                class_addMethod(processInfoClass, catalystSel, (IMP)PXNSProcessInfoReturnNo, "c@:");
+                PXLog(@"[WeaponX] ✅ Added isMacCatalystApp fallback to NSProcessInfo");
+            }
+        } else {
+            PXLog(@"[WeaponX] ⚠️ NSProcessInfo class not found for fallback selectors");
+        }
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         NSString *processName = [[NSProcessInfo processInfo] processName];
         PXLog(@"[WeaponX] ✅ UUIDHooks loaded in process=%@ bundle=%@", processName, bundleID);
