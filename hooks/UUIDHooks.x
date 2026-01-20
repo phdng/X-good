@@ -15,6 +15,18 @@
 // Macro for iOS version checking
 #define SYSTEM_VERSION_GREATER_THAN_OR_EQUAL_TO(v) ([[[UIDevice currentDevice] systemVersion] compare:v options:NSNumericSearch] != NSOrderedAscending)
 
+%hook NSString
+
++ (instancetype)stringWithCString:(const char *)cString encoding:(NSStringEncoding)enc {
+    if (!cString) {
+        PXLog(@"[WeaponX] ⚠️ stringWithCString:encoding: received NULL. Stack: %@", [NSThread callStackSymbols]);
+        return @"";
+    }
+    return %orig;
+}
+
+%end
+
 
 #pragma mark - NSUUID Hooks
 
