@@ -550,6 +550,10 @@ static const struct dyld_all_image_infos* replaced_dyld_get_all_image_infos(void
         PXLog(@"[WeaponX] ❌ Exception in replaced_dyld_get_all_image_infos: %@", exception);
     }
     
+    if (!orig_dyld_get_all_image_infos) {
+        PXLog(@"[WeaponX] ⚠️ _dyld_get_all_image_infos original is NULL; returning NULL to avoid crash");
+        return NULL;
+    }
     return orig_dyld_get_all_image_infos();
 }
 
@@ -614,6 +618,10 @@ static int replaced_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, 
     }
     
     // Call original
+    if (!orig_sysctlbyname) {
+        PXLog(@"[WeaponX] ⚠️ sysctlbyname original is NULL; returning -1 to avoid crash");
+        return -1;
+    }
     return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
 }
 
