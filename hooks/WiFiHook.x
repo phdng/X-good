@@ -145,15 +145,19 @@ static id replaced_dictionaryWithScanResult(id self, SEL _cmd, id arg1) {
 // Hook implementation for WiFiManagerClientCreate
 static WiFiManagerRef replaced_WiFiManagerClientCreate(CFAllocatorRef allocator, int flags) {
     // Call original implementation
-    WiFiManagerRef result = orig_WiFiManagerClientCreate(allocator, flags);
-    return result;
+    if (!orig_WiFiManagerClientCreate) {
+        return NULL;
+    }
+    return orig_WiFiManagerClientCreate(allocator, flags);
 }
 
 // Hook implementation for WiFiDeviceClientCopyCurrentNetwork
 static WiFiNetworkRef replaced_WiFiDeviceClientCopyCurrentNetwork(WiFiDeviceClientRef client) {
     // Call original implementation
-    WiFiNetworkRef result = orig_WiFiDeviceClientCopyCurrentNetwork(client);
-    return result;
+    if (!orig_WiFiDeviceClientCopyCurrentNetwork) {
+        return NULL;
+    }
+    return orig_WiFiDeviceClientCopyCurrentNetwork(client);
 }
 
 // Hook implementation for WiFiNetworkGetSSID
@@ -166,6 +170,9 @@ static CFStringRef replaced_WiFiNetworkGetSSID(WiFiNetworkRef network) {
     }
     
     // Call original as fallback
+    if (!orig_WiFiNetworkGetSSID) {
+        return NULL;
+    }
     return orig_WiFiNetworkGetSSID(network);
 }
 
@@ -177,6 +184,9 @@ static CFStringRef replaced_WiFiNetworkGetBSSID(WiFiNetworkRef network) {
     }
     
     // Call original as fallback
+    if (!orig_WiFiNetworkGetBSSID) {
+        return NULL;
+    }
     return orig_WiFiNetworkGetBSSID(network);
 }
 
@@ -368,4 +378,3 @@ static void initializeHooks(void) {
         }
     }
 }
-

@@ -333,6 +333,9 @@ static NSString *getCurrentCellularNetworkType() {
 static Boolean (*original_SCNetworkReachabilityGetFlags)(SCNetworkReachabilityRef target, SCNetworkReachabilityFlags *flags);
 
 Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SCNetworkReachabilityFlags *flags) {
+    if (!original_SCNetworkReachabilityGetFlags) {
+        return false;
+    }
     if (shouldShowAsWiFi()) {
         return original_SCNetworkReachabilityGetFlags(target, flags);
     }
@@ -478,6 +481,9 @@ Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SC
 static int (*original_getifaddrs)(struct ifaddrs **);
 static int hooked_getifaddrs(struct ifaddrs **ifap) {
     NSLog(@"[NetworkHook] hooked_getifaddrs");
+    if (!original_getifaddrs) {
+        return -1;
+    }
     int result = original_getifaddrs(ifap);
     if (result == 0 && ifap && *ifap) {
         struct ifaddrs *ifa = *ifap;
@@ -623,6 +629,9 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
 static CFDictionaryRef (*original_CNCopyCurrentNetworkInfo)(CFStringRef interfaceName);
 
 static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName) {
+    if (!original_CNCopyCurrentNetworkInfo) {
+        return NULL;
+    }
     if (shouldShowAsWiFi()) {
         return original_CNCopyCurrentNetworkInfo(interfaceName);
     }
