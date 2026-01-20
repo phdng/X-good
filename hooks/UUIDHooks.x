@@ -87,6 +87,14 @@ static void PXAppendCStringLog(NSString *message) {
 
 %end
 
+%hook NSProcessInfo
+
+- (BOOL)isiOSAppOnMac {
+    return NO;
+}
+
+%end
+
 %ctor {
     @autoreleasepool {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
