@@ -1,5 +1,6 @@
 #import "PhoneInfo.h"
 #import "ProjectXLogging.h"
+#import <UIKit/UIKit.h>
 #import <sys/sysctl.h>
 
 static CFPropertyListRef PXCopyPhoneInfoPrefs(CFStringRef user, CFStringRef host) {
