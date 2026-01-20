@@ -4,6 +4,7 @@
 #import <UIKit/UIKit.h>
 #import <sys/utsname.h>
 #import <sys/sysctl.h>
+#import <errno.h>
 #import <IOKit/IOKitLib.h>
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
@@ -92,7 +93,11 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
         return -1;
     }
     if (!name) {
-        return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+        // Some apps (intentionally or due to bugs) may pass a NULL name.
+        // Calling sysctlbyname(NULL, ...) is undefined and can crash (EXC_BAD_ACCESS)
+        // inside libc/kernel. Return an error instead.
+        errno = EINVAL;
+        return -1;
     }
     if (!oldlenp) {
         return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
