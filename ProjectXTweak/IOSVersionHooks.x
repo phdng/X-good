@@ -7,6 +7,7 @@
 #import <WebKit/WebKit.h>
 #import <sys/sysctl.h>
 #import <dlfcn.h>
+#import <substrate.h>
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <mach/mach_time.h>
 

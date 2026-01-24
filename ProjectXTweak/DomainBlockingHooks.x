@@ -5,6 +5,7 @@
 #import <arpa/inet.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
+#import <substrate.h>
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <WebKit/WebKit.h>
 #import <SafariServices/SafariServices.h>

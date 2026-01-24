@@ -6,6 +6,7 @@
 #import <dlfcn.h>
 #import "ProjectXLogging.h"
 #import "WiFiManager.h"
+#import <substrate.h>
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <Network/Network.h>
 #import <SystemConfiguration/SystemConfiguration.h>

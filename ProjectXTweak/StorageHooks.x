@@ -5,6 +5,7 @@
 #import <Foundation/Foundation.h>
 #import <sys/mount.h>
 #import <dlfcn.h>
+#import <substrate.h>
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <IOKit/IOKitLib.h>
 #import <execinfo.h>
