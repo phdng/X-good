@@ -2,8 +2,8 @@ TARGET := iphone:clang:16.5:12.0
 ARCHS = arm64 arm64e
 LOGOS_DEFAULT_GENERATOR = internal
 INSTALL_TARGET_PROCESSES = SpringBoard ProjectX
-DEBUG=0
-FINALPACKAGE=1
+DEBUG=1
+FINALPACKAGE=0
 
 # Note: This project now includes a Notification Service Extension for rich push notifications
 # The extension needs to be manually added in Xcode after installing this package

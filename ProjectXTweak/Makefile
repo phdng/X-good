@@ -15,6 +15,6 @@ ProjectXTweak_PRIVATE_FRAMEWORKS = MobileCoreServices AppSupport SpringBoardServ
 ProjectXTweak_LIBRARIES = MobileGestalt
 
 # CRITICAL: Prevent constructor stripping - ensures __mod_init_func section is kept
-ProjectXTweak_LDFLAGS = -Wl,-all_load
+# ProjectXTweak_LDFLAGS = -Wl,-no_dead_strip -Wl,-ObjC
 
 include $(THEOS_MAKE_PATH)/tweak.mk
