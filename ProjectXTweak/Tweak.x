@@ -2023,6 +2023,25 @@ static char* hook_GSSystemGetSerialNo(void) {
     
     PXLog(@"ProjectX tweak initializing...");
     
+    NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
+    PXLog(@"[WeaponX] 💉 Tweak injected into process: %@ (BundleID: %@)", [NSProcessInfo processInfo].processName, currentBundleID);
+    
+    if (currentBundleID) {
+        IdentifierManager *mgr = [%c(IdentifierManager) sharedManager];
+        if (mgr) {
+            BOOL enabled = [mgr isApplicationEnabled:currentBundleID];
+            PXLog(@"[WeaponX] 🔍 App Enabled Check: %@ -> %@", currentBundleID, enabled ? @"YES" : @"NO");
+            
+            if (enabled) {
+                PXLog(@"[WeaponX] ✅ App is enabled! Hooks should activate.");
+            } else {
+                PXLog(@"[WeaponX] ⚠️ App is NOT enabled in settings.");
+            }
+        } else {
+            PXLog(@"[WeaponX] ❌ Failed to get IdentifierManager instance!");
+        }
+    }
+    
     // CRITICAL FIX: Safely initialize jailbreak detection bypass with proper safety measures
     // This must happen before any jailbreak-detection hooks are needed
     NSString *currentProcess = [NSProcessInfo processInfo].processName;

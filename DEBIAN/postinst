@@ -14,6 +14,11 @@ mkdir -p "/var/mobile/Library/WeaponX"
 chmod 755 "/var/mobile/Library/WeaponX"
 chown mobile:mobile "/var/mobile/Library/WeaponX"
 
+# Create Log directory for ProjectX
+mkdir -p "/var/mobile/Library/Logs/ProjectX"
+chmod 777 "/var/mobile/Library/Logs/ProjectX"
+chown mobile:mobile "/var/mobile/Library/Logs/ProjectX"
+
 # Create Sandbox/Profile directory (for LibSandy)
 mkdir -p "/Library/Sandbox/Profile"
 chmod 755 "/Library/Sandbox/Profile"
