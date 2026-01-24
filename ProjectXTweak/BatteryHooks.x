@@ -42,7 +42,7 @@ static NSDictionary *loadScopedApps(void) {
         } else {
             [scopedAppsCache removeAllObjects];
         }
-        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1, kScopedAppsPathAlt2];
+        NSArray *possiblePaths = @[kScopedAppsPath, kScopedAppsPathAlt1];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;
         for (NSString *path in possiblePaths) {
