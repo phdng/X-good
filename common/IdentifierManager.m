@@ -1979,29 +1979,94 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         return;
     }
     
-    // Set proper permissions for global scope file
-    NSError *permError = nil;
-    NSDictionary *fileAttributes = @{NSFilePosixPermissions: @0644,
-                                   NSFileOwnerAccountName: @"mobile"};
+
+
+- (void)loadSettings {
+    PXLog(@"[WeaponX] Loading settings...");
     
-    if (![fileManager setAttributes:fileAttributes
-                      ofItemAtPath:scopedAppsFile
-                             error:&permError]) {
-        NSLog(@"[ProjectX] Warning: Failed to set global scope file permissions: %@", permError);
+    // Try rootless path first
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
+    NSString *prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
+    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
+    
+    // Fallback to standard path if rootless path doesn't exist
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+    if (![fileManager fileExistsAtPath:prefsFile]) {
+        PXLog(@"[WeaponX] Settings not found at default path: %@", prefsFile);
+        
+        // Try Dopamine 2 path
+        prefsPath = @"/private/var/mobile/Library/Preferences";
+        prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
+        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
+        
+        // Fallback to standard path if needed
+        if (![fileManager fileExistsAtPath:prefsFile]) {
+            PXLog(@"[WeaponX] Settings not found at private path: %@", prefsFile);
+            
+            prefsPath = @"/var/mobile/Library/Preferences";
+            prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
+            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
+            
+            // If still not found, try the original filename as a fallback
+            if (![fileManager fileExistsAtPath:prefsFile]) {
+                prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.plist"];
+                PXLog(@"[WeaponX] Checking fallback legacy path: %@", prefsFile);
+            }
+        }
+    }
+    
+    PXLog(@"[WeaponX] Final settings file path: %@", prefsFile);
+    PXLog(@"[WeaponX] Final scoped apps file path: %@", scopedAppsFile);
+
+    // Load dictionary from main settings file
+    NSDictionary *loadedDict = [NSDictionary dictionaryWithContentsOfFile:prefsFile];
+    if (loadedDict) {
+        PXLog(@"[WeaponX] Successfully loaded settings dictionary.");
+    } else {
+        PXLog(@"[WeaponX] Failed to load settings dictionary (file may imply empty or permission denied?)");
     }
 
-    // Set proper permissions
-    if (![fileManager setAttributes:fileAttributes
-                      ofItemAtPath:prefsFile
-                             error:&permError]) {
-        NSLog(@"[ProjectX] Loaded scoped apps from legacy location, will migrate to global file");
+    // Check if settings are initialized
+    if (!loadedDict || ![loadedDict[@"SettingsInitialized"] boolValue]) {
+        // Initialize with default values
+        PXLog(@"[WeaponX] Settings not initialized, using defaults.");
+        self.settings = [NSMutableDictionary dictionaryWithDictionary:@{
+            @"IDFA": @NO,
+            @"IDFV": @NO,
+            @"DeviceName": @NO,
+            @"SerialNumber": @NO,
+            @"UDID": @NO,
+            @"IMEI": @NO,
+            @"SystemVersion": @NO,
+            @"BuildVersion": @NO,
+            @"StorageSystem": @NO,
+            @"SystemBootUUID": @NO,
+            @"DyldCacheUUID": @NO,
+            @"PasteboardUUID": @NO,
+            @"KeychainUUID": @NO,
+            @"UserDefaultsUUID": @NO,
+            @"AppGroupUUID": @NO,
+            @"CoreDataUUID": @NO,
+            @"AppInstallUUID": @NO,
+            @"AppContainerUUID": @NO,
+            @"SettingsInitialized": @YES
+        }];
+    } else {
+        self.settings = [loadedDict mutableCopy];
     }
     
-    if (savedApps) {
-        [self.scopedApps setDictionary:savedApps];
+    // Load scoped apps
+    NSDictionary *scopedAppsDict = [NSDictionary dictionaryWithContentsOfFile:scopedAppsFile];
+    if (scopedAppsDict && scopedAppsDict[@"ScopedApps"]) {
+        self.scopedApps = [scopedAppsDict[@"ScopedApps"] mutableCopy];
+        PXLog(@"[WeaponX] Loaded Scoped Apps: %lu apps found.", (unsigned long)self.scopedApps.count);
+        for (NSString *appID in self.scopedApps) {
+            PXLog(@"[WeaponX] Scope App: %@ | Enabled: %@", appID, self.scopedApps[appID][@"enabled"]);
+        }
+    } else {
+        PXLog(@"[WeaponX] No ScopedApps found or failed to load scoped apps file.");
+        self.scopedApps = [NSMutableDictionary dictionary];
     }
-    
-    // We no longer load identifier values from global settings as they're profile-specific
 }
 
 #pragma mark - Error Handling
