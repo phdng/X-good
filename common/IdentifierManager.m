@@ -235,13 +235,13 @@
 
 - (NSString *)getActiveProfileId {
     // First check the primary profile info file
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
     
     NSString *profileId = centralInfo[@"ProfileId"];
     if (!profileId) {
         // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *activeInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
         NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
         profileId = activeInfo[@"ProfileId"];
         
@@ -252,7 +252,7 @@
         NSLog(@"[WeaponX] Warning: No active profile ID found, using default");
         // Try to find any profile directory as a fallback
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDir = @"/var/mobile/Library/WeaponX/Profiles";
         NSError *error = nil;
         NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
         
@@ -290,7 +290,7 @@
     }
     
     // Build the path to this profile's identity directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     
     // Create the directory if it doesn't exist
@@ -1047,7 +1047,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     
     // For WiFi specifically, also update the SystemConfiguration plist
     if ([type isEqualToString:@"WiFi"]) {
-        NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
         NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
         settingsDict[@"wifiSpoofEnabled"] = @(enabled);
         [settingsDict writeToFile:securitySettingsPath atomically:YES];
@@ -1064,7 +1064,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     }
     // For Battery specifically, update the SystemConfiguration plist
     else if ([type isEqualToString:@"Battery"]) {
-        NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
         NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
         settingsDict[@"batterySpoofEnabled"] = @(enabled);
         [settingsDict writeToFile:securitySettingsPath atomically:YES];
@@ -1081,7 +1081,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     }
     // For DeviceTheme, update the SystemConfiguration plist
     else if ([type isEqualToString:@"DeviceTheme"]) {
-        NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
         NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
         settingsDict[@"deviceThemeSpoofEnabled"] = @(enabled);
         [settingsDict writeToFile:securitySettingsPath atomically:YES];
@@ -1846,7 +1846,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 // New method to load scoped apps configuration explicitly
 - (void)loadScopedApps {
     // Try rootless path first
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
     NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
     PXLog(@"[WeaponX] IdentifierManager DEBUG: Trying to load scoped apps from: %@", scopedAppsFile);
     
@@ -1855,7 +1855,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     if (![fileManager fileExistsAtPath:scopedAppsFile]) {
         PXLog(@"[WeaponX] IdentifierManager DEBUG: First path not found, trying Dopamine 2 path");
         // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+        prefsPath = @"/private/var/mobile/Library/Preferences";
         scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         
         // Fallback to older paths if needed
@@ -1903,7 +1903,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (void)saveSettings {
     // Get the proper preferences path
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
     NSString *prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
     
     // Global settings file for scoped apps (universal across all profiles)
@@ -1913,7 +1913,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if (![fileManager fileExistsAtPath:prefsPath]) {
         // Try Dopamine 2 path first
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+        prefsPath = @"/private/var/mobile/Library/Preferences";
         prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
         scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         
@@ -2000,7 +2000,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (void)loadSettings {
     // Try rootless path first
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
     NSString *prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
     NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
     
@@ -2008,7 +2008,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if (![fileManager fileExistsAtPath:prefsFile]) {
         // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+        prefsPath = @"/private/var/mobile/Library/Preferences";
         prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
         scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         
@@ -2221,14 +2221,14 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (void)saveScopedApps {
     // Get the proper preferences path
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
     NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
     
     // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if (![fileManager fileExistsAtPath:prefsPath]) {
         // Try Dopamine 2 path first
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+        prefsPath = @"/private/var/mobile/Library/Preferences";
         scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         
         // Fallback to standard path if needed
@@ -2766,7 +2766,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (BOOL)isCanvasFingerprintProtectionEnabled {
     // Read directly from the plist file - SINGLE SOURCE OF TRUTH
-    NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
     NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:securitySettingsPath];
     
     if (settingsDict) {
@@ -2783,7 +2783,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (BOOL)setCanvasFingerprintProtection:(BOOL)enabled {
     // Read and update the plist file directly - SINGLE SOURCE OF TRUTH
-    NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
     NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
     
     // Update with both key names for compatibility

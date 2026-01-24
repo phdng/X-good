@@ -186,12 +186,12 @@
         _fileManager = [NSFileManager defaultManager];
         
         // Use the specified jailbreak directory structure
-        _profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        _profilesDirectory = @"/var/mobile/Library/WeaponX/Profiles";
         
         NSLog(@"[WeaponX] 📁 Using profiles directory: %@", _profilesDirectory);
         
         // Create main WeaponX directory if it doesn't exist
-        NSString *weaponXDirectory = @"/var/jb/var/mobile/Library/WeaponX";
+        NSString *weaponXDirectory = @"/var/mobile/Library/WeaponX";
         [self createDirectoryIfNeeded:weaponXDirectory];
         
         // Create profiles directory if it doesn't exist
@@ -223,7 +223,7 @@
             [_fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:centralInfoPath error:nil];
             
             // Also write to active_profile_info.plist as a backup/legacy support
-            NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+            NSString *activeInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
             [profileInfo writeToFile:activeInfoPath atomically:YES];
             [_fileManager setAttributes:@{NSFilePosixPermissions: @0644} ofItemAtPath:activeInfoPath error:nil];
             
@@ -447,7 +447,7 @@
         NSInteger connectionType = [securitySettings integerForKey:@"networkConnectionType"];
         
         // Path to profile identity directory
-        NSString *identityDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@/identity", profile.profileId];
+        NSString *identityDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@/identity", profile.profileId];
         
         // Check if directory exists, create if not
         NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -861,13 +861,13 @@
     NSLog(@"[WeaponX] 🎲 Randomizing app versions for profile: %@", profileId);
     
     // Try rootless path first for multi-version data
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
     NSString *multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
     
     // Fallback to standard path if rootless path doesn't exist
     if (![self.fileManager fileExistsAtPath:prefsPath]) {
         // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+        prefsPath = @"/private/var/mobile/Library/Preferences";
         multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
         
         // Fallback to standard path if needed
@@ -890,7 +890,7 @@
     NSDictionary *scopedAppsInfo = [self loadScopedAppsInfo];
     
     // Create app_versions directory in the profile directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
     
     if (![self.fileManager fileExistsAtPath:appVersionsDir]) {
@@ -954,13 +954,13 @@
 
 - (NSDictionary *)loadScopedAppsInfo {
     // Try to load scoped apps info from global scope file
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
     NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
     
     // Fallback to standard path if rootless path doesn't exist
     if (![self.fileManager fileExistsAtPath:prefsPath]) {
         // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+        prefsPath = @"/private/var/mobile/Library/Preferences";
         scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         
         // Fallback to standard path if needed
@@ -1085,7 +1085,7 @@
         NSMutableArray *existingIDs = [NSMutableArray array];
         
         // Get profiles directory path
-        NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDirectory = @"/var/mobile/Library/WeaponX/Profiles";
         
         // Get file manager
         NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -1299,7 +1299,7 @@
 }
 
 - (void)saveSettings:(NSDictionary *)settings {
-    NSString *settingsPath = [@"/var/jb/var/mobile/Library/WeaponX" stringByAppendingPathComponent:@"settings.plist"];
+    NSString *settingsPath = [@"/var/mobile/Library/WeaponX" stringByAppendingPathComponent:@"settings.plist"];
     
     BOOL success = [settings writeToFile:settingsPath atomically:YES];
     if (success) {
@@ -1527,7 +1527,7 @@
     [self updateCurrentProfileInfoWithProfile:defaultProfile];
     
     // Also write directly to active_profile_info.plist as a backup
-    NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+    NSString *activeInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
     NSDictionary *activeInfo = @{
         @"ProfileId": @"0",
         @"ProfileName": defaultProfile.name,

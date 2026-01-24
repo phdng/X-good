@@ -3,7 +3,7 @@
 #import <WebKit/WebKit.h>
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 
 // Cache for bundle decisions
 static NSMutableDictionary *cachedBundleDecisions = nil;
@@ -23,8 +23,8 @@ static NSMutableDictionary *noiseSeedCache = nil;
 static BOOL isCanvasFingerprintProtectionEnabledForCurrentApp(void) {
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if (!bundleID) return NO;
-    NSArray *possiblePaths = @[@"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
-                               @"/var/jb/private/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
+    NSArray *possiblePaths = @[@"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
+                               @"/private/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
                                @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist"];
     NSDictionary *settingsDict = nil;
     for (NSString *path in possiblePaths) {
@@ -109,8 +109,8 @@ static BOOL isInScopedAppsList(void) {
         if (!bundleID || [bundleID length] == 0) {
             return NO;
         }
-        NSArray *possiblePaths = @[@"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist",
-                                   @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist",
+        NSArray *possiblePaths = @[@"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist",
+                                   @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist",
                                    @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist"];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         NSString *validPath = nil;

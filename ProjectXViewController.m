@@ -377,12 +377,12 @@
         // Highlight installed version by comparing to installed version from plist
         // --- Begin: Robust installed version fetch (rootless/jailbreak aware, same as AppVersionSpoofingViewController) ---
         NSString *installedVersion = nil;
-        NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+        NSString *prefsPath = @"/var/mobile/Library/Preferences";
         NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         if (![fileManager fileExistsAtPath:prefsPath]) {
             // Try Dopamine 2 path
-            prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+            prefsPath = @"/private/var/mobile/Library/Preferences";
             scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
             if (![fileManager fileExistsAtPath:prefsPath]) {
                 prefsPath = @"/var/mobile/Library/Preferences";
@@ -1002,20 +1002,39 @@
 
     // Add Generate All button with minimalistic style
     UIButton *generateAllButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    UIButtonConfiguration *generateAllConfig = [UIButtonConfiguration plainButtonConfiguration];
-    generateAllConfig.title = @"Generate All";
-    generateAllConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    generateAllConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
-    generateAllConfig.baseForegroundColor = [UIColor systemBlueColor];
-    generateAllConfig.contentInsets = NSDirectionalEdgeInsetsMake(2, 4, 2, 4);
     
-    // Create a smaller icon that matches the text size
-    UIImage *smallIcon = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:10]];
-    generateAllConfig.image = smallIcon;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *generateAllConfig = [UIButtonConfiguration plainButtonConfiguration];
+        generateAllConfig.title = @"Generate All";
+        generateAllConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        generateAllConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
+        generateAllConfig.baseForegroundColor = [UIColor systemBlueColor];
+        generateAllConfig.contentInsets = NSDirectionalEdgeInsetsMake(2, 4, 2, 4);
+        
+        // Create a smaller icon that matches the text size
+        UIImage *smallIcon = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath" withConfiguration:[UIImageSymbolConfiguration configurationWithPointSize:10]];
+        generateAllConfig.image = smallIcon;
+        
+        generateAllConfig.imagePlacement = NSDirectionalRectEdgeLeading;
+        generateAllConfig.imagePadding = 2;
+        generateAllButton.configuration = generateAllConfig;
+    } else {
+        // iOS 12-14 fallback
+        [generateAllButton setTitle:@"Generate All" forState:UIControlStateNormal];
+        [generateAllButton setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
+        generateAllButton.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
+        
+        if (@available(iOS 13.0, *)) {
+            UIImage *smallIcon = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"];
+            [generateAllButton setImage:smallIcon forState:UIControlStateNormal];
+        }
+        
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        generateAllButton.contentEdgeInsets = UIEdgeInsetsMake(2, 4, 2, 4);
+        #pragma clang diagnostic pop
+    }
     
-    generateAllConfig.imagePlacement = NSDirectionalRectEdgeLeading;
-    generateAllConfig.imagePadding = 2;
-    generateAllButton.configuration = generateAllConfig;
     generateAllButton.titleLabel.font = [UIFont systemFontOfSize:11 weight:UIFontWeightMedium];
     generateAllButton.layer.cornerRadius = 8;
     generateAllButton.clipsToBounds = YES;

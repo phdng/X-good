@@ -2093,7 +2093,7 @@
     BOOL enabled = sender.isOn;
     
     // 1. Update plist file - THE SOURCE OF TRUTH
-    NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
     NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
     settingsDict[@"networkDataSpoofEnabled"] = @(enabled);
     
@@ -4145,7 +4145,7 @@
     
     // 3. Then check plist file directly
     if (!toggleEnabled) {
-        NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
         NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:securitySettingsPath];
         if (settingsDict) {
             toggleEnabled = [settingsDict[@"canvasFingerprintingEnabled"] boolValue] || 
@@ -4268,7 +4268,7 @@
     BOOL enabled = sender.isOn;
     
     // ONLY update the plist file - THE SINGLE SOURCE OF TRUTH
-    NSString *securitySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
     NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
     settingsDict[@"canvasFingerprintingEnabled"] = @(enabled);
     settingsDict[@"CanvasFingerprint"] = @(enabled); // Also use old key for compatibility

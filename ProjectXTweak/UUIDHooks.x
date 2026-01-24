@@ -9,7 +9,7 @@
 #import <mach-o/dyld.h>
 #import <mach-o/dyld_images.h>
 #import <IOKit/IOKitLib.h>
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <sys/sysctl.h>
 #import <pthread.h>
 
@@ -110,8 +110,8 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
         
         // Try rootless path first for settings
         NSArray *preferencesLocations = @[
-            @"/var/jb/var/mobile/Library/Preferences",
-            @"/var/jb/private/var/mobile/Library/Preferences",
+            @"/var/mobile/Library/Preferences",
+            @"/private/var/mobile/Library/Preferences",
             @"/var/mobile/Library/Preferences"
         ];
         
@@ -211,8 +211,8 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
 static BOOL isSystemBootUUIDEnabled() {
     // Check settings file directly
     NSArray *preferencesLocations = @[
-        @"/var/jb/var/mobile/Library/Preferences",
-        @"/var/jb/private/var/mobile/Library/Preferences",
+        @"/var/mobile/Library/Preferences",
+        @"/private/var/mobile/Library/Preferences",
         @"/var/mobile/Library/Preferences"
     ];
     
@@ -240,8 +240,8 @@ static BOOL isSystemBootUUIDEnabled() {
 static BOOL isDyldCacheUUIDEnabled() {
     // Check settings file directly
     NSArray *preferencesLocations = @[
-        @"/var/jb/var/mobile/Library/Preferences",
-        @"/var/jb/private/var/mobile/Library/Preferences",
+        @"/var/mobile/Library/Preferences",
+        @"/private/var/mobile/Library/Preferences",
         @"/var/mobile/Library/Preferences"
     ];
     

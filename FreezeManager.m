@@ -171,9 +171,9 @@
     
     // Check for different killall paths based on jailbreak type
     NSArray *killallPaths = @[
-        @"/var/jb/usr/bin/killall",              // Dopamine path
+        @"/usr/bin/killall",              // Dopamine path
         @"/usr/bin/killall",                     // Traditional/Palera1n path
-        @"/var/jb/bin/killall",                  // Alternative Dopamine path
+        @"/bin/killall",                  // Alternative Dopamine path
         @"/private/preboot/jb/usr/bin/killall"   // Additional Palera1n path
     ];
     

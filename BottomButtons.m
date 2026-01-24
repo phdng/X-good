@@ -58,9 +58,9 @@
         
         // Check for different killall paths based on jailbreak type
         NSArray *killallPaths = @[
-            @"/var/jb/usr/bin/killall",  // Dopamine path
+            @"/usr/bin/killall",  // Dopamine path
             @"/usr/bin/killall",         // Traditional/Palera1n path
-            @"/var/jb/bin/killall"       // Alternative Dopamine path
+            @"/bin/killall"       // Alternative Dopamine path
         ];
         
         NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -124,9 +124,9 @@
         
         // Check for different pidof paths based on jailbreak type
         NSArray *pidofPaths = @[
-            @"/var/jb/usr/bin/pidof",    // Dopamine path
+            @"/usr/bin/pidof",    // Dopamine path
             @"/usr/bin/pidof",           // Traditional/Palera1n path
-            @"/var/jb/bin/pidof"         // Alternative Dopamine path
+            @"/bin/pidof"         // Alternative Dopamine path
         ];
         
         NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -334,9 +334,9 @@
     
     // Check for different killall paths based on jailbreak type
     NSArray *killallPaths = @[
-        @"/var/jb/usr/bin/killall",   // Dopamine path
+        @"/usr/bin/killall",   // Dopamine path
         @"/usr/bin/killall",          // Traditional/Palera1n path
-        @"/var/jb/bin/killall",       // Alternative Dopamine path
+        @"/bin/killall",       // Alternative Dopamine path
         @"/private/preboot/jb/usr/bin/killall"  // Additional Palera1n path
     ];
     
@@ -380,9 +380,9 @@
     
     // Check for different sbreload paths based on jailbreak type
     NSArray *sbreloadPaths = @[
-        @"/var/jb/usr/bin/sbreload",   // Dopamine path
+        @"/usr/bin/sbreload",   // Dopamine path
         @"/usr/bin/sbreload",          // Traditional/Palera1n path
-        @"/var/jb/bin/sbreload",       // Alternative path
+        @"/bin/sbreload",       // Alternative path
         @"/private/preboot/jb/usr/bin/sbreload"  // Additional Palera1n path
     ];
     
@@ -433,9 +433,9 @@
     
     // Check for different ldrestart paths based on jailbreak type
     NSArray *ldrestartPaths = @[
-        @"/var/jb/usr/bin/ldrestart",   // Dopamine path
+        @"/usr/bin/ldrestart",   // Dopamine path
         @"/usr/bin/ldrestart",          // Traditional/Palera1n path
-        @"/var/jb/bin/ldrestart",       // Alternative path
+        @"/bin/ldrestart",       // Alternative path
         @"/private/preboot/jb/usr/bin/ldrestart"  // Additional Palera1n path
     ];
     

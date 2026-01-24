@@ -54,7 +54,7 @@
 #pragma mark - Directory Structure
 
 - (NSString *)profileBasePath:(NSString *)profileID {
-    NSString *basePath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+    NSString *basePath = @"/var/mobile/Library/WeaponX/Profiles";
     return [basePath stringByAppendingPathComponent:profileID];
 }
 

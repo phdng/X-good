@@ -11,7 +11,7 @@
 #import <dlfcn.h>
 #import <mach-o/dyld.h>
 #import <substrate.h>
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import "MobileGestalt.h"
 
 // Original function pointers
@@ -69,7 +69,7 @@ static BOOL isDeviceModelSpoofingEnabled() {
             // If the direct check fails, try profile settings directly
             if (!shouldSpoof) {
                 // Try to get profile settings directly from file
-                NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+                NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
                 NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
                 NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
                 
@@ -124,7 +124,7 @@ static NSString* getSpoofedDeviceModel() {
     @try {
         // METHOD 1: Try direct access from profile plist for highest reliability
         // First get current profile ID
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         
@@ -190,7 +190,7 @@ static NSString* getSpoofedBoardID() {
         }
         
         // METHOD 1: Try to get from device_ids.plist directly
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         NSString *profileId = centralInfo[@"ProfileId"];
@@ -238,7 +238,7 @@ static NSString* getSpoofedHWModel() {
         }
         
         // METHOD 1: Try to get from device_ids.plist directly
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         NSString *profileId = centralInfo[@"ProfileId"];

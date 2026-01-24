@@ -73,7 +73,7 @@
     }
     
     // Fallback to direct file read if ProfileManager isn't available
-    NSString *currentProfileInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *currentProfileInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
     NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
     
     if (profileInfo && profileInfo[@"ProfileId"]) {
@@ -107,7 +107,7 @@
     self.currentProfileId = profileId;
     
     // Build path to WiFi info file in profile directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
     
@@ -137,7 +137,7 @@
     self.currentProfileId = profileId;
     
     // Build path to WiFi info file in profile directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
     

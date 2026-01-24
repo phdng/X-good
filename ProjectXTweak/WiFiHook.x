@@ -6,7 +6,7 @@
 #import <dlfcn.h>
 #import "ProjectXLogging.h"
 #import "WiFiManager.h"
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <Network/Network.h>
 #import <SystemConfiguration/SystemConfiguration.h>
 #import <ifaddrs.h>
@@ -14,8 +14,8 @@
 #import "MethodSwizzler.h"
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
 // Scoped apps cache
@@ -125,7 +125,7 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
 // Helper function to directly get current profile ID from plist
 static NSString *getCurrentProfileID(void) {
     // Direct access to the current profile info plist
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
     
     NSString *profileId = centralInfo[@"ProfileId"];
@@ -134,7 +134,7 @@ static NSString *getCurrentProfileID(void) {
     }
     
     // Fallback to legacy location if needed
-    NSString *legacyInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+    NSString *legacyInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
     NSDictionary *legacyInfo = [NSDictionary dictionaryWithContentsOfFile:legacyInfoPath];
     profileId = legacyInfo[@"ProfileId"];
     
@@ -144,7 +144,7 @@ static NSString *getCurrentProfileID(void) {
     
     // Last resort - scan for profiles
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+    NSString *profilesDir = @"/var/mobile/Library/WeaponX/Profiles";
     NSError *error = nil;
     NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
     
@@ -196,7 +196,7 @@ static NSDictionary *getProfileWiFiInfo(void) {
     }
     
     // Build path to WiFi info file in profile directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     NSString *wifiInfoPath = [identityDir stringByAppendingPathComponent:@"wifi_info.plist"];
     NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];

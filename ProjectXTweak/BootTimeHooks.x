@@ -9,7 +9,7 @@
 #import <mach/mach_time.h>
 #import <mach/mach_host.h>
 #import <substrate.h>
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <dlfcn.h>
 #import <objc/runtime.h>
 
@@ -31,8 +31,8 @@ static NSDate *cacheTimestamp = nil;
 static const NSTimeInterval kCacheValidityDuration = 30.0; // 30 seconds cache
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
 // Scoped apps cache
@@ -220,7 +220,7 @@ static NSString *getCurrentProfilePath(void) {
         if (!currentProfile) return nil;
         
         // Use the hardcoded profiles directory path since profilesDirectory is private
-        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDir = @"/var/mobile/Library/WeaponX/Profiles";
         return [profilesDir stringByAppendingPathComponent:currentProfile.profileId];
     } @catch (NSException *e) {
         return nil;

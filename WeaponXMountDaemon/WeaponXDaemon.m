@@ -39,22 +39,13 @@ extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 - (instancetype)init {
     self = [super init];
     if (self) {
-        // Check for rootless environment
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        if ([fileManager fileExistsAtPath:@"/var/jb"]) {
-            ROOT_PREFIX = @"/var/jb";
-            NSLog(@"Rootless jailbreak detected - using prefix: %@", ROOT_PREFIX);
-        } else if ([fileManager fileExistsAtPath:@"/var/LIB"]) {
-            ROOT_PREFIX = @"/var/LIB";
-            NSLog(@"Dopamine rootless jailbreak detected - using prefix: %@", ROOT_PREFIX);
-        } else {
-            ROOT_PREFIX = @"";
-            NSLog(@"Traditional jailbreak detected");
-        }
+        // Rootful jailbreak - no prefix needed
+        ROOT_PREFIX = @"";
+        NSLog(@"Rootful jailbreak mode");
         
-        // Set paths with the appropriate prefix
-        kGuardianDir = [ROOT_PREFIX stringByAppendingString:@"/Library/WeaponX/Guardian"];
-        kProjectXPath = [ROOT_PREFIX stringByAppendingString:@"/Applications/ProjectX.app/ProjectX"];
+        // Set paths directly for rootful
+        kGuardianDir = @"/Library/WeaponX/Guardian";
+        kProjectXPath = @"/Applications/ProjectX.app/ProjectX";
         
         _processInfo = [NSMutableDictionary dictionary];
         _protectedProcesses = [NSMutableArray arrayWithObjects:@"ProjectX", nil];

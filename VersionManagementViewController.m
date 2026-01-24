@@ -547,14 +547,14 @@
 
 - (void)loadVersionsForBundleID:(NSString *)bundleID {
     // Try rootless path first
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
     NSString *multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
     
     // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if (![fileManager fileExistsAtPath:prefsPath]) {
         // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+        prefsPath = @"/private/var/mobile/Library/Preferences";
         multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
         
         // Fallback to standard path if needed
@@ -581,14 +581,14 @@
 
 - (void)saveVersions {
     // Try rootless path first
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
     NSString *multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
     
     // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if (![fileManager fileExistsAtPath:prefsPath]) {
         // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+        prefsPath = @"/private/var/mobile/Library/Preferences";
         multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
         
         // Fallback to standard path if needed
@@ -652,13 +652,13 @@
     // Fallback if no profile ID found
     if (!profileId) {
         // First check the primary profile info file
-        NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+        NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         
         profileId = centralInfo[@"ProfileId"];
         if (!profileId) {
             // If not found, check the legacy active_profile_info.plist
-            NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+            NSString *activeInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
             NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
             profileId = activeInfo[@"ProfileId"];
         }
@@ -670,7 +670,7 @@
     }
     
     // Build the path to this profile's app versions directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
     
     // Create the directory if it doesn't exist
@@ -702,14 +702,14 @@
     BOOL usingProfileStorage = (appVersionFile != nil);
     
     // Get the shared storage paths as fallback
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
     NSString *versionSpoofFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.version_spoof.plist"];
     
     // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if (!usingProfileStorage && ![fileManager fileExistsAtPath:prefsPath]) {
         // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+        prefsPath = @"/private/var/mobile/Library/Preferences";
         versionSpoofFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.version_spoof.plist"];
         
         // Fallback to standard path if needed

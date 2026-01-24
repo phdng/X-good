@@ -148,7 +148,7 @@
     }
     
     // Get profiles directory path
-    NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+    NSString *profilesDirectory = @"/var/mobile/Library/WeaponX/Profiles";
     
     // Get file manager
     NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -1456,7 +1456,7 @@
                                                     style:UIAlertActionStyleDestructive
                                                     handler:^(UIAlertAction * _Nonnull action) {
             // Direct approach: Delete the profile folder from the filesystem
-            NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+            NSString *profilesDirectory = @"/var/mobile/Library/WeaponX/Profiles";
             NSString *profilePath = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
             
             NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -1610,7 +1610,7 @@
             [loadingIndicator startAnimating];
             
             // Get profile directory
-            NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+            NSString *profilesDirectory = @"/var/mobile/Library/WeaponX/Profiles";
             NSString *profilePath = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
             
             // Update profile name in memory
@@ -1779,7 +1779,7 @@
         [loadingIndicator startAnimating];
         
         // Direct approach: Delete the profile folder from the filesystem
-        NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDirectory = @"/var/mobile/Library/WeaponX/Profiles";
         NSString *profilePath = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
         
         NSFileManager *fileManager = [NSFileManager defaultManager];
@@ -1875,7 +1875,7 @@
             profile.shortDescription = newDescription;
             
             // Get profile directory
-            NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+            NSString *profilesDirectory = @"/var/mobile/Library/WeaponX/Profiles";
             NSString *profilePath = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
             
             // Direct file updates - update description in all possible plist files
@@ -2018,7 +2018,7 @@
 
 // Enrich existing profiles with additional information from plists if available
 - (void)enrichProfilesWithAdditionalInfo {
-    NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+    NSString *profilesDirectory = @"/var/mobile/Library/WeaponX/Profiles";
     
     for (Profile *profile in self.profiles) {
         // If profile already has a proper name and description, skip it
@@ -2100,7 +2100,7 @@
     Profile *profile = self.isSearchActive ? self.filteredProfiles[index] : self.profiles[index];
     
     // Get file metadata directly from the filesystem for the most up-to-date information
-    NSString *profileDirectory = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profile.profileId];
+    NSString *profileDirectory = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profile.profileId];
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
     NSDate *creationDate = nil;
@@ -2306,7 +2306,7 @@
     [loadingIndicator startAnimating];
     
     // Get the profiles directory
-    NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+    NSString *profilesDirectory = @"/var/mobile/Library/WeaponX/Profiles";
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
     // Get current profile ID to preserve it - use the central profile info which is more reliable
@@ -2423,7 +2423,7 @@
     Profile *profile = self.isSearchActive ? self.filteredProfiles[index] : self.profiles[index];
     
     // Get the profile directory path
-    NSString *profilesDirectory = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+    NSString *profilesDirectory = @"/var/mobile/Library/WeaponX/Profiles";
     NSString *profilePath = [profilesDirectory stringByAppendingPathComponent:profile.profileId];
     
     // Check if the profile directory exists

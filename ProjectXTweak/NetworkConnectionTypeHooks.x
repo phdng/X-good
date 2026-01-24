@@ -3,7 +3,7 @@
 #import <UIKit/UIKit.h>
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <netinet/in.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreTelephony/CTCarrier.h>
@@ -21,11 +21,11 @@ typedef NS_ENUM(NSInteger, NetworkConnectionType) {
 };
 
 // Path to security settings plist
-static NSString *const kSecuritySettingsPath = @"/var/jb/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+static NSString *const kSecuritySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
 // Cache for quick lookup
@@ -123,13 +123,13 @@ static NSString *getCurrentISOCountryCode() {
 static NSString *getProfileIdentityPath() {
     // Get current profile ID
     NSString *profileId = nil;
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
     
     profileId = centralInfo[@"ProfileId"];
     if (!profileId) {
         // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *activeInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
         NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
         profileId = activeInfo[@"ProfileId"];
     }
@@ -137,7 +137,7 @@ static NSString *getProfileIdentityPath() {
     if (!profileId) {
         // Fallback approach: try to find any profile directory
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDir = @"/var/mobile/Library/WeaponX/Profiles";
         NSError *error = nil;
         NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
         
@@ -161,7 +161,7 @@ static NSString *getProfileIdentityPath() {
     }
     
     // Build the path to this profile's identity directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     
     return identityDir;

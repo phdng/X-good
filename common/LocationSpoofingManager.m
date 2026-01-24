@@ -376,7 +376,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         lastLoadTime = currentTime;
         
         // Try rootless path first
-        NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+        NSString *prefsPath = @"/var/mobile/Library/Preferences";
         NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         PXLog(@"[WeaponX] LocationSpoofingManager: Trying to load scoped apps from: %@", scopedAppsFile);
         
@@ -385,7 +385,7 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
         if (![fileManager fileExistsAtPath:scopedAppsFile]) {
             PXLog(@"[WeaponX] LocationSpoofingManager: First path not found, trying Dopamine 2 path");
             // Try Dopamine 2 path
-            prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+            prefsPath = @"/private/var/mobile/Library/Preferences";
             scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
             
             // Fallback to older paths if needed

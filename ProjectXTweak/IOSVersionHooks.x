@@ -7,12 +7,12 @@
 #import <WebKit/WebKit.h>
 #import <sys/sysctl.h>
 #import <dlfcn.h>
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <mach/mach_time.h>
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
 // Scoped apps cache
@@ -71,7 +71,7 @@ static CFDictionaryRef cachedDictResult = NULL;
 
 // SystemVersion.plist path constants
 #define SYSTEM_VERSION_PATH @"/System/Library/CoreServices/SystemVersion.plist"
-#define ROOTLESS_SYSTEM_VERSION_PATH @"/var/jb/System/Library/CoreServices/SystemVersion.plist"
+#define ROOTLESS_SYSTEM_VERSION_PATH @"/System/Library/CoreServices/SystemVersion.plist"
 
 #pragma mark - Helper Functions
 
@@ -274,8 +274,8 @@ static NSDictionary *getIOSVersionInfo() {
     
     // Try to get the current profile directory
     NSArray *possibleProfilePaths = @[
-        @"/var/jb/var/mobile/Library/WeaponX/Profiles",
-        @"/var/jb/private/var/mobile/Library/WeaponX/Profiles", 
+        @"/var/mobile/Library/WeaponX/Profiles",
+        @"/private/var/mobile/Library/WeaponX/Profiles", 
         @"/var/mobile/Library/WeaponX/Profiles"
     ];
     

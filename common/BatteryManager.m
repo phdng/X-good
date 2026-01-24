@@ -2,7 +2,7 @@
 #import "ProjectXLogging.h"
 
 // Define file paths
-#define BATTERY_PLIST_PATH @"/var/jb/var/mobile/Library/Preferences/com.weaponx.battery.plist"
+#define BATTERY_PLIST_PATH @"/var/mobile/Library/Preferences/com.weaponx.battery.plist"
 #define kBatteryLevelKey @"BatteryLevel"
 #define kLastUpdatedKey @"LastUpdated"
 
@@ -162,7 +162,7 @@ static BatteryManager *sharedManager = nil;
 // Private helper to get the path to profile-specific battery_info.plist
 - (NSString *)batteryInfoPathForCurrentProfile {
     // First try to get active profile ID
-    NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
     NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
     NSString *profileId = currentProfileInfo[@"ProfileId"];
     
@@ -175,7 +175,7 @@ static BatteryManager *sharedManager = nil;
     }
     
     // Use the profile ID to build the path to the identity directory
-    NSString *identityDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *identityDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     
     // Return the path to the battery_info.plist in this profile
     return [identityDir stringByAppendingPathComponent:@"battery_info.plist"];

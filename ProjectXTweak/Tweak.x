@@ -2,7 +2,7 @@
 #import "IdentifierManager.h"
 #import <AdSupport/ASIdentifierManager.h>
 #import <UIKit/UIKit.h>
-#import "ellekit/ellekit.h"
+// #import "ellekit/ellekit.h" // Removed for rootful - using Substrate
 #import <objc/runtime.h>
 #import <dlfcn.h>
 #import "ProjectXLogging.h"
@@ -23,7 +23,7 @@
 #import <Security/Security.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>
 #import <CoreGraphics/CoreGraphics.h>
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <CoreMotion/CoreMotion.h> // Import CoreMotion framework for sensor spoofing
 #import "LocationSpoofingManager.h" // Import location spoofing manager
 #import "MobileGestalt.h"

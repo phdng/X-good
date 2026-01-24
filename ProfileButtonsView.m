@@ -48,32 +48,54 @@
 }
 
 - (UIButton *)createButtonWithIcon:(NSString *)iconName title:(NSString *)title {
-    // Create button configuration
-    UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
-    config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+    UIButton *button;
     
-    // Configure background
-    config.background.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.5];
-    config.background.cornerRadius = 22;
+    if (@available(iOS 15.0, *)) {
+        // iOS 15+ - Use modern UIButtonConfiguration
+        UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
+        config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        
+        // Configure background
+        config.background.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.5];
+        config.background.cornerRadius = 22;
+        
+        // Configure image and text
+        UIImage *icon = [UIImage systemImageNamed:iconName];
+        config.image = icon;
+        config.title = title;
+        config.imagePlacement = NSDirectionalRectEdgeTop;
+        config.imagePadding = 8;
+        
+        // Configure text attributes
+        UIFont *font = [UIFont systemFontOfSize:8 weight:UIFontWeightMedium];
+        NSDictionary *attributeDict = @{NSFontAttributeName: font};
+        NSAttributedString *attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:attributeDict];
+        config.attributedTitle = attributedTitle;
+        
+        // Set colors
+        config.baseForegroundColor = [UIColor systemBlueColor];
+        
+        // Create button with configuration
+        button = [UIButton buttonWithConfiguration:config primaryAction:nil];
+    } else {
+        // iOS 12-14 fallback
+        button = [UIButton buttonWithType:UIButtonTypeSystem];
+        [button setTitle:title forState:UIControlStateNormal];
+        [button setTintColor:[UIColor systemBlueColor]];
+        button.titleLabel.font = [UIFont systemFontOfSize:8 weight:UIFontWeightMedium];
+        
+        // Set image for iOS 13+
+        if (@available(iOS 13.0, *)) {
+            UIImage *icon = [UIImage systemImageNamed:iconName];
+            [button setImage:icon forState:UIControlStateNormal];
+        }
+        
+        // Style the button
+        button.backgroundColor = [[UIColor systemBackgroundColor] colorWithAlphaComponent:0.5];
+        button.layer.cornerRadius = 22;
+        button.clipsToBounds = YES;
+    }
     
-    // Configure image and text
-    UIImage *icon = [UIImage systemImageNamed:iconName];
-    config.image = icon;
-    config.title = title;
-    config.imagePlacement = NSDirectionalRectEdgeTop;
-    config.imagePadding = 8;
-    
-    // Configure text attributes
-    UIFont *font = [UIFont systemFontOfSize:8 weight:UIFontWeightMedium];
-    NSDictionary *attributeDict = @{NSFontAttributeName: font};
-    NSAttributedString *attributedTitle = [[NSAttributedString alloc] initWithString:title attributes:attributeDict];
-    config.attributedTitle = attributedTitle;
-    
-    // Set colors
-    config.baseForegroundColor = [UIColor systemBlueColor];
-    
-    // Create button with configuration
-    UIButton *button = [UIButton buttonWithConfiguration:config primaryAction:nil];
     button.translatesAutoresizingMaskIntoConstraints = NO;
     
     // Add targets

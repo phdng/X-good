@@ -3,11 +3,11 @@
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
 #import "PasteboardUUIDManager.h"
-// #import <ellekit/ellekit.h>
+// // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
 // Scoped apps cache
@@ -228,8 +228,8 @@ static NSString *getSpoofedPasteboardUUID() {
     
     // Try to determine profile directory from common paths
     NSArray *possibleProfilePaths = @[
-        @"/var/jb/var/mobile/Library/WeaponX/Profiles",
-        @"/var/jb/private/var/mobile/Library/WeaponX/Profiles", 
+        @"/var/mobile/Library/WeaponX/Profiles",
+        @"/private/var/mobile/Library/WeaponX/Profiles", 
         @"/var/mobile/Library/WeaponX/Profiles"
     ];
     

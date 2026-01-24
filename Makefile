@@ -1,13 +1,9 @@
-TARGET := iphone:clang:16.5:15.0
+TARGET := iphone:clang:16.5:12.0
 ARCHS = arm64 arm64e
-ROOTLESS = 1
 LOGOS_DEFAULT_GENERATOR = internal
 INSTALL_TARGET_PROCESSES = SpringBoard ProjectX
 DEBUG=0
 FINALPACKAGE=1
-# Ensure rootless paths
-THEOS_PACKAGE_SCHEME = rootless
-THEOS_PACKAGE_INSTALL_PREFIX = /var/jb
 
 # Note: This project now includes a Notification Service Extension for rich push notifications
 # The extension needs to be manually added in Xcode after installing this package
@@ -26,7 +22,9 @@ ProjectX_RESOURCE_DIRS = Assets.xcassets
 ProjectX_RESOURCE_FILES = Info.plist Icon.png LaunchScreen.storyboard
 ProjectX_PRIVATE_FRAMEWORKS = FrontBoardServices SpringBoardServices BackBoardServices StoreKitUI MobileCoreServices
 # ProjectX_LDFLAGS = -I./common
-ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit IOKit Security CoreLocation CoreLocationUI
+ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit IOKit Security CoreLocation
+# CoreLocationUI is iOS 15+ only, weak-link it
+ProjectX_LDFLAGS = -weak_framework CoreLocationUI
 ProjectX_CODESIGN_FLAGS = -Sent.plist
 ProjectX_CFLAGS = -fobjc-arc -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1 -I./common
 
@@ -104,7 +102,7 @@ ProjectXCLI_LDFLAGS = -L$(THEOS_VENDOR_LIBRARY_PATH)
 after-package::
 	@echo "🔍 Checking package contents..."
 	@mkdir -p $(THEOS_STAGING_DIR)/../debug
-	@PACKAGE_FILE="$$(ls -t ./packages/com.hydra.projectx_*_iphoneos-arm64.deb | head -1)" && \
+	@PACKAGE_FILE="$$(ls -t ./packages/com.hydra.projectx_*_iphoneos-arm.deb | head -1)" && \
 	if [ -f "$$PACKAGE_FILE" ]; then \
 		echo "Extracting $$PACKAGE_FILE"; \
 		(cd $(THEOS_STAGING_DIR)/../debug && ar -x "../../$$PACKAGE_FILE" && tar -xf data.tar.*); \
@@ -113,11 +111,11 @@ after-package::
 		exit 1; \
 	fi
 	@echo "✅ Checking WeaponXDaemon executable..."
-	@ls -la $(THEOS_STAGING_DIR)/../debug/var/jb/Library/WeaponX/WeaponXDaemon || echo "❌ WeaponXDaemon not found!"
+	@ls -la $(THEOS_STAGING_DIR)/../debug/Library/WeaponX/WeaponXDaemon || echo "❌ WeaponXDaemon not found!"
 	@echo "✅ Checking LaunchDaemon plist..."
-	@ls -la $(THEOS_STAGING_DIR)/../debug/var/jb/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist || echo "❌ LaunchDaemon plist not found!"
+	@ls -la $(THEOS_STAGING_DIR)/../debug/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist || echo "❌ LaunchDaemon plist not found!"
 	@echo "✅ Checking Guardian directory and log files..."
-	@ls -la $(THEOS_STAGING_DIR)/../debug/var/jb/Library/WeaponX/Guardian/ || echo "❌ Guardian directory not found!"
+	@ls -la $(THEOS_STAGING_DIR)/../debug/Library/WeaponX/Guardian/ || echo "❌ Guardian directory not found!"
 	@echo "Package check completed!"
 SUBPROJECTS += ProjectXTweak
 include $(THEOS_MAKE_PATH)/aggregate.mk

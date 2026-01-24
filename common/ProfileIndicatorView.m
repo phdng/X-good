@@ -398,7 +398,7 @@ static void springboardBeenUnlockedCallback(CFNotificationCenterRef center, void
 
 // Return path to dedicated position file
 - (NSString *)getPositionFilePath {
-    NSString *libraryDir = @"/var/jb/var/mobile/Library/WeaponX";
+    NSString *libraryDir = @"/var/mobile/Library/WeaponX";
     // Create directory if it doesn't exist
     if (![[NSFileManager defaultManager] fileExistsAtPath:libraryDir]) {
         [[NSFileManager defaultManager] createDirectoryAtPath:libraryDir
@@ -449,7 +449,7 @@ static void springboardBeenUnlockedCallback(CFNotificationCenterRef center, void
         PXLog(@"ProfileIndicator: ❌ Failed to read profile info dictionary from current_profile_info.plist");
         
         // Fallback to active profile info
-        NSString *activeProfileInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *activeProfileInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
         PXLog(@"ProfileIndicator: 🔄 Trying fallback profile info from: %@", activeProfileInfoPath);
         
         profileInfo = [NSDictionary dictionaryWithContentsOfFile:activeProfileInfoPath];
@@ -894,7 +894,7 @@ static void springboardBeenUnlockedCallback(CFNotificationCenterRef center, void
         // Direct file approach: Read current_profile_info.plist or active_profile_info.plist
         ProfileManager *profileManager = [ProfileManager sharedManager];
         NSString *centralProfileInfoPath = [profileManager centralProfileInfoPath];
-        NSString *activeProfileInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *activeProfileInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
         
         // Try reading from central profile info first
         NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:centralProfileInfoPath];

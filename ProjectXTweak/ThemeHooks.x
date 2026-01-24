@@ -2,11 +2,11 @@
 #import <UIKit/UIKit.h>
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
 // Scoped apps cache
@@ -198,8 +198,8 @@ static WeaponXThemeStyle getThemeStyleFromProfile(void) {
     
     // Try to get the current profile directory
     NSArray *possibleProfilePaths = @[
-        @"/var/jb/var/mobile/Library/WeaponX/Profiles",
-        @"/var/jb/private/var/mobile/Library/WeaponX/Profiles", 
+        @"/var/mobile/Library/WeaponX/Profiles",
+        @"/private/var/mobile/Library/WeaponX/Profiles", 
         @"/var/mobile/Library/WeaponX/Profiles"
     ];
     

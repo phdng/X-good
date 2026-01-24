@@ -44,7 +44,7 @@
 
 - (void)loadFromCurrentProfile {
     // Get active profile ID
-    NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
     NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
     
     if (currentProfileInfo && currentProfileInfo[@"ProfileId"]) {
@@ -238,7 +238,7 @@
 
 - (void)saveToCurrentProfile {
     // Get active profile ID
-    NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
     NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
     
     if (currentProfileInfo && currentProfileInfo[@"ProfileId"]) {
@@ -250,7 +250,7 @@
 - (void)saveToProfile:(NSString *)profileId {
     if (!profileId) return;
     
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     NSString *storagePath = [profileDir stringByAppendingPathComponent:@"storage.plist"];
     
     [_storageSettings writeToFile:storagePath atomically:YES];
@@ -259,7 +259,7 @@
 - (BOOL)loadFromProfile:(NSString *)profileId {
     if (!profileId) return NO;
     
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     NSString *storagePath = [profileDir stringByAppendingPathComponent:@"storage.plist"];
     
     NSDictionary *savedSettings = [NSDictionary dictionaryWithContentsOfFile:storagePath];

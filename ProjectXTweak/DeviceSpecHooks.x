@@ -13,7 +13,7 @@
 #import <mach/mach_host.h>
 #import <objc/runtime.h>
 #import <substrate.h>
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 
 // Define the swap usage structure if it's not available
 #ifndef HAVE_XSW_USAGE
@@ -32,8 +32,8 @@ static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, v
 static kern_return_t (*orig_host_statistics64)(host_t host, host_flavor_t flavor, host_info64_t info, mach_msg_type_number_t *count);
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
 // Scoped apps cache
@@ -231,7 +231,7 @@ static BOOL isSpoofingEnabled(void) {
                 // If the direct check fails, try profile settings directly
                 if (!shouldSpoof) {
                     // Try to get profile settings directly from file
-                    NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+                    NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
                     NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
                     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
                     
@@ -265,7 +265,7 @@ static NSString *getSpoofedDeviceModel() {
         NSString *deviceModel = nil;
         
         // METHOD 1: Try direct access from profile plist
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         
@@ -322,7 +322,7 @@ static NSDictionary *getDeviceSpecs() {
     
     @try {
         // METHOD 1: Try to get specs directly from profile plist files
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         

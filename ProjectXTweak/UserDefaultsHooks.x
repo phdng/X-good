@@ -4,7 +4,7 @@
 #import "ProjectXLogging.h"
 #import "IdentifierManager.h"
 #import "UserDefaultsUUIDManager.h"
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 
 // Function declarations
 static NSString *getSpoofedUserDefaultsUUID();
@@ -79,13 +79,13 @@ static NSString *getSpoofedUserDefaultsUUID() {
     NSString *activeProfileId = nil;
     
     // Get active profile ID from central profile info
-    NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
     if (centralInfo && centralInfo[@"ProfileId"]) {
         activeProfileId = centralInfo[@"ProfileId"];
     } else {
         // Try fallback location for profile ID
-        NSString *fallbackPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *fallbackPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
         NSDictionary *fallbackInfo = [NSDictionary dictionaryWithContentsOfFile:fallbackPath];
         if (fallbackInfo && fallbackInfo[@"ProfileId"]) {
             activeProfileId = fallbackInfo[@"ProfileId"];
@@ -94,7 +94,7 @@ static NSString *getSpoofedUserDefaultsUUID() {
     
     if (activeProfileId) {
         // Build path to the profile's identity directory
-        NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", activeProfileId];
+        NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", activeProfileId];
         NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
         
         // Read from device_ids.plist first (combined identifiers file)
@@ -119,7 +119,7 @@ static NSString *getSpoofedUserDefaultsUUID() {
     }
     
     // If all else fails, use a persistent fallback UUID
-    NSString *fallbackUUIDPath = @"/var/jb/var/mobile/Library/WeaponX/fallback_userdefaults_uuid.plist";
+    NSString *fallbackUUIDPath = @"/var/mobile/Library/WeaponX/fallback_userdefaults_uuid.plist";
     NSMutableDictionary *fallbackDict = [NSMutableDictionary dictionaryWithContentsOfFile:fallbackUUIDPath];
     
     if (!fallbackDict) {

@@ -28,8 +28,8 @@ void PXLog(NSString *format, ...) {
         
         // Check for rootless jailbreak paths
         NSArray *possiblePaths = @[
-            @"/var/jb/var/mobile/Library/Logs/ProjectX",
-            @"/var/jb/private/var/mobile/Library/Logs/ProjectX",
+            @"/var/mobile/Library/Logs/ProjectX",
+            @"/private/var/mobile/Library/Logs/ProjectX",
             @"/var/LIB/var/mobile/Library/Logs/ProjectX",
             @"/var/mobile/Library/Logs/ProjectX"
         ];

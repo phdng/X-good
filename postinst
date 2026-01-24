@@ -1,31 +1,25 @@
 #!/bin/sh
 
-# WeaponX Setup Script
+# WeaponX Setup Script for Rootful iOS 12+
 echo "Running WeaponX Setup..."
 
-# Check if we are in a rootless environment
-if [ -d /var/jb ]; then
-  echo "Detected rootless jailbreak environment"
-  ROOT_PREFIX="/var/jb"
-else
-  echo "Detected traditional jailbreak environment"
-  ROOT_PREFIX=""
-fi
+# Rootful jailbreak - no prefix needed
+ROOT_PREFIX=""
 
 # Create the preferences directories if they don't exist
-PREFS_DIR="${ROOT_PREFIX}/var/mobile/Library/Preferences"
+PREFS_DIR="/var/mobile/Library/Preferences"
 mkdir -p "$PREFS_DIR"
 chmod 755 "$PREFS_DIR"
 chown mobile:mobile "$PREFS_DIR"
 
 # Create the WeaponX directories if they don't exist
-WEAPONX_DIR="${ROOT_PREFIX}/var/mobile/Library/WeaponX"
+WEAPONX_DIR="/var/mobile/Library/WeaponX"
 mkdir -p "$WEAPONX_DIR"
 chmod 755 "$WEAPONX_DIR"
 chown mobile:mobile "$WEAPONX_DIR"
 
 # Create WeaponX daemon directories - use root:wheel ownership for daemon
-DAEMON_DIR="${ROOT_PREFIX}/Library/WeaponX"
+DAEMON_DIR="/Library/WeaponX"
 GUARDIAN_DIR="${DAEMON_DIR}/Guardian"
 mkdir -p "$GUARDIAN_DIR"
 chmod 755 "$DAEMON_DIR"
@@ -148,7 +142,7 @@ if [ ! -f "$SETTINGS_PLIST" ]; then
 fi
 
 # Handle the WeaponX daemon LaunchDaemon
-LAUNCHDAEMON_PATH="${ROOT_PREFIX}/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist"
+LAUNCHDAEMON_PATH="/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist"
 LAUNCHDAEMON_LABEL="com.hydra.weaponx.guardian"
 
 # First make sure the plist exists
@@ -160,21 +154,17 @@ if [ -f "$LAUNCHDAEMON_PATH" ]; then
   
   # Unload the daemon if it's already loaded (ignore errors)
   echo "Unloading previous LaunchDaemon instance if it exists..."
-  launchctl bootout system/$LAUNCHDAEMON_LABEL 2>/dev/null || true
   launchctl unload "$LAUNCHDAEMON_PATH" 2>/dev/null || true
   
-  # Load the daemon with bootstrap for root daemons
-  echo "Loading LaunchDaemon using bootstrap system..."
-  launchctl bootstrap system "$LAUNCHDAEMON_PATH" 2>&1
-  BOOTSTRAP_STATUS=$?
+  # Load the daemon
+  echo "Loading LaunchDaemon..."
+  launchctl load -w "$LAUNCHDAEMON_PATH" 2>&1
+  LOAD_STATUS=$?
   
-  if [ $BOOTSTRAP_STATUS -eq 0 ]; then
-    echo "✅ LaunchDaemon bootstrapped successfully!"
+  if [ $LOAD_STATUS -eq 0 ]; then
+    echo "✅ LaunchDaemon loaded successfully!"
   else
-    echo "⚠️ Bootstrap failed, trying traditional load..."
-    launchctl load -w "$LAUNCHDAEMON_PATH" 2>&1
-    LOAD_STATUS=$?
-    echo "Traditional load status: $LOAD_STATUS"
+    echo "⚠️ LaunchDaemon load returned status: $LOAD_STATUS"
   fi
   
   # Verify the daemon is loaded (give it a moment to start)
@@ -190,36 +180,10 @@ if [ -f "$LAUNCHDAEMON_PATH" ]; then
     fi
   else
     echo "⚠️ Warning: Guardian daemon may not have loaded correctly."
-    echo "Checking daemon executable permissions:"
-    ls -la "${ROOT_PREFIX}/Library/WeaponX/WeaponXDaemon"
-    
-    echo "Checking LaunchDaemon plist:"
-    ls -la "$LAUNCHDAEMON_PATH"
-    
-    echo "Checking log directory permissions:"
-    ls -la "${ROOT_PREFIX}/Library/WeaponX/Guardian/"
-    
-    echo "Attempting direct launch for debugging..."
-    "${ROOT_PREFIX}/Library/WeaponX/WeaponXDaemon" > /dev/null 2>&1 &
-    DAEMON_PID=$!
-    sleep 2
-    if kill -0 $DAEMON_PID 2>/dev/null; then
-      echo "✅ Direct launch succeeded (PID: $DAEMON_PID). Daemon can run!"
-      kill $DAEMON_PID
-      
-      echo "Trying enhanced bootstrap..."
-      launchctl enable system/$LAUNCHDAEMON_LABEL
-      launchctl kickstart -k system/$LAUNCHDAEMON_LABEL
-    else
-      echo "❌ Direct launch failed. Daemon might have errors."
-    fi
-    
-    echo "Log files should appear at: ${ROOT_PREFIX}/Library/WeaponX/Guardian/"
-    ls -la "${ROOT_PREFIX}/Library/WeaponX/Guardian/"
   fi
 else
   echo "ERROR: LaunchDaemon plist not found at ${LAUNCHDAEMON_PATH}"
 fi
 
 echo "WeaponX Setup completed!"
-exit 0 
+exit 0

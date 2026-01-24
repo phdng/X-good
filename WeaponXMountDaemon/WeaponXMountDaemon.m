@@ -254,7 +254,7 @@ static int fs_snapshot_mount(const char *volume, const char *mount_path, const c
     int argIndex = 0;
     
     // Path to the mount_bindfs command
-    const char *binPath = "/var/jb/usr/bin/mount_bindfs";
+    const char *binPath = "/usr/bin/mount_bindfs";
     args[argIndex++] = (char *)binPath;
     
     // Add -r flag if read-only

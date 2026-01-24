@@ -19,8 +19,8 @@ extern int proc_pidpath(int pid, void *buffer, uint32_t buffersize);
 
 static NSString * const kWeaponXGuardianKey = @"WeaponXGuardianActive";
 static NSString * const kWeaponXProcessIDs = @"WeaponXProcessIDs";
-static NSString * const kWeaponXDaemonPath = @"/var/jb/Library/WeaponX/WeaponXDaemon";
-static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist";
+static NSString * const kWeaponXDaemonPath = @"/Library/WeaponX/WeaponXDaemon";
+static NSString * const kWeaponXLaunchDaemonPath = @"/Library/LaunchDaemons/com.hydra.weaponx.guardian.plist";
 
 @interface WeaponXGuardian : NSObject
 @property (nonatomic, strong) NSTimer *guardianTimer;
@@ -354,10 +354,10 @@ static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemo
     
     if ([processName isEqualToString:@"ProjectX"]) {
         // Path to the ProjectX app
-        processPath = @"/var/jb/Applications/ProjectX.app/ProjectX";
+        processPath = @"/Applications/ProjectX.app/ProjectX";
     } else if ([processName isEqualToString:@"WeaponXDaemon"]) {
         // Path to the daemon
-        processPath = @"/var/jb/Library/WeaponX/WeaponXDaemon";
+        processPath = @"/Library/WeaponX/WeaponXDaemon";
     }
     
     if (!processPath) {
@@ -430,7 +430,7 @@ static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemo
 
 - (void)createPersistentState {
     // Create a directory to store our persistent state
-    NSString *guardianDir = @"/var/jb/Library/WeaponX/Guardian";
+    NSString *guardianDir = @"/Library/WeaponX/Guardian";
     NSFileManager *fileManager = [NSFileManager defaultManager];
     
     if (![fileManager fileExistsAtPath:guardianDir]) {
@@ -454,7 +454,7 @@ static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemo
 }
 
 - (void)updatePersistentState {
-    NSString *statePath = @"/var/jb/Library/WeaponX/Guardian/guardian.plist";
+    NSString *statePath = @"/Library/WeaponX/Guardian/guardian.plist";
     NSDictionary *state = @{
         @"active": @(_isGuardianActive),
         @"protectedProcesses": self.protectedProcesses,
@@ -482,7 +482,7 @@ static NSString * const kWeaponXLaunchDaemonPath = @"/var/jb/Library/LaunchDaemo
 
 - (void)applicationWillTerminate:(NSNotification *)notification {
     // Update state with termination flag
-    NSString *statePath = @"/var/jb/Library/WeaponX/Guardian/guardian.plist";
+    NSString *statePath = @"/Library/WeaponX/Guardian/guardian.plist";
     NSDictionary *state = @{
         @"active": @(YES),
         @"needsRestart": @(YES),

@@ -5,7 +5,7 @@
 #import <Foundation/Foundation.h>
 #import <sys/mount.h>
 #import <dlfcn.h>
-#import <ellekit/ellekit.h>
+// #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <IOKit/IOKitLib.h>
 #import <execinfo.h>
 #import <mach-o/dyld.h>
@@ -33,8 +33,8 @@
 #define DEFAULT_BLOCK_SIZE (4096ULL)
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
 // Scoped apps cache
@@ -188,13 +188,13 @@ static NSDictionary *getStorageValues() {
     
     @try {
         // First try to get active profile ID
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+        NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
         NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
         NSString *profileId = currentProfileInfo[@"ProfileId"];
         
         if (profileId) {
             // Build path to storage.plist for this profile
-            NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+            NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
             NSString *storagePath = [profileDir stringByAppendingPathComponent:@"storage.plist"];
             
             // Try to load values from storage.plist

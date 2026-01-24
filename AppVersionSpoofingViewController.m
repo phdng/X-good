@@ -244,13 +244,13 @@
     // Fallback if no profile ID found
     if (!profileId) {
         // First check the primary profile info file
-        NSString *centralInfoPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+        NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         
         profileId = centralInfo[@"ProfileId"];
         if (!profileId) {
             // If not found, check the legacy active_profile_info.plist
-            NSString *activeInfoPath = @"/var/jb/var/mobile/Library/WeaponX/active_profile_info.plist";
+            NSString *activeInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
             NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
             profileId = activeInfo[@"ProfileId"];
         }
@@ -262,7 +262,7 @@
     }
     
     // Build the path to this profile's app versions directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
     NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
     
     // Check if the directory exists
@@ -287,7 +287,7 @@
 
 - (void)loadAppsData {
     // Try rootless path first
-    NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+    NSString *prefsPath = @"/var/mobile/Library/Preferences";
     NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
     NSString *versionSpoofFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.version_spoof.plist"];
     NSString *multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
@@ -296,7 +296,7 @@
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if (![fileManager fileExistsAtPath:prefsPath]) {
         // Try Dopamine 2 path
-        prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+        prefsPath = @"/private/var/mobile/Library/Preferences";
         scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
         versionSpoofFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.version_spoof.plist"];
         multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
@@ -1101,7 +1101,7 @@
     
     if (profileId) {
         // Build the path to this profile's app versions directory
-        NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+        NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
         NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
         
         // Create the directory if it doesn't exist
@@ -1263,11 +1263,11 @@
         // Only use global storage for toggle state, never profile-specific
         
         // Try rootless path first
-        NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+        NSString *prefsPath = @"/var/mobile/Library/Preferences";
         NSString *versionSpoofFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.version_spoof.plist"];
         NSFileManager *fileManager = [NSFileManager defaultManager];
         if (![fileManager fileExistsAtPath:prefsPath]) {
-            prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+            prefsPath = @"/private/var/mobile/Library/Preferences";
             versionSpoofFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.version_spoof.plist"];
             if (![fileManager fileExistsAtPath:prefsPath]) {
                 prefsPath = @"/var/mobile/Library/Preferences";
@@ -1433,14 +1433,14 @@
 - (void)saveMultiVersionData {
     dispatch_async(dispatch_get_main_queue(), ^{
         // Try rootless path first
-        NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+        NSString *prefsPath = @"/var/mobile/Library/Preferences";
         NSString *multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
         
         // Fallback to standard path if rootless path doesn't exist
         NSFileManager *fileManager = [NSFileManager defaultManager];
         if (![fileManager fileExistsAtPath:prefsPath]) {
             // Try Dopamine 2 path
-            prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+            prefsPath = @"/private/var/mobile/Library/Preferences";
             multiVersionFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.multi_version_spoof.plist"];
             
             // Fallback to standard path if needed
@@ -1516,7 +1516,7 @@
                 // If we have a profile ID, proceed with profile-specific storage
                 if (profileId) {
                     // Build the path to this profile's app versions directory
-                    NSString *profileDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+                    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
                     NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
                     
                     // Create the directory if it doesn't exist
@@ -1581,14 +1581,14 @@
         
         // Now handle the global storage for all apps' toggle state
         // Try rootless path first
-        NSString *prefsPath = @"/var/jb/var/mobile/Library/Preferences";
+        NSString *prefsPath = @"/var/mobile/Library/Preferences";
         NSString *versionSpoofFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.version_spoof.plist"];
         
         // Fallback to standard path if rootless path doesn't exist
         NSFileManager *fileManager = [NSFileManager defaultManager];
         if (![fileManager fileExistsAtPath:prefsPath]) {
             // Try Dopamine 2 path
-            prefsPath = @"/var/jb/private/var/mobile/Library/Preferences";
+            prefsPath = @"/private/var/mobile/Library/Preferences";
             versionSpoofFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.version_spoof.plist"];
             
             // Fallback to standard path if needed

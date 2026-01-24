@@ -1,14 +1,12 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <substrate.h>
-#import <ellekit/ellekit.h>
 #import "BatteryManager.h"
 #import "IdentifierManager.h"
 
 // Path to scoped apps plist
-static NSString *const kScopedAppsPath = @"/var/jb/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt1 = @"/var/jb/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
-static NSString *const kScopedAppsPathAlt2 = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 
 // Scoped apps cache
 static NSMutableDictionary *scopedAppsCache = nil;
@@ -160,7 +158,7 @@ static BOOL isBatterySpoofingEnabled(void) {
 static NSString *getProfileBatteryLevel(void) {
     @try {
         // Get current profile ID
-        NSString *profilesPath = @"/var/jb/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+        NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
         NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:profilesPath];
         if (!currentProfileInfo) {
             return nil;
@@ -169,7 +167,7 @@ static NSString *getProfileBatteryLevel(void) {
         if (!profileId) {
             return nil;
         }
-        NSString *identityDir = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+        NSString *identityDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
         NSString *batteryInfoPath = [identityDir stringByAppendingPathComponent:@"battery_info.plist"];
         NSDictionary *batteryInfo = [NSDictionary dictionaryWithContentsOfFile:batteryInfoPath];
         if (!batteryInfo) {

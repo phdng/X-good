@@ -112,11 +112,11 @@
     
     // --- Optimized: Cache directory listings for this cleaning pass ---
     NSArray *cachedDataDirs = [self listDirectoriesInPath:@"/var/mobile/Containers/Data/Application"];
-    NSArray *cachedRootlessDataDirs = [self listDirectoriesInPath:@"/var/jb/containers/Data/Application"];
+    NSArray *cachedRootlessDataDirs = [self listDirectoriesInPath:@"/containers/Data/Application"];
     NSArray *cachedBundleDirs = [self listDirectoriesInPath:@"/var/containers/Bundle/Application"];
-    NSArray *cachedRootlessBundleDirs = [self listDirectoriesInPath:@"/var/jb/containers/Bundle/Application"];
+    NSArray *cachedRootlessBundleDirs = [self listDirectoriesInPath:@"/containers/Bundle/Application"];
     NSArray *cachedGroupDirs = [self listDirectoriesInPath:@"/var/mobile/Containers/Shared/AppGroup"];
-    NSArray *cachedRootlessGroupDirs = [self listDirectoriesInPath:@"/var/jb/containers/Shared/AppGroup"];
+    NSArray *cachedRootlessGroupDirs = [self listDirectoriesInPath:@"/containers/Shared/AppGroup"];
 
     // Optimized lookups using cached listings
     NSString *dataUUID = [self optimized_findDataContainerUUID:bundleID inDirectories:cachedDataDirs];
@@ -193,18 +193,18 @@
     
     // Clear rootless data container using the same approach
     if (rootlessDataUUID) {
-        NSString *rootlessDataPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@", rootlessDataUUID];
+        NSString *rootlessDataPath = [NSString stringWithFormat:@"/containers/Data/Application/%@", rootlessDataUUID];
         NSLog(@"[AppDataCleaner] Wiping rootless data container: %@", rootlessDataPath);
         [self completelyWipeContainer:rootlessDataPath];
     } else {
-        NSLog(@"[AppDataCleaner] Directory does not exist: /var/jb/containers/Data/Application");
+        NSLog(@"[AppDataCleaner] Directory does not exist: /containers/Data/Application");
     }
     
     // Clear App Store receipt
     [self clearAppReceiptData:bundleID withBundleUUID:bundleUUID];
     
     // Process rootless bundle container
-    NSString *rootlessBundlePath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@", bundleUUID];
+    NSString *rootlessBundlePath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@", bundleUUID];
     if ([[NSFileManager defaultManager] fileExistsAtPath:rootlessBundlePath]) {
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/*", rootlessBundlePath]];
     }
@@ -243,12 +243,12 @@
         [NSString stringWithFormat:@"/var/mobile/Library/Application Support/%@", bundleID],
         [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID],
         // Rootless equivalents
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/%@.plist", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Caches/%@", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Spotlight/%@", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Cookies/%@.binarycookies", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Application Support/%@", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID]
+        [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Caches/%@", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Spotlight/%@", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Cookies/%@.binarycookies", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Application Support/%@", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID]
     ];
     dispatch_group_t addPathsGroup = dispatch_group_create();
     for (NSString *path in additionalPaths) {
@@ -271,10 +271,10 @@
     
     // Clean RootHide var data (SAFE: Only app's own files, no wildcards outside app scope)
     NSLog(@"[AppDataCleaner] Cleaning RootHide var data for %@", bundleID);
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/jb/var/mobile/Library/Caches/%@", bundleID]];
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/jb/var/mobile/Library/Preferences/%@.plist", bundleID]];
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/jb/var/root/Library/Preferences/%@.plist", bundleID]];
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/jb/private/var/mobile/Library/Preferences/%@.plist", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Caches/%@", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Preferences/%@.plist", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/root/Library/Preferences/%@.plist", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /private/var/mobile/Library/Preferences/%@.plist", bundleID]];
 
     // Clear iCloud-related data
     NSLog(@"[AppDataCleaner] Clearing iCloud-related data for %@", bundleID);
@@ -340,7 +340,7 @@
         [finalSweepPaths addObject:[NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", dataUUID]];
     }
     if (rootlessDataUUID) {
-        [finalSweepPaths addObject:[NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@", rootlessDataUUID]];
+        [finalSweepPaths addObject:[NSString stringWithFormat:@"/containers/Data/Application/%@", rootlessDataUUID]];
     }
     for (NSString *groupUUID in groupUUIDs) {
         NSString *path = [NSString stringWithFormat:@"/var/mobile/Containers/Shared/AppGroup/%@", groupUUID];
@@ -348,7 +348,7 @@
         [finalSweepPaths addObject:path];
     }
     for (NSString *groupUUID in rootlessGroupUUIDs) {
-        NSString *path = [NSString stringWithFormat:@"/var/jb/containers/Shared/AppGroup/%@", groupUUID];
+        NSString *path = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", groupUUID];
         NSLog(@"[AppDataCleaner][Detect] Rootless App Group Container: %@", path);
         [finalSweepPaths addObject:path];
     }
@@ -485,12 +485,12 @@
     }
     
     // Also check rootless path
-    NSString *rootlessBundlePath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@", bundleUUID];
+    NSString *rootlessBundlePath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@", bundleUUID];
     NSArray *rootlessBundleContents = [self listDirectoriesInPath:rootlessBundlePath];
     
     for (NSString *item in rootlessBundleContents) {
         if ([item hasSuffix:@".app"]) {
-            NSString *receiptPath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@/%@/_MASReceipt", 
+            NSString *receiptPath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@/%@/_MASReceipt", 
                                    bundleUUID, item];
             
             NSLog(@"[AppDataCleaner] Wiping rootless app receipt at: %@", receiptPath);
@@ -509,7 +509,7 @@
 // NEW: Enhanced method to clear app group containers with better subfolder handling
 - (void)clearAppGroupContainers:(NSString *)bundleID withGroupUUIDs:(NSArray *)groupUUIDs isRootless:(BOOL)isRootless {
     NSString *basePath = isRootless ? 
-        @"/var/jb/containers/Shared/AppGroup/%@" : 
+        @"/containers/Shared/AppGroup/%@" : 
         @"/var/mobile/Containers/Shared/AppGroup/%@";
     
     for (NSString *groupUUID in groupUUIDs) {
@@ -605,9 +605,9 @@
     // Also manually clear Spotlight directories regardless of API result
     NSArray *spotlightPaths = @[
         [NSString stringWithFormat:@"/var/mobile/Library/Spotlight/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Spotlight/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Spotlight/%@*", bundleID],
         @"/var/mobile/Library/Caches/com.apple.Spotlight*",
-        @"/var/jb/var/mobile/Library/Caches/com.apple.Spotlight*"
+        @"/var/mobile/Library/Caches/com.apple.Spotlight*"
     ];
     
     for (NSString *pattern in spotlightPaths) {
@@ -643,16 +643,16 @@
     }
     
     // Try rootless path if standard path didn't work
-    if ([self directoryHasContent:@"/var/jb/containers/Bundle/Application"]) {
-        NSArray *bundleDirs = [self listDirectoriesInPath:@"/var/jb/containers/Bundle/Application"];
+    if ([self directoryHasContent:@"/containers/Bundle/Application"]) {
+        NSArray *bundleDirs = [self listDirectoriesInPath:@"/containers/Bundle/Application"];
         
         for (NSString *uuid in bundleDirs) {
-            NSString *appPath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@", uuid];
+            NSString *appPath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@", uuid];
             NSArray *appContents = [self listDirectoriesInPath:appPath];
             
             for (NSString *item in appContents) {
                 if ([item hasSuffix:@".app"]) {
-                    NSString *infoPlistPath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@/%@/Info.plist", 
+                    NSString *infoPlistPath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@/%@/Info.plist", 
                                               uuid, item];
                     NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
                     NSString *itemBundleID = infoPlist[@"CFBundleIdentifier"];
@@ -731,10 +731,10 @@
     NSArray *parts = [bundleID componentsSeparatedByString:@"."];
     NSString *company = parts.count > 1 ? parts[1] : @"";
     NSString *shortName = parts.lastObject;
-    if (![_fileManager fileExistsAtPath:@"/var/jb/containers/Data/Application"]) return nil;
-    NSArray *dataDirs = [self listDirectoriesInPath:@"/var/jb/containers/Data/Application"];
+    if (![_fileManager fileExistsAtPath:@"/containers/Data/Application"]) return nil;
+    NSArray *dataDirs = [self listDirectoriesInPath:@"/containers/Data/Application"];
     for (NSString *uuid in dataDirs) {
-        NSString *metadataPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
+        NSString *metadataPath = [NSString stringWithFormat:@"/containers/Data/Application/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
         NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
         NSString *containerBundleID = metadata[@"MCMMetadataIdentifier"];
         if ([containerBundleID isEqualToString:bundleID]) return uuid;
@@ -745,7 +745,7 @@
                 NSLog(@"[AppDataCleaner][Aggressive] Matched rootless data container %@ by fuzzy metadata: %@", uuid, containerBundleID);
                 return uuid;
             }
-            NSString *containerPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@", uuid];
+            NSString *containerPath = [NSString stringWithFormat:@"/containers/Data/Application/%@", uuid];
             NSArray *contents = [self listDirectoriesInPath:containerPath];
             for (NSString *item in contents) {
                 if (([item containsString:bundleID] ||
@@ -764,16 +764,16 @@
     return [self findRootlessDataContainerUUID:bundleID aggressive:YES];
     NSLog(@"[AppDataCleaner] Searching for rootless data container UUID for %@", bundleID);
     
-    if (![_fileManager fileExistsAtPath:@"/var/jb/containers/Data/Application"]) {
+    if (![_fileManager fileExistsAtPath:@"/containers/Data/Application"]) {
         NSLog(@"[AppDataCleaner] Rootless data containers directory doesn't exist");
         return nil;
     }
     
-    NSArray *dataDirs = [self listDirectoriesInPath:@"/var/jb/containers/Data/Application"];
+    NSArray *dataDirs = [self listDirectoriesInPath:@"/containers/Data/Application"];
     NSLog(@"[AppDataCleaner] Found %lu rootless application data containers", (unsigned long)dataDirs.count);
     
     for (NSString *uuid in dataDirs) {
-        NSString *metadataPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
+        NSString *metadataPath = [NSString stringWithFormat:@"/containers/Data/Application/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
         NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
         NSString *containerBundleID = metadata[@"MCMMetadataIdentifier"];
         
@@ -864,15 +864,15 @@
 }
 
 - (NSArray *)findRootlessAppGroupUUIDs:(NSString *)bundleID {
-    if (![self directoryHasContent:@"/var/jb/containers/Shared/AppGroup"]) {
+    if (![self directoryHasContent:@"/containers/Shared/AppGroup"]) {
         return @[];
     }
     
     NSMutableArray *groupUUIDs = [NSMutableArray array];
-    NSArray *groupDirs = [self listDirectoriesInPath:@"/var/jb/containers/Shared/AppGroup"];
+    NSArray *groupDirs = [self listDirectoriesInPath:@"/containers/Shared/AppGroup"];
     
     for (NSString *uuid in groupDirs) {
-        NSString *metadataPath = [NSString stringWithFormat:@"/var/jb/containers/Shared/AppGroup/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
+        NSString *metadataPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
         NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
         
         // App groups may have different metadata structure
@@ -1271,18 +1271,18 @@
     
     // RootHide stores some data in these locations
     NSArray *rootHidePaths = @[
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/%@.plist", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/%@*.plist", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Caches/%@", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Caches/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/tmp/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/tmp/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/WebKit/WebsiteData/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Application Support/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Cookies/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@*.plist", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Caches/%@", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Caches/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/tmp/%@*", bundleID],
+        [NSString stringWithFormat:@"/tmp/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/WebKit/WebsiteData/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Application Support/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Cookies/%@*", bundleID],
         // RootHide specific paths
-        [NSString stringWithFormat:@"/var/jb/var/root/Library/Preferences/%@*.plist", bundleID],
-        [NSString stringWithFormat:@"/var/jb/private/var/mobile/Library/Preferences/%@*.plist", bundleID]
+        [NSString stringWithFormat:@"/var/root/Library/Preferences/%@*.plist", bundleID],
+        [NSString stringWithFormat:@"/private/var/mobile/Library/Preferences/%@*.plist", bundleID]
     ];
     
     for (NSString *pattern in rootHidePaths) {
@@ -1294,10 +1294,10 @@
     }
     
     // Use elevated permissions to ensure clean var
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/jb/var/mobile/Library/Caches/%@*", bundleID]];
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/jb/var/mobile/Library/Preferences/%@*", bundleID]];
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/jb/var/root/Library/Preferences/%@*", bundleID]];
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/jb/private/var/mobile/Library/Preferences/%@*", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Caches/%@*", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Preferences/%@*", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/root/Library/Preferences/%@*", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /private/var/mobile/Library/Preferences/%@*", bundleID]];
 }
 
 - (void)clearPluginKitData:(NSString *)bundleID {
@@ -1306,9 +1306,9 @@
     // PluginKit stores data about app extensions which can also contain auth data
     NSArray *pluginKitPaths = @[
         @"/var/mobile/Library/PlugInKit/",
-        @"/var/jb/var/mobile/Library/PlugInKit/",
+        @"/var/mobile/Library/PlugInKit/",
         @"/var/mobile/Library/MobileContainerManager/PluginKitPlugin/",
-        @"/var/jb/var/mobile/Library/MobileContainerManager/PluginKitPlugin/"
+        @"/var/mobile/Library/MobileContainerManager/PluginKitPlugin/"
     ];
     
     for (NSString *basePath in pluginKitPaths) {
@@ -1367,7 +1367,7 @@
     }
     
     // Also check rootless path
-    NSString *rootlessContainerMgrPath = @"/var/jb/var/mobile/Library/MobileContainerManager/containers.plist";
+    NSString *rootlessContainerMgrPath = @"/var/mobile/Library/MobileContainerManager/containers.plist";
     if ([_fileManager fileExistsAtPath:rootlessContainerMgrPath]) {
         NSString *tempPath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"containers.plist.temp"];
         [_fileManager copyItemAtPath:rootlessContainerMgrPath toPath:tempPath error:nil];
@@ -1402,8 +1402,8 @@
     NSArray *paths = @[
         [NSString stringWithFormat:@"/var/mobile/Library/Caches/com.apple.thumbnailservices/%@*", bundleID],
         [NSString stringWithFormat:@"/var/mobile/Library/Caches/com.apple.QuickLook.thumbnailcache/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Caches/com.apple.thumbnailservices/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Caches/com.apple.QuickLook.thumbnailcache/%@*", bundleID]
+        [NSString stringWithFormat:@"/var/mobile/Library/Caches/com.apple.thumbnailservices/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Caches/com.apple.QuickLook.thumbnailcache/%@*", bundleID]
     ];
     
     for (NSString *pattern in paths) {
@@ -1421,13 +1421,13 @@
     // Target iCloud containers, which may contain auth tokens and sync data
     NSArray *iCloudPaths = @[
         @"/var/mobile/Library/Mobile Documents/",
-        @"/var/jb/var/mobile/Library/Mobile Documents/",
+        @"/var/mobile/Library/Mobile Documents/",
         @"/var/mobile/Library/Application Support/CloudDocs/",
-        @"/var/jb/var/mobile/Library/Application Support/CloudDocs/",
+        @"/var/mobile/Library/Application Support/CloudDocs/",
         @"/var/mobile/Library/Application Support/CloudKit/",
-        @"/var/jb/var/mobile/Library/Application Support/CloudKit/",
+        @"/var/mobile/Library/Application Support/CloudKit/",
         @"/var/mobile/Library/Accounts/",
-        @"/var/jb/var/mobile/Library/Accounts/"
+        @"/var/mobile/Library/Accounts/"
     ];
     
     // Parse out domain names from the bundle ID (like 'uber' from 'com.ubercab.UberClient')
@@ -1475,7 +1475,7 @@
     }
     
     // Also check rootless path
-    NSString *rootlessAccountsDBPath = @"/var/jb/var/mobile/Library/Accounts/Accounts3.sqlite";
+    NSString *rootlessAccountsDBPath = @"/var/mobile/Library/Accounts/Accounts3.sqlite";
     if ([_fileManager fileExistsAtPath:rootlessAccountsDBPath]) {
         for (NSString *term in searchTerms) {
             NSString *sqlCommand = [NSString stringWithFormat:
@@ -1492,8 +1492,8 @@
         [NSString stringWithFormat:@"/var/mobile/Library/Logs/DiagnosticReports/%@*", bundleID],
         [NSString stringWithFormat:@"/var/log/asl/*%@*", bundleID],
         [NSString stringWithFormat:@"/var/log/system.log.*%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Logs/CrashReporter/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Logs/DiagnosticReports/%@*", bundleID]
+        [NSString stringWithFormat:@"/var/mobile/Library/Logs/CrashReporter/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Logs/DiagnosticReports/%@*", bundleID]
     ];
     
     for (NSString *pattern in logPaths) {
@@ -1987,7 +1987,7 @@
     
     // Rootless data container - more aggressive
     if (rootlessDataUUID) {
-        NSString *containerPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@", rootlessDataUUID];
+        NSString *containerPath = [NSString stringWithFormat:@"/containers/Data/Application/%@", rootlessDataUUID];
         if ([self directoryExistsAndHasAnyContent:containerPath]) {
             NSLog(@"[AppDataCleaner] Found data in rootless application container: %@", containerPath);
             hasData = YES;
@@ -2005,7 +2005,7 @@
     
     // Rootless app groups - check entire container
     for (NSString *groupUUID in rootlessGroupUUIDs) {
-        NSString *groupPath = [NSString stringWithFormat:@"/var/jb/containers/Shared/AppGroup/%@", groupUUID];
+        NSString *groupPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", groupUUID];
         if ([self directoryExistsAndHasAnyContent:groupPath]) {
             NSLog(@"[AppDataCleaner] Found data in rootless App Group: %@", groupPath);
             hasData = YES;
@@ -2020,7 +2020,7 @@
     }
     
     // Check rootless preferences
-    NSString *rootlessPrefsPath = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/%@.plist", bundleID];
+    NSString *rootlessPrefsPath = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bundleID];
     if ([_fileManager fileExistsAtPath:rootlessPrefsPath]) {
         NSLog(@"[AppDataCleaner] Found rootless preference file: %@", rootlessPrefsPath);
         hasData = YES;
@@ -2097,7 +2097,7 @@
     dispatch_apply(dataDirs.count, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t i) {
         if (result) return;
         NSString *uuid = dataDirs[i];
-        NSString *metadataPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
+        NSString *metadataPath = [NSString stringWithFormat:@"/containers/Data/Application/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
         NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
         NSString *containerBundleID = metadata[@"MCMMetadataIdentifier"];
         if ([containerBundleID isEqualToString:bundleID]) { result = uuid; return; }
@@ -2106,7 +2106,7 @@
             (shortName.length && [containerBundleID containsString:shortName])) {
             result = uuid; return;
         }
-        NSString *containerPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@", uuid];
+        NSString *containerPath = [NSString stringWithFormat:@"/containers/Data/Application/%@", uuid];
         NSArray *contents = [self listDirectoriesInPath:containerPath];
         for (NSString *item in contents) {
             if (([item containsString:bundleID] ||
@@ -2181,11 +2181,11 @@
     dispatch_apply(rootlessDirs.count, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t i) {
         if (result) return;
         NSString *uuid = rootlessDirs[i];
-        NSString *appPath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@", uuid];
+        NSString *appPath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@", uuid];
         NSArray *appContents = [self listDirectoriesInPath:appPath];
         for (NSString *item in appContents) {
             if ([item hasSuffix:@".app"]) {
-                NSString *infoPlistPath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@/%@/Info.plist", uuid, item];
+                NSString *infoPlistPath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@/%@/Info.plist", uuid, item];
                 NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
                 NSString *itemBundleID = infoPlist[@"CFBundleIdentifier"];
                 if ([itemBundleID isEqualToString:bundleID]) { result = uuid; return; }
@@ -2214,7 +2214,7 @@
     // Rootless
     dispatch_apply(rootlessDataDirs.count, dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^(size_t i) {
         NSString *uuid = rootlessDataDirs[i];
-        NSString *metadataPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
+        NSString *metadataPath = [NSString stringWithFormat:@"/containers/Data/Application/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
         NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
         NSString *containerBundleID = metadata[@"MCMMetadataIdentifier"];
         if (containerBundleID && [containerBundleID hasPrefix:bundleID] && ![containerBundleID isEqualToString:bundleID]) {
@@ -2251,7 +2251,7 @@
     
     // Clear standard data container 
     [self completelyWipeContainer:[NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", dataUUID]];
-    [self completelyWipeContainer:[NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@", rootlessDataUUID]];
+    [self completelyWipeContainer:[NSString stringWithFormat:@"/containers/Data/Application/%@", rootlessDataUUID]];
     
     // Clear all kinds of user data
     [self clearKeychainItemsForBundleID:bundleID];
@@ -2267,7 +2267,7 @@
     
     // Clear app settings
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Preferences/%@*", bundleID]];
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/jb/var/mobile/Library/Preferences/%@*", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Preferences/%@*", bundleID]];
     
     // Clear encrypted data
     [self _internalClearEncryptedData:bundleID];
@@ -2300,12 +2300,12 @@
     }
     
     if (rootlessDataUUID) {
-        NSString *cachePath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@/Library/Caches", rootlessDataUUID];
+        NSString *cachePath = [NSString stringWithFormat:@"/containers/Data/Application/%@/Library/Caches", rootlessDataUUID];
         [self wipeDirectoryContents:cachePath keepDirectoryStructure:YES];
     }
     
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Caches/%@*", bundleID]];
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/jb/var/mobile/Library/Caches/%@*", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Caches/%@*", bundleID]];
 }
 
 - (void)clearAppPreferences:(NSString *)bundleID {
@@ -2318,12 +2318,12 @@
     }
     
     if (rootlessDataUUID) {
-        NSString *prefsPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@/Library/Preferences", rootlessDataUUID];
+        NSString *prefsPath = [NSString stringWithFormat:@"/containers/Data/Application/%@/Library/Preferences", rootlessDataUUID];
         [self wipeDirectoryContents:prefsPath keepDirectoryStructure:YES];
     }
     
     [self securelyWipeFile:[NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bundleID]];
-    [self securelyWipeFile:[NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/%@.plist", bundleID]];
+    [self securelyWipeFile:[NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bundleID]];
 }
 
 - (void)clearAppCookies:(NSString *)bundleID {
@@ -2336,12 +2336,12 @@
     }
     
     if (rootlessDataUUID) {
-        NSString *cookiesPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@/Library/Cookies", rootlessDataUUID];
+        NSString *cookiesPath = [NSString stringWithFormat:@"/containers/Data/Application/%@/Library/Cookies", rootlessDataUUID];
         [self wipeDirectoryContents:cookiesPath keepDirectoryStructure:YES];
     }
     
     [self securelyWipeFile:[NSString stringWithFormat:@"/var/mobile/Library/Cookies/%@.binarycookies", bundleID]];
-    [self securelyWipeFile:[NSString stringWithFormat:@"/var/jb/var/mobile/Library/Cookies/%@.binarycookies", bundleID]];
+    [self securelyWipeFile:[NSString stringWithFormat:@"/var/mobile/Library/Cookies/%@.binarycookies", bundleID]];
 }
 
 - (void)clearAppWebKitData:(NSString *)bundleID {
@@ -2354,12 +2354,12 @@
     }
     
     if (rootlessDataUUID) {
-        NSString *webkitPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@/Library/WebKit", rootlessDataUUID];
+        NSString *webkitPath = [NSString stringWithFormat:@"/containers/Data/Application/%@/Library/WebKit", rootlessDataUUID];
         [self wipeDirectoryContents:webkitPath keepDirectoryStructure:YES];
     }
     
     [self securelyWipeFile:[NSString stringWithFormat:@"/var/mobile/Library/WebKit/WebsiteData/*/%@", bundleID]];
-    [self securelyWipeFile:[NSString stringWithFormat:@"/var/jb/var/mobile/Library/WebKit/WebsiteData/*/%@", bundleID]];
+    [self securelyWipeFile:[NSString stringWithFormat:@"/var/mobile/Library/WebKit/WebsiteData/*/%@", bundleID]];
 }
 
 - (void)clearAppKeychain:(NSString *)bundleID {
@@ -2376,7 +2376,7 @@
     }
     
     for (NSString *groupUUID in rootlessGroupUUIDs) {
-        NSString *groupPath = [NSString stringWithFormat:@"/var/jb/containers/Shared/AppGroup/%@", groupUUID];
+        NSString *groupPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", groupUUID];
         [self wipeDirectoryContents:groupPath keepDirectoryStructure:YES];
     }
 }
@@ -2563,7 +2563,7 @@
     // Clear app state data which can contain login sessions
     NSArray *statePaths = @[
         [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID]
+        [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID]
     ];
     
     for (NSString *path in statePaths) {
@@ -2577,7 +2577,7 @@
     }
     
     // Check rootless paths too
-    frontBoardPaths = [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/jb/var/mobile/Library/FrontBoard/*/%@*", bundleID]];
+    frontBoardPaths = [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/mobile/Library/FrontBoard/*/%@*", bundleID]];
     for (NSString *path in frontBoardPaths) {
         [self securelyWipeFile:path];
     }
@@ -2586,22 +2586,22 @@
     NSArray *modernStatePaths = @[
         // LiveActivities state
         [NSString stringWithFormat:@"/var/mobile/Library/LiveActivities/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/LiveActivities/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/LiveActivities/%@*", bundleID],
         // App state in different format
         [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/RecentlyTerminatedAppState/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/SpringBoard/RecentlyTerminatedAppState/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/RecentlyTerminatedAppState/%@*", bundleID],
         // Backgrounding state
         [NSString stringWithFormat:@"/var/mobile/Library/BackgroundTasks/*/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/BackgroundTasks/*/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/BackgroundTasks/*/%@*", bundleID],
         // Permission state
         [NSString stringWithFormat:@"/var/mobile/Library/TCC/*/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/TCC/*/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/TCC/*/%@*", bundleID],
         // Additional state locations
         [NSString stringWithFormat:@"/var/mobile/Library/Containers/*/Data/System/com.apple.nsurlsessiond/SessionData/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Containers/*/Data/System/com.apple.nsurlsessiond/SessionData/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Containers/*/Data/System/com.apple.nsurlsessiond/SessionData/%@*", bundleID],
         // iOS 15 specific frontend state
         [NSString stringWithFormat:@"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.%@.plist", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.%@.plist", bundleID]
+        [NSString stringWithFormat:@"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.%@.plist", bundleID]
     ];
     
     for (NSString *pattern in modernStatePaths) {
@@ -2631,11 +2631,11 @@
     }
     
     // 2. Also check rootless paths
-    NSArray *rootlessEncryptedPrefs = [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/%@*.enc*", bundleID]];
+    NSArray *rootlessEncryptedPrefs = [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@*.enc*", bundleID]];
     rootlessEncryptedPrefs = [rootlessEncryptedPrefs arrayByAddingObjectsFromArray:
-                             [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/%@*.encrypted*", bundleID]]];
+                             [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@*.encrypted*", bundleID]]];
     rootlessEncryptedPrefs = [rootlessEncryptedPrefs arrayByAddingObjectsFromArray:
-                             [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/%@*.secure*", bundleID]]];
+                             [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@*.secure*", bundleID]]];
     
     for (NSString *path in rootlessEncryptedPrefs) {
         [self securelyWipeFile:path];
@@ -2762,11 +2762,11 @@
     }
     
     // 2. Check rootless path too
-    if ([self directoryHasContent:@"/var/jb/containers/Data/Application"]) {
-        NSArray *rootlessDataContainers = [self listDirectoriesInPath:@"/var/jb/containers/Data/Application"];
+    if ([self directoryHasContent:@"/containers/Data/Application"]) {
+        NSArray *rootlessDataContainers = [self listDirectoriesInPath:@"/containers/Data/Application"];
         
         for (NSString *uuid in rootlessDataContainers) {
-            NSString *metadataPath = [NSString stringWithFormat:@"/var/jb/containers/Data/Application/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
+            NSString *metadataPath = [NSString stringWithFormat:@"/containers/Data/Application/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
             NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
             NSString *containerBundleID = metadata[@"MCMMetadataIdentifier"];
             
@@ -2810,7 +2810,7 @@
     }
     
     // 4. Check rootless PluginKitPlugin containers
-    pluginKitPaths = [self findPathsMatchingPattern:@"/var/jb/containers/Data/PluginKitPlugin/*"];
+    pluginKitPaths = [self findPathsMatchingPattern:@"/containers/Data/PluginKitPlugin/*"];
     for (NSString *pluginPath in pluginKitPaths) {
         NSString *metadataPath = [pluginPath stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
         NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
@@ -2884,14 +2884,14 @@
 
 // Find rootless bundle UUID for an extension
 - (NSString *)findRootlessBundleUUIDForExtension:(NSString *)extensionBundleID {
-    if (![self directoryHasContent:@"/var/jb/containers/Bundle/Application"]) {
+    if (![self directoryHasContent:@"/containers/Bundle/Application"]) {
         return nil;
     }
     
-    NSArray *bundleDirs = [self listDirectoriesInPath:@"/var/jb/containers/Bundle/Application"];
+    NSArray *bundleDirs = [self listDirectoriesInPath:@"/containers/Bundle/Application"];
     
     for (NSString *uuid in bundleDirs) {
-        NSString *appPath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@", uuid];
+        NSString *appPath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@", uuid];
         NSArray *appContents = [self listDirectoriesInPath:appPath];
         
         // Same logic as standard bundle, but with rootless paths
@@ -2900,7 +2900,7 @@
                 [item isEqualToString:@"PlugIns"] || [item isEqualToString:@"Plugins"]) {
                 
                 if ([item hasSuffix:@".appex"]) {
-                    NSString *infoPlistPath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@/%@/Info.plist", 
+                    NSString *infoPlistPath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@/%@/Info.plist", 
                                              uuid, item];
                     NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
                     NSString *itemBundleID = infoPlist[@"CFBundleIdentifier"];
@@ -2910,12 +2910,12 @@
                     }
                 } 
                 else if ([item isEqualToString:@"PlugIns"] || [item isEqualToString:@"Plugins"]) {
-                    NSString *pluginsPath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@/%@", uuid, item];
+                    NSString *pluginsPath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@/%@", uuid, item];
                     NSArray *plugins = [self listDirectoriesInPath:pluginsPath];
                     
                     for (NSString *plugin in plugins) {
                         if ([plugin hasSuffix:@".appex"]) {
-                            NSString *infoPlistPath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@/%@/%@/Info.plist", 
+                            NSString *infoPlistPath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@/%@/%@/Info.plist", 
                                                      uuid, item, plugin];
                             NSDictionary *infoPlist = [NSDictionary dictionaryWithContentsOfFile:infoPlistPath];
                             NSString *itemBundleID = infoPlist[@"CFBundleIdentifier"];
@@ -2952,7 +2952,7 @@
         // 1. Clear extension data container
         if (dataUUID.length > 0) {
             NSString *basePath = isRootless ? 
-                @"/var/jb/containers/Data/" : 
+                @"/containers/Data/" : 
                 @"/var/mobile/Containers/Data/";
             
             NSString *containerType = [type isEqualToString:@"pluginkit"] ? @"PluginKitPlugin" : @"Application";
@@ -2996,7 +2996,7 @@
         // 2. Clear extension bundle receipt if available
         if (bundleUUID.length > 0) {
             NSString *basePath = isRootless ?
-                @"/var/jb/containers/Bundle/Application/" :
+                @"/containers/Bundle/Application/" :
                 @"/var/containers/Bundle/Application/";
             
             // Extensions can be directly in the bundle directory or in PlugIns/Plugins subdirectory
@@ -3045,7 +3045,7 @@
         NSString *prefsPath = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", extensionBundleID];
         [self securelyWipeFile:prefsPath];
         
-        NSString *rootlessPrefsPath = [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/%@.plist", extensionBundleID];
+        NSString *rootlessPrefsPath = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", extensionBundleID];
         [self securelyWipeFile:rootlessPrefsPath];
     }
 }
@@ -3153,7 +3153,7 @@
     }
     
     // 3. Also check rootless path
-    NSString *rootlessBundlesPath = @"/var/jb/containers/Bundle/Application";
+    NSString *rootlessBundlesPath = @"/containers/Bundle/Application";
     if ([_fileManager fileExistsAtPath:rootlessBundlesPath]) {
         contents = [_fileManager contentsOfDirectoryAtPath:rootlessBundlesPath error:&error];
         
@@ -3211,7 +3211,7 @@
     }
     
     // 4. Check rootless paths too
-    NSString *rootlessReceiptPath = [NSString stringWithFormat:@"/var/jb/containers/Bundle/Application/%@/*/_MASReceipt", bundleUUID];
+    NSString *rootlessReceiptPath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@/*/_MASReceipt", bundleUUID];
     receipts = [self findPathsMatchingPattern:rootlessReceiptPath];
     for (NSString *path in receipts) {
         NSLog(@"[AppDataCleaner] Wiping rootless app receipt at: %@", path);
@@ -3287,8 +3287,8 @@
     NSArray *healthPaths = @[
         @"/var/mobile/Library/Health/",
         @"/var/mobile/Library/HealthKit/",
-        @"/var/jb/var/mobile/Library/Health/",
-        @"/var/jb/var/mobile/Library/HealthKit/"
+        @"/var/mobile/Library/Health/",
+        @"/var/mobile/Library/HealthKit/"
     ];
     
     for (NSString *basePath in healthPaths) {
@@ -3518,8 +3518,8 @@
     [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/CoreServices/SpringBoard.app/SBIconModelCache.plist"];
     
     // Also remove rootless versions
-    [self runCommandWithPrivileges:@"rm -rf /var/jb/var/mobile/Library/CoreServices/SpringBoard.app/SBAppTagsFileManager"];
-    [self runCommandWithPrivileges:@"rm -rf /var/jb/var/mobile/Library/CoreServices/SpringBoard.app/SBIconModelCache.plist"];
+    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/CoreServices/SpringBoard.app/SBAppTagsFileManager"];
+    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/CoreServices/SpringBoard.app/SBIconModelCache.plist"];
     
     // Find and remove LaunchServices caches
     NSArray *lsCachePaths = [self findPathsMatchingPattern:@"/var/mobile/Library/Caches/com.apple.LaunchServices-*"];
@@ -3528,7 +3528,7 @@
     }
     
     // Find and remove rootless LaunchServices caches
-    lsCachePaths = [self findPathsMatchingPattern:@"/var/jb/var/mobile/Library/Caches/com.apple.LaunchServices-*"];
+    lsCachePaths = [self findPathsMatchingPattern:@"/var/mobile/Library/Caches/com.apple.LaunchServices-*"];
     for (NSString *path in lsCachePaths) {
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'", path]];
     }
@@ -3552,13 +3552,13 @@
     
     // Enhanced: Force cache regen in filesystem
     [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.LaunchServices-* 2>/dev/null || true"];
-    [self runCommandWithPrivileges:@"rm -rf /var/jb/var/mobile/Library/Caches/com.apple.LaunchServices-* 2>/dev/null || true"];
+    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.LaunchServices-* 2>/dev/null || true"];
     
     // Enhanced: Force database vacuum on key databases to remove deleted data
     NSArray *dbsToVacuum = @[
         @"/var/mobile/Library/SpringBoard/IconState.plist",
         @"/var/mobile/Library/SpringBoard/ApplicationState.db",
-        @"/var/jb/var/mobile/Library/SpringBoard/ApplicationState.db"
+        @"/var/mobile/Library/SpringBoard/ApplicationState.db"
     ];
     
     for (NSString *dbPath in dbsToVacuum) {
@@ -3744,7 +3744,7 @@
     
     // Handle rootless app group containers using the same logic
     for (NSString *uuid in rootlessGroupUUIDs) {
-        NSString *containerPath = [NSString stringWithFormat:@"/var/jb/containers/Shared/AppGroup/%@", uuid];
+        NSString *containerPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", uuid];
         NSLog(@"[AppDataCleaner] Cleaning rootless app group container: %@", containerPath);
         
         // Get and log the group identifier
@@ -4170,37 +4170,37 @@
     NSArray *locationPaths = @[
         // Location caches that might contain bad registrations
         [NSString stringWithFormat:@"/var/mobile/Library/Caches/locationd/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Caches/locationd/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Caches/locationd/%@*", bundleID],
         // Special case for Lyft/Zimride
         @"/var/mobile/Library/Caches/locationd/*lyft*",
-        @"/var/jb/var/mobile/Library/Caches/locationd/*lyft*",
+        @"/var/mobile/Library/Caches/locationd/*lyft*",
         @"/var/mobile/Library/Caches/locationd/*zimride*",
-        @"/var/jb/var/mobile/Library/Caches/locationd/*zimride*",
+        @"/var/mobile/Library/Caches/locationd/*zimride*",
         // Extra case for com.lyft.ios specifically
         @"/var/mobile/Library/Caches/locationd/com.lyft.ios*",
-        @"/var/jb/var/mobile/Library/Caches/locationd/com.lyft.ios*",
+        @"/var/mobile/Library/Caches/locationd/com.lyft.ios*",
         // Special case for Uber/Helix
         @"/var/mobile/Library/Caches/locationd/*uber*",
-        @"/var/jb/var/mobile/Library/Caches/locationd/*uber*",
+        @"/var/mobile/Library/Caches/locationd/*uber*",
         @"/var/mobile/Library/Caches/locationd/*helix*",
-        @"/var/jb/var/mobile/Library/Caches/locationd/*helix*",
+        @"/var/mobile/Library/Caches/locationd/*helix*",
         // Location client registrations
         [NSString stringWithFormat:@"/var/mobile/Library/locationd/clients.plist"],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/locationd/clients.plist"],
+        [NSString stringWithFormat:@"/var/mobile/Library/locationd/clients.plist"],
         // Extra case for com.ubercab.UberClient specifically
         @"/var/mobile/Library/Caches/locationd/com.ubercab.UberClient*",
-        @"/var/jb/var/mobile/Library/Caches/locationd/com.ubercab.UberClient*",
+        @"/var/mobile/Library/Caches/locationd/com.ubercab.UberClient*",
         // Special case for Uber/Helix
         @"/var/mobile/Library/Caches/locationd/*uber*",
-        @"/var/jb/var/mobile/Library/Caches/locationd/*uber*",
+        @"/var/mobile/Library/Caches/locationd/*uber*",
         @"/var/mobile/Library/Caches/locationd/*helix*",
-        @"/var/jb/var/mobile/Library/Caches/locationd/*helix*",
+        @"/var/mobile/Library/Caches/locationd/*helix*",
         // Extra case for com.ubercab.UberClient specifically
         @"/var/mobile/Library/Caches/locationd/com.ubercab.UberClient*",
-        @"/var/jb/var/mobile/Library/Caches/locationd/com.ubercab.UberClient*",
+        @"/var/mobile/Library/Caches/locationd/com.ubercab.UberClient*",
         // Location client registrations
         [NSString stringWithFormat:@"/var/mobile/Library/locationd/clients.plist"],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/locationd/clients.plist"]
+        [NSString stringWithFormat:@"/var/mobile/Library/locationd/clients.plist"]
     ];
     
     // Clear location cache files
@@ -4256,37 +4256,37 @@
     NSArray *uiStatePaths = @[
         // UISplitViewController state
         [NSString stringWithFormat:@"/var/mobile/Library/Preferences/com.apple.UIKit.plist"],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/com.apple.UIKit.plist"],
+        [NSString stringWithFormat:@"/var/mobile/Library/Preferences/com.apple.UIKit.plist"],
         // App-specific UI state 
         [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@-UI-State.plist", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/%@-UI-State.plist", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@-UI-State.plist", bundleID],
         // Special case for Lyft/Zimride
         @"/var/mobile/Library/Preferences/*lyft*-UI-State.plist",
-        @"/var/jb/var/mobile/Library/Preferences/*lyft*-UI-State.plist",
+        @"/var/mobile/Library/Preferences/*lyft*-UI-State.plist",
         @"/var/mobile/Library/Preferences/*zimride*-UI-State.plist",
-        @"/var/jb/var/mobile/Library/Preferences/*zimride*-UI-State.plist",
+        @"/var/mobile/Library/Preferences/*zimride*-UI-State.plist",
         // Extra case for com.lyft.ios specifically
         @"/var/mobile/Library/Preferences/com.lyft.ios-UI-State.plist",
-        @"/var/jb/var/mobile/Library/Preferences/com.lyft.ios-UI-State.plist",
+        @"/var/mobile/Library/Preferences/com.lyft.ios-UI-State.plist",
         // Special case for Uber/Helix
         @"/var/mobile/Library/Preferences/*uber*-UI-State.plist",
-        @"/var/jb/var/mobile/Library/Preferences/*uber*-UI-State.plist",
+        @"/var/mobile/Library/Preferences/*uber*-UI-State.plist",
         @"/var/mobile/Library/Preferences/*helix*-UI-State.plist",
         // Extra case for com.ubercab.UberClient specifically
         @"/var/mobile/Library/Preferences/com.ubercab.UberClient-UI-State.plist",
-        @"/var/jb/var/mobile/Library/Preferences/com.ubercab.UberClient-UI-State.plist",
-        @"/var/jb/var/mobile/Library/Preferences/*helix*-UI-State.plist",
+        @"/var/mobile/Library/Preferences/com.ubercab.UberClient-UI-State.plist",
+        @"/var/mobile/Library/Preferences/*helix*-UI-State.plist",
         // SplitView controller state
         [NSString stringWithFormat:@"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.%@.plist", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.%@.plist", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.%@.plist", bundleID],
         @"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*lyft*.plist",
-        @"/var/jb/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*lyft*.plist",
+        @"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*lyft*.plist",
         @"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*zimride*.plist",
-        @"/var/jb/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*zimride*.plist",
+        @"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*zimride*.plist",
         @"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*uber*.plist",
-        @"/var/jb/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*uber*.plist",
+        @"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*uber*.plist",
         @"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*helix*.plist",
-        @"/var/jb/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*helix*.plist"
+        @"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.*helix*.plist"
     ];
     
     for (NSString *path in uiStatePaths) {
@@ -4306,40 +4306,40 @@
     // Fix snapshot denylisting for iOS 15+
     NSArray *snapshotPaths = @[
         [NSString stringWithFormat:@"/var/mobile/Library/SplashBoard/Snapshots/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/SplashBoard/Snapshots/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/SplashBoard/Snapshots/%@*", bundleID],
         [NSString stringWithFormat:@"/var/mobile/Library/Caches/Snapshots/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/jb/var/mobile/Library/Caches/Snapshots/%@*", bundleID],
+        [NSString stringWithFormat:@"/var/mobile/Library/Caches/Snapshots/%@*", bundleID],
         // Special case for Lyft/Zimride
         @"/var/mobile/Library/SplashBoard/Snapshots/*lyft*",
-        @"/var/jb/var/mobile/Library/SplashBoard/Snapshots/*lyft*",
+        @"/var/mobile/Library/SplashBoard/Snapshots/*lyft*",
         @"/var/mobile/Library/Caches/Snapshots/*lyft*",
-        @"/var/jb/var/mobile/Library/Caches/Snapshots/*lyft*",
+        @"/var/mobile/Library/Caches/Snapshots/*lyft*",
         @"/var/mobile/Library/SplashBoard/Snapshots/*zimride*",
-        @"/var/jb/var/mobile/Library/SplashBoard/Snapshots/*zimride*",
+        @"/var/mobile/Library/SplashBoard/Snapshots/*zimride*",
         @"/var/mobile/Library/Caches/Snapshots/*zimride*",
-        @"/var/jb/var/mobile/Library/Caches/Snapshots/*zimride*",
+        @"/var/mobile/Library/Caches/Snapshots/*zimride*",
         // Extra case for com.lyft.ios specifically
         @"/var/mobile/Library/SplashBoard/Snapshots/com.lyft.ios*",
-        @"/var/jb/var/mobile/Library/SplashBoard/Snapshots/com.lyft.ios*",
+        @"/var/mobile/Library/SplashBoard/Snapshots/com.lyft.ios*",
         @"/var/mobile/Library/Caches/Snapshots/com.lyft.ios*",
-        @"/var/jb/var/mobile/Library/Caches/Snapshots/com.lyft.ios*",
+        @"/var/mobile/Library/Caches/Snapshots/com.lyft.ios*",
         // Special case for Uber/Helix
         @"/var/mobile/Library/SplashBoard/Snapshots/*uber*",
-        @"/var/jb/var/mobile/Library/SplashBoard/Snapshots/*uber*",
+        @"/var/mobile/Library/SplashBoard/Snapshots/*uber*",
         @"/var/mobile/Library/Caches/Snapshots/*uber*",
-        @"/var/jb/var/mobile/Library/Caches/Snapshots/*uber*",
+        @"/var/mobile/Library/Caches/Snapshots/*uber*",
         @"/var/mobile/Library/SplashBoard/Snapshots/*helix*",
         // Extra case for com.ubercab.UberClient specifically
         @"/var/mobile/Library/SplashBoard/Snapshots/com.ubercab.UberClient*",
-        @"/var/jb/var/mobile/Library/SplashBoard/Snapshots/com.ubercab.UberClient*",
+        @"/var/mobile/Library/SplashBoard/Snapshots/com.ubercab.UberClient*",
         @"/var/mobile/Library/Caches/Snapshots/com.ubercab.UberClient*",
-        @"/var/jb/var/mobile/Library/Caches/Snapshots/com.ubercab.UberClient*",
-        @"/var/jb/var/mobile/Library/SplashBoard/Snapshots/*helix*",
+        @"/var/mobile/Library/Caches/Snapshots/com.ubercab.UberClient*",
+        @"/var/mobile/Library/SplashBoard/Snapshots/*helix*",
         @"/var/mobile/Library/Caches/Snapshots/*helix*",
-        @"/var/jb/var/mobile/Library/Caches/Snapshots/*helix*",
+        @"/var/mobile/Library/Caches/Snapshots/*helix*",
         // Snapshot deny list
         @"/var/mobile/Library/SpringBoard/ApplicationDenyList.plist",
-        @"/var/jb/var/mobile/Library/SpringBoard/ApplicationDenyList.plist"
+        @"/var/mobile/Library/SpringBoard/ApplicationDenyList.plist"
     ];
     
     for (NSString *pattern in snapshotPaths) {
@@ -4433,7 +4433,7 @@
     // Check for entry in launch services database
     NSArray *dbPaths = @[
         @"/var/mobile/Library/MobileInstallation/LastLaunchServicesMap.plist",
-        @"/var/jb/var/mobile/Library/MobileInstallation/LastLaunchServicesMap.plist"
+        @"/var/mobile/Library/MobileInstallation/LastLaunchServicesMap.plist"
     ];
     
     for (NSString *dbPath in dbPaths) {
@@ -4454,7 +4454,7 @@
     // Check for entries in IconState.plist
     NSArray *iconStatePaths = @[
         @"/var/mobile/Library/SpringBoard/IconState.plist",
-        @"/var/jb/var/mobile/Library/SpringBoard/IconState.plist"
+        @"/var/mobile/Library/SpringBoard/IconState.plist"
     ];
     
     for (NSString *iconPath in iconStatePaths) {
@@ -4471,7 +4471,7 @@
     // Check for app in notification settings
     NSArray *notifPaths = @[
         @"/var/mobile/Library/Preferences/com.apple.notifyd.plist",
-        @"/var/jb/var/mobile/Library/Preferences/com.apple.notifyd.plist"
+        @"/var/mobile/Library/Preferences/com.apple.notifyd.plist"
     ];
     
     for (NSString *notifPath in notifPaths) {
@@ -4489,8 +4489,8 @@
     NSArray *sqlitePaths = @[
         @"/var/mobile/Library/SpringBoard/ApplicationHistory.sqlite",
         @"/var/mobile/Library/Assistant/SiriAnalytics.db",
-        @"/var/jb/var/mobile/Library/SpringBoard/ApplicationHistory.sqlite",
-        @"/var/jb/var/mobile/Library/Assistant/SiriAnalytics.db"
+        @"/var/mobile/Library/SpringBoard/ApplicationHistory.sqlite",
+        @"/var/mobile/Library/Assistant/SiriAnalytics.db"
     ];
     
     for (NSString *sqlitePath in sqlitePaths) {

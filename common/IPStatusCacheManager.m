@@ -5,7 +5,7 @@
 
 #define kMaxCacheCount 3
 #define kIPStatusCacheKey @"IPStatusCache"
-#define kIPStatusPlistPath @"/var/jb/var/mobile/Library/Preferences/com.weaponx.ipstatus.plist"
+#define kIPStatusPlistPath @"/var/mobile/Library/Preferences/com.weaponx.ipstatus.plist"
 
 // Path helper for rootless jailbreak compatibility
 static NSString *getIPLocationTimePlistPath() {
