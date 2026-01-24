@@ -3034,8 +3034,22 @@
             if ([control isKindOfClass:[UIButton class]]) {
                 UIButton *button = (UIButton *)control;
                 NSString *buttonTitle = [button titleForState:UIControlStateNormal];
-                if ([buttonTitle isEqualToString:@"Generate"] || 
-                    [button.configuration.title isEqualToString:@"Generate"]) {
+                BOOL isGenerate = [buttonTitle isEqualToString:@"Generate"];
+                
+                if (!isGenerate && [UIButton buttonConfigurationClassExists]) {
+                    // Only check configuration if class exists (iOS 15+)
+                    // Use performSelector to avoid compiler warnings if strict checking is enabled
+                    // But direct access is fine since we verified class exists
+                    // Actually, to be super safe against dynamic dispatch issues if the property isn't seen by compiler on older SDKs?
+                    // No, SDK is new enough.
+                    if (@available(iOS 15.0, *)) {
+                         if ([button.configuration.title isEqualToString:@"Generate"]) {
+                             isGenerate = YES;
+                         }
+                    }
+                }
+                
+                if (isGenerate) {
                     generateButton = button;
                     break;
                 }

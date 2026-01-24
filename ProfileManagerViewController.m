@@ -2795,7 +2795,7 @@
     // For iOS 15+, we use the built-in UIButtonConfiguration highlighting
     // without trying to customize too much
     
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         // Set up a simple handler that handles the pressed state
         button.configurationUpdateHandler = ^(__kindof UIButton *btn) {
             // Apply a simple background when pressed
