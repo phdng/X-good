@@ -8,10 +8,6 @@
 		<array>
 			<string>com.apple.UIKit</string>
 		</array>
-		<key>Executables</key>
-		<array>
-			<string>SpringBoard</string>
-		</array>
 		<key>Mode</key>
 		<string>Any</string>
 	</dict>
