@@ -6,6 +6,7 @@
 //
 
 #import "UIButtonCompat.h"
+#import "UIButton+SafeConfiguration.h"
 
 @implementation UIButtonCompat
 
@@ -25,7 +26,7 @@
         if (tintColor) {
             config.baseForegroundColor = tintColor;
         }
-        button.configuration = config;
+        [button safeSetConfiguration:config];
     } else {
         [button setTitle:title forState:UIControlStateNormal];
         if (tintColor) {
@@ -67,7 +68,7 @@
             config.imagePlacement = NSDirectionalRectEdgeLeading;
             config.imagePadding = 4;
         }
-        button.configuration = config;
+        [button safeSetConfiguration:config];
     } else {
         [button setTitle:title forState:UIControlStateNormal];
         if (tintColor) {
@@ -119,7 +120,7 @@
             config.imagePadding = 4;
         }
         
-        button.configuration = config;
+        [button safeSetConfiguration:config];
     } else {
         [button setTitle:title forState:UIControlStateNormal];
         
