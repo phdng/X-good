@@ -13,8 +13,8 @@ ProjectXTweak_CFLAGS = -fobjc-arc -Wno-error=unused-variable -Wno-error=unused-f
 ProjectXTweak_FRAMEWORKS = UIKit Foundation AdSupport UserNotifications IOKit Security CoreLocation CoreFoundation Network CoreTelephony SystemConfiguration WebKit SafariServices   
 ProjectXTweak_PRIVATE_FRAMEWORKS = MobileCoreServices AppSupport SpringBoardServices 
 ProjectXTweak_LIBRARIES = MobileGestalt
-# ProjectXTweak_INSTALL_PATH = /Library/MobileSubstrate/DynamicLibraries
-# ProjectXTweak_LDFLAGS = -F$(THEOS)/vendor/lib -framework CydiaSubstrate
 
+# CRITICAL: Prevent constructor stripping - ensures __mod_init_func section is kept
+ProjectXTweak_LDFLAGS = -Wl,-no_dead_strip -Wl,-ObjC
 
 include $(THEOS_MAKE_PATH)/tweak.mk
