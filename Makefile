@@ -22,9 +22,10 @@ ProjectX_RESOURCE_DIRS = Assets.xcassets
 ProjectX_RESOURCE_FILES = Info.plist Icon.png LaunchScreen.storyboard
 ProjectX_PRIVATE_FRAMEWORKS = FrontBoardServices SpringBoardServices BackBoardServices StoreKitUI MobileCoreServices
 # ProjectX_LDFLAGS = -I./common
-ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit IOKit Security CoreLocation
-# CoreLocationUI is iOS 15+ only, weak-link it
-ProjectX_LDFLAGS = -weak_framework CoreLocationUI
+ProjectX_FRAMEWORKS = UIKit Foundation MobileCoreServices CoreServices StoreKit IOKit CoreLocation
+# Security and CoreLocationUI are weak-linked for iOS 12+ compatibility
+# SecTrustCopyCertificateChain is iOS 15+ only
+ProjectX_LDFLAGS = -weak_framework CoreLocationUI -weak_framework Security
 ProjectX_CODESIGN_FLAGS = -Sent.plist
 ProjectX_CFLAGS = -fobjc-arc -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1 -I./common
 
