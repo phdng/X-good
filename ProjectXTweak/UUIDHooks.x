@@ -1035,15 +1035,10 @@ static void setupAdditionalSystemUUIDHooks() {
         if (libc) {
             void *gethostuuid_sym = dlsym(libc, "gethostuuid");
             if (gethostuuid_sym) {
-                int result = MSHookFunction(gethostuuid_sym, 
-                                  (void *)replaced_gethostuuid, 
-                                  (void **)&orig_gethostuuid);
-                
-                if (result == 0) {
-                    PXLog(@"[WeaponX] ✅ Successfully hooked gethostuuid");
-                } else {
-                    PXLog(@"[WeaponX] ⚠️ Failed to hook gethostuuid: %d", result);
-                }
+                MSHookFunction(gethostuuid_sym, 
+                              (void *)replaced_gethostuuid, 
+                              (void **)&orig_gethostuuid);
+                PXLog(@"[WeaponX] ✅ Successfully hooked gethostuuid");
             } else {
                 PXLog(@"[WeaponX] ⚠️ Could not find gethostuuid symbol");
             }
@@ -1051,15 +1046,10 @@ static void setupAdditionalSystemUUIDHooks() {
             // Hook sysctlbyname
             void *sysctlbyname_sym = dlsym(libc, "sysctlbyname");
             if (sysctlbyname_sym) {
-                int result = MSHookFunction(sysctlbyname_sym, 
-                                  (void *)replaced_sysctlbyname, 
-                                  (void **)&orig_sysctlbyname);
-                
-                if (result == 0) {
-                    PXLog(@"[WeaponX] ✅ Successfully hooked sysctlbyname");
-                } else {
-                    PXLog(@"[WeaponX] ⚠️ Failed to hook sysctlbyname: %d", result);
-                }
+                MSHookFunction(sysctlbyname_sym, 
+                              (void *)replaced_sysctlbyname, 
+                              (void **)&orig_sysctlbyname);
+                PXLog(@"[WeaponX] ✅ Successfully hooked sysctlbyname");
             } else {
                 PXLog(@"[WeaponX] ⚠️ Could not find sysctlbyname symbol");
             }
@@ -1074,15 +1064,10 @@ static void setupAdditionalSystemUUIDHooks() {
         if (coreFoundation) {
             void *cfuuidcreate_sym = dlsym(coreFoundation, "CFUUIDCreate");
             if (cfuuidcreate_sym) {
-                int result = MSHookFunction(cfuuidcreate_sym, 
-                                  (void *)replaced_CFUUIDCreate, 
-                                  (void **)&orig_CFUUIDCreate);
-                
-                if (result == 0) {
-                    PXLog(@"[WeaponX] ✅ Successfully hooked CFUUIDCreate");
-                } else {
-                    PXLog(@"[WeaponX] ⚠️ Failed to hook CFUUIDCreate: %d", result);
-                }
+                MSHookFunction(cfuuidcreate_sym, 
+                              (void *)replaced_CFUUIDCreate, 
+                              (void **)&orig_CFUUIDCreate);
+                PXLog(@"[WeaponX] ✅ Successfully hooked CFUUIDCreate");
             } else {
                 PXLog(@"[WeaponX] ⚠️ Could not find CFUUIDCreate symbol");
             }
@@ -1189,26 +1174,11 @@ static void setupAdditionalSystemUUIDHooks() {
                         orig_dyld_get_shared_cache_uuid = dlsym(handle, "_dyld_get_shared_cache_uuid");
                         
                         if (orig_dyld_get_shared_cache_uuid) {
-                            // Use EKHook for hook installation with retry logic
-                            int retryCount = 0;
-                            int maxRetries = 3;
-                            int result = -1;
-                            
-                            while (result != 0 && retryCount < maxRetries) {
-                                result = MSHookFunction(orig_dyld_get_shared_cache_uuid, 
-                                            (void *)replaced_dyld_get_shared_cache_uuid, 
-                                            (void **)&orig_dyld_get_shared_cache_uuid);
-                                
-                                if (result == 0) {
-                                    PXLog(@"[WeaponX] ✅ Successfully hooked _dyld_get_shared_cache_uuid");
-                                } else {
-                                    PXLog(@"[WeaponX] ⚠️ Failed to hook _dyld_get_shared_cache_uuid (attempt %d): %d", 
-                                        retryCount + 1, result);
-                                    retryCount++;
-                                    // Small delay before retry
-                                    [NSThread sleepForTimeInterval:0.1];
-                                }
-                            }
+                            // Use MSHookFunction for hook installation
+                            MSHookFunction(orig_dyld_get_shared_cache_uuid, 
+                                        (void *)replaced_dyld_get_shared_cache_uuid, 
+                                        (void **)&orig_dyld_get_shared_cache_uuid);
+                            PXLog(@"[WeaponX] ✅ Successfully hooked _dyld_get_shared_cache_uuid");
                         } else {
                             PXLog(@"[WeaponX] ⚠️ Could not find _dyld_get_shared_cache_uuid symbol");
                         }
@@ -1222,26 +1192,11 @@ static void setupAdditionalSystemUUIDHooks() {
                         orig_dyld_get_all_image_infos = dlsym(handle, "_dyld_get_all_image_infos");
                         
                         if (orig_dyld_get_all_image_infos) {
-                            // Use EKHook for hook installation with retry logic
-                            int retryCount = 0;
-                            int maxRetries = 3;
-                            int result = -1;
-                            
-                            while (result != 0 && retryCount < maxRetries) {
-                                result = MSHookFunction(orig_dyld_get_all_image_infos, 
-                                            (void *)replaced_dyld_get_all_image_infos, 
-                                            (void **)&orig_dyld_get_all_image_infos);
-                                
-                                if (result == 0) {
-                                    PXLog(@"[WeaponX] ✅ Successfully hooked _dyld_get_all_image_infos");
-                                } else {
-                                    PXLog(@"[WeaponX] ⚠️ Failed to hook _dyld_get_all_image_infos (attempt %d): %d", 
-                                        retryCount + 1, result);
-                                    retryCount++;
-                                    // Small delay before retry
-                                    [NSThread sleepForTimeInterval:0.1];
-                                }
-                            }
+                            // Use MSHookFunction for hook installation
+                            MSHookFunction(orig_dyld_get_all_image_infos, 
+                                        (void *)replaced_dyld_get_all_image_infos, 
+                                        (void **)&orig_dyld_get_all_image_infos);
+                            PXLog(@"[WeaponX] ✅ Successfully hooked _dyld_get_all_image_infos");
                         } else {
                             PXLog(@"[WeaponX] ⚠️ Could not find _dyld_get_all_image_infos symbol");
                         }

@@ -564,25 +564,23 @@ static CFStringRef replaced_WiFiNetworkGetBSSID(WiFiNetworkRef network) {
 #pragma mark - Hook Installation
 
 static void initializeHooks(void) {
-    // Install CNCopyCurrentNetworkInfo hook using ellekit
+    // Install CNCopyCurrentNetworkInfo hook using Substrate
     void *symbol = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
     if (symbol) {
-        int result = MSHookFunction(symbol, 
-                           (void *)replaced_CNCopyCurrentNetworkInfo, 
-                           (void **)&orig_CNCopyCurrentNetworkInfo);
-        
-        if (result != 0) {
-            // Try to find the symbol in the framework
-            void *captiveNetworkLib = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
-            if (captiveNetworkLib) {
-                symbol = dlsym(captiveNetworkLib, "CNCopyCurrentNetworkInfo");
-                if (symbol) {
-                    MSHookFunction(symbol, 
-                          (void *)replaced_CNCopyCurrentNetworkInfo, 
-                          (void **)&orig_CNCopyCurrentNetworkInfo);
-                }
-                dlclose(captiveNetworkLib);
+        MSHookFunction(symbol, 
+                       (void *)replaced_CNCopyCurrentNetworkInfo, 
+                       (void **)&orig_CNCopyCurrentNetworkInfo);
+    } else {
+        // Try to find the symbol in the framework
+        void *captiveNetworkLib = dlopen("/System/Library/Frameworks/SystemConfiguration.framework/SystemConfiguration", RTLD_NOW);
+        if (captiveNetworkLib) {
+            symbol = dlsym(captiveNetworkLib, "CNCopyCurrentNetworkInfo");
+            if (symbol) {
+                MSHookFunction(symbol, 
+                      (void *)replaced_CNCopyCurrentNetworkInfo, 
+                      (void **)&orig_CNCopyCurrentNetworkInfo);
             }
+            dlclose(captiveNetworkLib);
         }
     }
     
