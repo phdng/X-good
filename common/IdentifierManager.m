@@ -1976,7 +1976,10 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         self.error = [NSError errorWithDomain:@"com.hydra.projectx" 
                                       code:4006 
                                   userInfo:@{NSLocalizedDescriptionKey: @"Failed to save global scoped apps"}];
+        PXLog(@"[WeaponX] ❌ Failed to save global scoped apps to: %@", scopedAppsFile);
         return;
+    } else {
+        PXLog(@"[WeaponX] ✅ Saved scoped apps to: %@", scopedAppsFile);
     }
 }
     

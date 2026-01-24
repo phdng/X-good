@@ -9,15 +9,8 @@
 
 // Path helper for rootless jailbreak compatibility
 static NSString *getIPLocationTimePlistPath() {
-    NSString *rootPrefix = @"";
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    
-    // Check for rootless jailbreak
-    if ([fileManager fileExistsAtPath:@"/var/jb"]) {
-        rootPrefix = @"/var/jb";
-    }
-    
-    NSString *basePath = [NSString stringWithFormat:@"%@/var/mobile/Library/Preferences", rootPrefix];
+    // Strictly use standard path for rootful iOS 13
+    NSString *basePath = @"/var/mobile/Library/Preferences";
     return [basePath stringByAppendingPathComponent:@"com.weaponx.iplocationtime.plist"];
 }
 
