@@ -2072,8 +2072,8 @@ static char* hook_GSSystemGetSerialNo(void) {
     NSLog(@"[WeaponX-DEBUG] ========================================");
     
     // VERIFICATION: Create a flag file to prove constructor ran
-    NSString *processName = [NSProcessInfo processInfo].processName;
-    NSString *flagPath = [NSString stringWithFormat:@"/tmp/weaponx_loaded_%@.txt", processName];
+    NSString *currentProcessName = [NSProcessInfo processInfo].processName;
+    NSString *flagPath = [NSString stringWithFormat:@"/tmp/weaponx_loaded_%@.txt", currentProcessName];
     [@"Constructor executed!" writeToFile:flagPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
     NSLog(@"[WeaponX-DEBUG] Created flag file: %@", flagPath);
     
