@@ -2056,7 +2056,20 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
             @"SettingsInitialized": @YES
         }];
     } else {
-        self.settings = [loadedDict mutableCopy];
+        // ✅ FIX: Load from the EnabledIdentifiers key, not the entire dictionary
+        NSDictionary *enabledIdentifiers = loadedDict[@"EnabledIdentifiers"];
+        if (enabledIdentifiers) {
+            self.settings = [enabledIdentifiers mutableCopy];
+            PXLog(@"[WeaponX] ✅ Loaded %lu identifier settings from EnabledIdentifiers", (unsigned long)self.settings.count);
+        } else {
+            PXLog(@"[WeaponX] ⚠️ EnabledIdentifiers key not found, using defaults");
+            self.settings = [NSMutableDictionary dictionaryWithDictionary:@{
+                @"IDFA": @NO,
+                @"IDFV": @NO,
+                @"DeviceName": @NO,
+                @"SerialNumber": @NO
+            }];
+        }
     }
     
     // Load scoped apps
