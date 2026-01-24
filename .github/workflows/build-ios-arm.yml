@@ -56,6 +56,22 @@ jobs:
           make clean
           make package ARCHS="$ARCHS" SDKVERSION="$SDKVERSION" TARGET="$TARGET"
 
+      - name: Debug - Check dylib constructors
+        run: |
+          echo "=== Checking dylib for constructor symbols ==="
+          DYLIB_PATH=".theos/obj/debug/arm64/ProjectXTweak.dylib"
+          if [ -f "$DYLIB_PATH" ]; then
+            echo "--- otool -l (looking for __mod_init_func) ---"
+            otool -l "$DYLIB_PATH" | grep -A10 "__mod_init_func" || echo "NO __mod_init_func section found!"
+            echo "--- nm (looking for constructors) ---"
+            nm "$DYLIB_PATH" 2>/dev/null | grep -i "ctor\|init\|AAA" | head -20 || echo "nm failed or no matches"
+            echo "--- strings (looking for test constructor) ---"
+            strings "$DYLIB_PATH" | grep -i "AAA_TestCtor\|weaponx_ctor" | head -10
+          else
+            echo "Dylib not found at $DYLIB_PATH"
+            find .theos -name "*.dylib" 2>/dev/null
+          fi
+
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
