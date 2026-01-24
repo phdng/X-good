@@ -98,5 +98,15 @@ if [ -f "/usr/bin/projectx-fix-containers" ]; then
     "/usr/bin/projectx-fix-containers"
 fi
 
+# CRITICAL: Register app icon and reload MobileSubstrate
+echo "🔄 Registering application with SpringBoard..."
+if command -v uicache > /dev/null 2>&1; then
+    uicache -p /Applications/ProjectX.app
+    echo "✅ App registered successfully"
+else
+    echo "⚠️ uicache not found, trying alternative..."
+    killall -9 SpringBoard 2>/dev/null || true
+fi
+
 echo "✅ WeaponX installation completed!"
 exit 0
