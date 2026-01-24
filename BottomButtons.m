@@ -1,6 +1,7 @@
 #import "BottomButtons.h"
 #import "ProjectX.h"
 #import "IdentifierManager.h"
+#import "common/UIButton+SafeConfiguration.h"
 #import <spawn.h>
 #import <sys/wait.h>
 #import <objc/runtime.h>
@@ -225,14 +226,16 @@
     
     // Create kill button with soft minimalistic style
     UIButton *killButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
-        UIButtonConfiguration *killConfig = [UIButtonConfiguration plainButtonConfiguration];
-        killConfig.title = @"Kill Enabled Apps";
-        killConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-        killConfig.background.backgroundColor = [UIColor.systemRedColor colorWithAlphaComponent:0.15];
-        killConfig.baseForegroundColor = [UIColor systemRedColor];
-        killConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
-        killButton.configuration = killConfig;
+    if ([killButton supportsConfiguration]) {
+        if (@available(iOS 15.0, *)) {
+            UIButtonConfiguration *killConfig = [UIButtonConfiguration plainButtonConfiguration];
+            killConfig.title = @"Kill Enabled Apps";
+            killConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+            killConfig.background.backgroundColor = [UIColor.systemRedColor colorWithAlphaComponent:0.15];
+            killConfig.baseForegroundColor = [UIColor systemRedColor];
+            killConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
+            [killButton safeSetConfiguration:killConfig];
+        }
     } else {
         [killButton setTitle:@"Kill Enabled Apps" forState:UIControlStateNormal];
         killButton.tintColor = [UIColor systemRedColor];
@@ -245,14 +248,16 @@
     
     // Create respring button with soft minimalistic style
     UIButton *applyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
-        UIButtonConfiguration *applyConfig = [UIButtonConfiguration plainButtonConfiguration];
-        applyConfig.title = @"Respring";
-        applyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-        applyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
-        applyConfig.baseForegroundColor = [UIColor systemBlueColor];
-        applyConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
-        applyButton.configuration = applyConfig;
+    if ([applyButton supportsConfiguration]) {
+        if (@available(iOS 15.0, *)) {
+            UIButtonConfiguration *applyConfig = [UIButtonConfiguration plainButtonConfiguration];
+            applyConfig.title = @"Respring";
+            applyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+            applyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
+            applyConfig.baseForegroundColor = [UIColor systemBlueColor];
+            applyConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
+            [applyButton safeSetConfiguration:applyConfig];
+        }
     } else {
         [applyButton setTitle:@"Respring" forState:UIControlStateNormal];
         applyButton.tintColor = [UIColor systemBlueColor];
