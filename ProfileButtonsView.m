@@ -51,7 +51,7 @@
 - (UIButton *)createButtonWithIcon:(NSString *)iconName title:(NSString *)title {
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         if ([button supportsConfiguration]) {
             // iOS 15+ - Use modern UIButtonConfiguration
             UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];

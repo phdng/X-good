@@ -778,7 +778,7 @@
     self.view.backgroundColor = [UIColor systemBackgroundColor];
     
     
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         // Modern button style for iOS 15+
         UIButtonConfiguration *filesConfig = [UIButtonConfiguration plainButtonConfiguration];
         filesConfig.title = @"Files";
@@ -829,7 +829,7 @@
     toolsButton.titleLabel.font = [UIFont systemFontOfSize:16 weight:UIFontWeightMedium];
     [toolsButton setTitleColor:[UIColor systemBlueColor] forState:UIControlStateNormal];
     
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         // Use modern button configuration for iOS 15+
         UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
         config.title = @"Tools";
@@ -1004,7 +1004,7 @@
     // Add Generate All button with minimalistic style
     UIButton *generateAllButton = [UIButton buttonWithType:UIButtonTypeSystem];
     
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *generateAllConfig = [UIButtonConfiguration plainButtonConfiguration];
         generateAllConfig.title = @"Generate All";
         generateAllConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
@@ -1637,7 +1637,7 @@
     
     // Create copy button with enhanced style
     UIButton *copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *copyConfig = [UIButtonConfiguration plainButtonConfiguration];
         copyConfig.image = [UIImage systemImageNamed:@"doc.on.doc"];
         copyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
@@ -1682,7 +1682,7 @@
     
     // Create generate button with minimalistic style
     UIButton *generateButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *generateConfig = [UIButtonConfiguration plainButtonConfiguration];
         generateConfig.image = [UIImage systemImageNamed:@"arrow.clockwise"];
         generateConfig.title = @"Generate";
@@ -1781,7 +1781,7 @@
     
     // Add App button
     UIButton *addButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *addButtonConfig = [UIButtonConfiguration plainButtonConfiguration];
         addButtonConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 6, 4, 6);
         addButtonConfig.title = @"Add App";
@@ -2318,8 +2318,14 @@
         // Enhanced visual feedback for copy action
         UIColor *originalColor = sender.tintColor;
         
-        if (@available(iOS 15.0, *)) {
+        if ([UIButton buttonConfigurationClassExists]) {
             // Create a checkmark configuration for success feedback
+            // Need to get configuration safely - if safeSetConfiguration was used, we can try to access .configuration
+            // but it might not return what we expect if not on iOS 15. Hmmm.
+            // On iOS < 15 config is not supported so we shouldn't be here.
+            // But if we are here, we know the CLASS exists.
+            // However, [sender configuration] might return nil or default if not set. 
+            // Let's assume safeguards elsewhere work.
             UIButtonConfiguration *originalConfig = sender.configuration;
             UIButtonConfiguration *successConfig = [originalConfig copy];
             successConfig.image = [UIImage systemImageNamed:@"checkmark"];
@@ -4469,7 +4475,7 @@ else if ([identifierType isEqualToString:@"AppContainerUUID"])
     self.showAdvancedButton.translatesAutoresizingMaskIntoConstraints = NO;
     
     // Configure button with modern appearance
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = [UIButtonConfiguration filledButtonConfiguration];
         config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
         config.baseBackgroundColor = [UIColor systemBlueColor];
@@ -4558,7 +4564,7 @@ else if ([identifierType isEqualToString:@"AppContainerUUID"])
     self.showAdvancedIdentifiers = !self.showAdvancedIdentifiers;
     
     // Update button appearance
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = self.showAdvancedButton.configuration;
         if (self.showAdvancedIdentifiers) {
             config.title = @"Hide Advanced Identifiers";

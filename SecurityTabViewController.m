@@ -11,6 +11,7 @@
 #import "DomainBlockingSettings.h"
 #import "DomainManagementViewController.h"
 #import <notify.h>  // Add this import for Darwin notification functions
+#import "common/UIButton+SafeConfiguration.h"
 #import <CoreLocation/CoreLocation.h>
 #import <ifaddrs.h>
 #import <arpa/inet.h>
@@ -598,7 +599,7 @@
 
     // Check IP button
     self.ipMonitorCheckButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = [UIButtonConfiguration filledButtonConfiguration];
         config.title = @"Check IP";
         config.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *attributes) {
@@ -610,7 +611,7 @@
         config.background.backgroundColor = [UIColor systemBlueColor];
         config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
         config.baseForegroundColor = [UIColor whiteColor];
-        [self.ipMonitorCheckButton setConfiguration:config];
+        [self.ipMonitorCheckButton safeSetConfiguration:config];
     } else {
         [self.ipMonitorCheckButton setTitle:@"Check IP" forState:UIControlStateNormal];
         self.ipMonitorCheckButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
@@ -3191,7 +3192,7 @@
     
     // Access button for Device Specific Spoofing
     self.deviceSpoofingAccessButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = [UIButtonConfiguration filledButtonConfiguration];
         config.title = @"Access";
         config.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *attributes) {
@@ -3203,7 +3204,7 @@
         config.background.backgroundColor = [UIColor systemBlueColor];
         config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
         config.baseForegroundColor = [UIColor whiteColor];
-        [self.deviceSpoofingAccessButton setConfiguration:config];
+        [self.deviceSpoofingAccessButton safeSetConfiguration:config];
     } else {
         [self.deviceSpoofingAccessButton setTitle:@"Access" forState:UIControlStateNormal];
         self.deviceSpoofingAccessButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
@@ -3239,11 +3240,11 @@
     // Enable/disable access button based on toggle state
     self.deviceSpoofingAccessButton.enabled = deviceSpoofingEnabled;
     if (!deviceSpoofingEnabled) {
-        if (@available(iOS 15.0, *)) {
+        if ([UIButton buttonConfigurationClassExists]) {
             if (self.deviceSpoofingAccessButton.configuration) {
                 UIButtonConfiguration *config = [self.deviceSpoofingAccessButton.configuration copy];
                 config.background.backgroundColor = [UIColor systemGrayColor];
-                [self.deviceSpoofingAccessButton setConfiguration:config];
+                [self.deviceSpoofingAccessButton safeSetConfiguration:config];
             }
             self.deviceSpoofingAccessButton.alpha = 0.6;
         } else {
@@ -3326,7 +3327,7 @@
     
     // Animate alpha and background color change
     [UIView animateWithDuration:0.2 animations:^{
-        if (@available(iOS 15.0, *)) {
+        if ([UIButton buttonConfigurationClassExists]) {
             UIButtonConfiguration *config = [self.deviceSpoofingAccessButton.configuration copy];
             if (enabled) {
                 config.background.backgroundColor = [UIColor systemBlueColor];
@@ -3433,7 +3434,7 @@
     
     // Access button for APP Version Spoofing
     self.appVersionSpoofingAccessButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = [UIButtonConfiguration filledButtonConfiguration];
         config.title = @"Access";
         config.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *attributes) {
@@ -3445,7 +3446,7 @@
         config.background.backgroundColor = [UIColor systemBlueColor];
         config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
         config.baseForegroundColor = [UIColor whiteColor];
-        [self.appVersionSpoofingAccessButton setConfiguration:config];
+        [self.appVersionSpoofingAccessButton safeSetConfiguration:config];
     } else {
         [self.appVersionSpoofingAccessButton setTitle:@"Access" forState:UIControlStateNormal];
         self.appVersionSpoofingAccessButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
@@ -3481,11 +3482,11 @@
     // Enable/disable access button based on toggle state
     self.appVersionSpoofingAccessButton.enabled = appVersionSpoofingEnabled;
     if (!appVersionSpoofingEnabled) {
-        if (@available(iOS 15.0, *)) {
+        if ([UIButton buttonConfigurationClassExists]) {
             if (self.appVersionSpoofingAccessButton.configuration) {
                 UIButtonConfiguration *config = [self.appVersionSpoofingAccessButton.configuration copy];
                 config.background.backgroundColor = [UIColor systemGrayColor];
-                [self.appVersionSpoofingAccessButton setConfiguration:config];
+                [self.appVersionSpoofingAccessButton safeSetConfiguration:config];
             }
             self.appVersionSpoofingAccessButton.alpha = 0.6;
         } else {
@@ -3568,7 +3569,7 @@
     
     // Animate alpha and background color change
     [UIView animateWithDuration:0.2 animations:^{
-        if (@available(iOS 15.0, *)) {
+        if ([UIButton buttonConfigurationClassExists]) {
             UIButtonConfiguration *config = [self.appVersionSpoofingAccessButton.configuration copy];
             if (enabled) {
                 config.background.backgroundColor = [UIColor systemBlueColor];
@@ -4167,7 +4168,7 @@
 
     // Reset button with icon (styled like other buttons in the app)
     self.canvasFingerprintingResetButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
         config.title = @"Reset Noise";
         config.image = [UIImage systemImageNamed:@"arrow.clockwise"];

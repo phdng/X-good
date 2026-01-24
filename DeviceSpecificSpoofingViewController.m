@@ -197,7 +197,7 @@
     self.showAdvancedButton.translatesAutoresizingMaskIntoConstraints = NO;
     
     // Configure button with modern appearance
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = [UIButtonConfiguration filledButtonConfiguration];
         config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
         config.baseBackgroundColor = [UIColor systemBlueColor];
@@ -257,7 +257,7 @@
     self.showAdvancedIdentifiers = !self.showAdvancedIdentifiers;
     
     // Update button appearance
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = self.showAdvancedButton.configuration;
         if (self.showAdvancedIdentifiers) {
             config.title = @"Hide Advanced Identifiers";
@@ -489,7 +489,7 @@
     }
 
     UIButton *copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *copyConfig = [UIButtonConfiguration plainButtonConfiguration];
         copyConfig.image = [UIImage systemImageNamed:@"doc.on.doc"];
         copyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
@@ -513,7 +513,7 @@
     UIButton *infoButton = nil;
     if ([key isEqualToString:@"DeviceModel"]) {
         infoButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        if (@available(iOS 15.0, *)) {
+        if ([UIButton buttonConfigurationClassExists]) {
             UIButtonConfiguration *infoConfig = [UIButtonConfiguration plainButtonConfiguration];
             infoConfig.image = [UIImage systemImageNamed:@"info.circle"];
             infoConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
@@ -617,7 +617,7 @@
 
     // Generate button
     UIButton *generateButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *generateConfig = [UIButtonConfiguration plainButtonConfiguration];
         generateConfig.image = [UIImage systemImageNamed:@"arrow.clockwise"];
         generateConfig.title = @"Generate";
@@ -807,7 +807,7 @@
                         // Also update button colors based on enabled state
                         if ([identifierType isEqualToString:@"DeviceTheme"] && button.tag == 4) {
                             BOOL isEnabled = [[IdentifierManager sharedManager] isIdentifierEnabled:identifierType];
-                            if (@available(iOS 15.0, *)) {
+                            if ([UIButton buttonConfigurationClassExists]) {
                                 UIButtonConfiguration *cfg = [button.configuration copy];
                                 cfg.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
                                 [button safeSetConfiguration:cfg];
@@ -888,7 +888,7 @@
     NSString *value = [[IdentifierManager sharedManager] currentValueForIdentifier:key] ?: @"Not Set";
     if (value) {
         UIPasteboard.generalPasteboard.string = value;
-        if (@available(iOS 15.0, *)) {
+        if ([UIButton buttonConfigurationClassExists]) {
             // Enhanced visual feedback for copy action (same as ProjectXViewController)
             UIColor *originalColor = sender.tintColor;
             UIButtonConfiguration *originalConfig = sender.configuration;
@@ -969,7 +969,7 @@
     if (stateLabel) stateLabel.textColor = isEnabled ? [UIColor systemBlueColor] : [UIColor labelColor];
     if (stateLabel) stateLabel.text = isEnabled ? @"Enabled" : @"Disabled";
 
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         if (copyButton) {
             UIButtonConfiguration *cfg = [copyButton.configuration copy];
             cfg.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];

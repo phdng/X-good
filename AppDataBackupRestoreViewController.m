@@ -69,7 +69,7 @@
     
     // Create stylish buttons with icons using UIButtonConfiguration (iOS 15+)
     UIButton *backupButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *backupConfig = [UIButtonConfiguration filledButtonConfiguration];
         backupConfig.title = @"Backup App Data";
         backupConfig.image = [UIImage systemImageNamed:@"arrow.down.doc.fill"];
@@ -100,7 +100,7 @@
     
     // Create restore button with UIButtonConfiguration (iOS 15+)
     UIButton *restoreButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *restoreConfig = [UIButtonConfiguration filledButtonConfiguration];
         restoreConfig.title = @"Restore App Data";
         restoreConfig.image = [UIImage systemImageNamed:@"arrow.up.doc.fill"];

@@ -19,7 +19,7 @@ static const void *const kCopyTextKey = &kCopyTextKey;
     UIButton *copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
     
     // Use modern button configuration
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
         config.image = [UIImage systemImageNamed:@"doc.on.doc"];
         config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
@@ -54,7 +54,7 @@ static const void *const kCopyTextKey = &kCopyTextKey;
         // Enhanced visual feedback for copy action
         UIColor *originalColor = sender.tintColor;
         
-        if (@available(iOS 15.0, *)) {
+        if ([UIButton buttonConfigurationClassExists]) {
             // Create a checkmark configuration for success feedback
             UIButtonConfiguration *originalConfig = sender.configuration;
             UIButtonConfiguration *successConfig = [originalConfig copy];

@@ -16,7 +16,7 @@
     
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = [UIButtonConfiguration filledButtonConfiguration];
         config.title = title;
         config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
@@ -56,7 +56,7 @@
     
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
         config.title = title;
         config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
@@ -98,7 +98,7 @@
     
     UIButton *button = [UIButton buttonWithType:UIButtonTypeSystem];
     
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *config;
         if (backgroundColor) {
             config = [UIButtonConfiguration filledButtonConfiguration];

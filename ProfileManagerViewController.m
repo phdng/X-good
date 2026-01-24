@@ -1073,7 +1073,7 @@
         NSString *importExportTitle = @"IMPORT/EXPORT";
         
         // Create configuration for button with smaller text
-        if (@available(iOS 15.0, *)) {
+        if ([UIButton buttonConfigurationClassExists]) {
             UIButtonConfiguration *importExportConfig = [UIButtonConfiguration filledButtonConfiguration];
             importExportConfig.title = importExportTitle;
             importExportConfig.image = importExportIcon;
@@ -1121,7 +1121,7 @@
         NSString *trashTitle = @"ALL PROFILES";
         
         // Create configuration for button with smaller text
-        if (@available(iOS 15.0, *)) {
+        if ([UIButton buttonConfigurationClassExists]) {
             UIButtonConfiguration *trashConfig = [UIButtonConfiguration filledButtonConfiguration];
             trashConfig.title = trashTitle;
             trashConfig.image = trashIcon;
@@ -1203,7 +1203,7 @@
             NSString *title = @"Show More";
             
             // Create configuration for button
-            if (@available(iOS 15.0, *)) {
+            if ([UIButton buttonConfigurationClassExists]) {
                 UIButtonConfiguration *showMoreConfig = [UIButtonConfiguration filledButtonConfiguration];
                 showMoreConfig.title = title;
                 showMoreConfig.image = addIcon;
@@ -1239,7 +1239,7 @@
             NSString *searchTitle = @"Search";
             
             // Create configuration for button
-            if (@available(iOS 15.0, *)) {
+            if ([UIButton buttonConfigurationClassExists]) {
                 UIButtonConfiguration *searchConfig = [UIButtonConfiguration filledButtonConfiguration];
                 searchConfig.title = searchTitle;
                 searchConfig.image = searchIcon;
@@ -2637,7 +2637,7 @@
     self.renameButton.frame = CGRectMake(200, 22, 30, 30);
     
     // Use modern UIButtonConfiguration API for iOS 15+
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *renameConfig = [UIButtonConfiguration plainButtonConfiguration];
         renameConfig.image = [UIImage systemImageNamed:@"pencil"];
         renameConfig.baseForegroundColor = [UIColor secondaryLabelColor];
@@ -2656,7 +2656,7 @@
     self.infoButton.frame = CGRectMake(self.innerCard.bounds.size.width - 44, 13, 32, 32);
     
     // Use modern UIButtonConfiguration API for iOS 15+
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *infoConfig = [UIButtonConfiguration plainButtonConfiguration];
         infoConfig.image = [UIImage systemImageNamed:@"info.circle"];
         infoConfig.baseForegroundColor = [UIColor systemBlueColor];
@@ -2693,7 +2693,7 @@
     self.timeButton.frame = CGRectMake(15, 5, buttonSize, buttonSize);
     
     // Use modern UIButtonConfiguration API for iOS 15+
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *timeConfig = [UIButtonConfiguration plainButtonConfiguration];
         timeConfig.image = [UIImage systemImageNamed:@"clock"];
         timeConfig.baseForegroundColor = [UIColor systemGrayColor];
@@ -2713,7 +2713,7 @@
     self.exportButton.frame = CGRectMake(exportX, 5, buttonSize, buttonSize);
     
     // Use modern UIButtonConfiguration API for iOS 15+
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *exportConfig = [UIButtonConfiguration plainButtonConfiguration];
         exportConfig.image = [UIImage systemImageNamed:@"square.and.arrow.up.on.square"];
         exportConfig.baseForegroundColor = [UIColor systemBlueColor];
@@ -2733,7 +2733,7 @@
     self.switchButton.frame = CGRectMake(switchX, 5, buttonSize, buttonSize);
     
     // Use modern UIButtonConfiguration API for iOS 15+
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *switchConfig = [UIButtonConfiguration plainButtonConfiguration];
         // Use a simpler SF Symbol that's definitely available in iOS 15+
         switchConfig.image = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"];
@@ -2754,7 +2754,7 @@
     self.deleteButton.frame = CGRectMake(deleteX, 5, buttonSize, buttonSize);
     
     // Use modern UIButtonConfiguration API for iOS 15+
-    if (@available(iOS 15.0, *)) {
+    if ([UIButton buttonConfigurationClassExists]) {
         UIButtonConfiguration *deleteConfig = [UIButtonConfiguration plainButtonConfiguration];
         deleteConfig.image = [UIImage systemImageNamed:@"trash"];
         deleteConfig.baseForegroundColor = [UIColor systemRedColor];
