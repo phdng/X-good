@@ -1133,7 +1133,7 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
             void *SCNetworkReachabilityGetFlagsPtr = dlsym(RTLD_DEFAULT, "SCNetworkReachabilityGetFlags");
             if (SCNetworkReachabilityGetFlagsPtr) {
                 // Use ElleKit for hooking (preferred for iOS 15+)
-                EKHook(SCNetworkReachabilityGetFlagsPtr, 
+                MSHookFunction(SCNetworkReachabilityGetFlagsPtr, 
                        (void *)hooked_SCNetworkReachabilityGetFlags, 
                        (void **)&original_SCNetworkReachabilityGetFlags);
                 PXLog(@"[NetworkHook] Successfully hooked SCNetworkReachabilityGetFlags");
@@ -1144,7 +1144,7 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
             // Enable getifaddrs hook for local IP spoofing
             void *getifaddrsPtr = dlsym(RTLD_DEFAULT, "getifaddrs");
             if (getifaddrsPtr) {
-                EKHook(getifaddrsPtr, (void *)hooked_getifaddrs, (void **)&original_getifaddrs);
+                MSHookFunction(getifaddrsPtr, (void *)hooked_getifaddrs, (void **)&original_getifaddrs);
                 PXLog(@"[NetworkHook] Successfully hooked getifaddrs for local IP spoofing");
             } else {
                 PXLog(@"[NetworkHook] ERROR: Could not find getifaddrs function!");
@@ -1237,7 +1237,7 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
             // Setup CNCopyCurrentNetworkInfo hook for WiFi signal strength
             void *CNCopyCurrentNetworkInfoPtr = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
             if (CNCopyCurrentNetworkInfoPtr) {
-                EKHook(CNCopyCurrentNetworkInfoPtr,
+                MSHookFunction(CNCopyCurrentNetworkInfoPtr,
                       (void *)hooked_CNCopyCurrentNetworkInfo,
                       (void **)&original_CNCopyCurrentNetworkInfo);
                 PXLog(@"[NetworkHook] Successfully hooked CNCopyCurrentNetworkInfo for WiFi signal strength spoofing");

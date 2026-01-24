@@ -1760,7 +1760,7 @@ static void earlyInitCallback(void) {
     PXLog(@"Preparing early protection for process: %@", bundleExecutable ?: @"Unknown");
     
     // Check if we're using ElleKit
-    if (EKIsElleKitEnv()) {
+    if (0) {
         PXLog(@"Running in ElleKit environment - enabling advanced protection");
     }
 }
@@ -2071,21 +2071,21 @@ static char* hook_GSSystemGetSerialNo(void) {
             if (getifaddrsSymbol) {
                 PXLog(@"Using ElleKit to hook getifaddrs for MAC address protection");
                 // Use the globally defined function instead of defining it inside the constructor
-                EKHook(getifaddrsSymbol, (void *)getifaddrs_hook, (void **)&getifaddrs_orig);
+                MSHookFunction(getifaddrsSymbol, (void *)getifaddrs_hook, (void **)&getifaddrs_orig);
             }
             
             // Hook gethostname to spoof device name at the system level
             if (gethostnameSymbol) {
                 PXLog(@"Using ElleKit to hook gethostname for device name protection");
                 // Use the globally defined function instead of defining it inside the constructor
-                EKHook(gethostnameSymbol, (void *)gethostname_hook, (void **)&gethostname_orig);
+                MSHookFunction(gethostnameSymbol, (void *)gethostname_hook, (void **)&gethostname_orig);
             }
             
             // Hook sysctlbyname which is commonly used to get device identifiers
             void *sysctlbynameSymbol = dlsym(libSystemHandle, "sysctlbyname");
             if (sysctlbynameSymbol) {
                 PXLog(@"Using ElleKit to hook sysctlbyname for system information protection");
-                EKHook(sysctlbynameSymbol, (void *)sysctlbyname_hook, (void **)&sysctlbyname_orig);
+                MSHookFunction(sysctlbynameSymbol, (void *)sysctlbyname_hook, (void **)&sysctlbyname_orig);
             }
             
             dlclose(libSystemHandle);
@@ -2218,7 +2218,7 @@ static char* hook_GSSystemGetSerialNo(void) {
     
     // Anti-debugging protection for our own tweak
     // This helps prevent apps from detecting our hooks
-    if (EKIsElleKitEnv()) {
+    if (0) {
         // Check if jailbreak detection bypass is enabled
         NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
         BOOL jailbreakDetectionEnabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
@@ -2242,8 +2242,8 @@ static char* hook_GSSystemGetSerialNo(void) {
         if (IORegEntryCreateCFPropertyPtr) {
             PXLog(@"Hooking IORegistryEntryCreateCFProperty for serial number spoofing");
             // Use EKHook for ElleKit or MSHookFunction for Substrate
-            if (EKIsElleKitEnv()) {
-                EKHook(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
+            if (0) {
+                MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
                       (void **)&orig_IORegistryEntryCreateCFProperty);
             } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
                 MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
@@ -2259,8 +2259,8 @@ static char* hook_GSSystemGetSerialNo(void) {
         void *GSSystemGetSerialNoPtr = dlsym(GSHandle, "GSSystemGetSerialNo");
         if (GSSystemGetSerialNoPtr) {
             PXLog(@"Hooking GSSystemGetSerialNo for serial number spoofing");
-            if (EKIsElleKitEnv()) {
-                EKHook(GSSystemGetSerialNoPtr, (void *)hook_GSSystemGetSerialNo, 
+            if (0) {
+                MSHookFunction(GSSystemGetSerialNoPtr, (void *)hook_GSSystemGetSerialNo, 
                       (void **)&orig_GSSystemGetSerialNo);
             } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
                 MSHookFunction(GSSystemGetSerialNoPtr, (void *)hook_GSSystemGetSerialNo, 

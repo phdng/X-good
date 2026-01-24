@@ -1035,7 +1035,7 @@ static void setupAdditionalSystemUUIDHooks() {
         if (libc) {
             void *gethostuuid_sym = dlsym(libc, "gethostuuid");
             if (gethostuuid_sym) {
-                int result = EKHook(gethostuuid_sym, 
+                int result = MSHookFunction(gethostuuid_sym, 
                                   (void *)replaced_gethostuuid, 
                                   (void **)&orig_gethostuuid);
                 
@@ -1051,7 +1051,7 @@ static void setupAdditionalSystemUUIDHooks() {
             // Hook sysctlbyname
             void *sysctlbyname_sym = dlsym(libc, "sysctlbyname");
             if (sysctlbyname_sym) {
-                int result = EKHook(sysctlbyname_sym, 
+                int result = MSHookFunction(sysctlbyname_sym, 
                                   (void *)replaced_sysctlbyname, 
                                   (void **)&orig_sysctlbyname);
                 
@@ -1074,7 +1074,7 @@ static void setupAdditionalSystemUUIDHooks() {
         if (coreFoundation) {
             void *cfuuidcreate_sym = dlsym(coreFoundation, "CFUUIDCreate");
             if (cfuuidcreate_sym) {
-                int result = EKHook(cfuuidcreate_sym, 
+                int result = MSHookFunction(cfuuidcreate_sym, 
                                   (void *)replaced_CFUUIDCreate, 
                                   (void **)&orig_CFUUIDCreate);
                 
@@ -1195,7 +1195,7 @@ static void setupAdditionalSystemUUIDHooks() {
                             int result = -1;
                             
                             while (result != 0 && retryCount < maxRetries) {
-                                result = EKHook(orig_dyld_get_shared_cache_uuid, 
+                                result = MSHookFunction(orig_dyld_get_shared_cache_uuid, 
                                             (void *)replaced_dyld_get_shared_cache_uuid, 
                                             (void **)&orig_dyld_get_shared_cache_uuid);
                                 
@@ -1228,7 +1228,7 @@ static void setupAdditionalSystemUUIDHooks() {
                             int result = -1;
                             
                             while (result != 0 && retryCount < maxRetries) {
-                                result = EKHook(orig_dyld_get_all_image_infos, 
+                                result = MSHookFunction(orig_dyld_get_all_image_infos, 
                                             (void *)replaced_dyld_get_all_image_infos, 
                                             (void **)&orig_dyld_get_all_image_infos);
                                 

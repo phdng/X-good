@@ -683,17 +683,17 @@ static int hooked_getnameinfo(const struct sockaddr *sa, socklen_t salen, char *
         // Initialize DNS-level C function hooks with ElleKit
         void *gethostbyname_ptr = dlsym(RTLD_DEFAULT, "gethostbyname");
         if (gethostbyname_ptr) {
-            EKHook(gethostbyname_ptr, (void *)hooked_gethostbyname, (void **)&original_gethostbyname);
+            MSHookFunction(gethostbyname_ptr, (void *)hooked_gethostbyname, (void **)&original_gethostbyname);
         }
         
         void *getaddrinfo_ptr = dlsym(RTLD_DEFAULT, "getaddrinfo");
         if (getaddrinfo_ptr) {
-            EKHook(getaddrinfo_ptr, (void *)hooked_getaddrinfo, (void **)&original_getaddrinfo);
+            MSHookFunction(getaddrinfo_ptr, (void *)hooked_getaddrinfo, (void **)&original_getaddrinfo);
         }
         
         void *getnameinfo_ptr = dlsym(RTLD_DEFAULT, "getnameinfo");
         if (getnameinfo_ptr) {
-            EKHook(getnameinfo_ptr, (void *)hooked_getnameinfo, (void **)&original_getnameinfo);
+            MSHookFunction(getnameinfo_ptr, (void *)hooked_getnameinfo, (void **)&original_getnameinfo);
         }
         
         // Initialize all Objective-C hooks

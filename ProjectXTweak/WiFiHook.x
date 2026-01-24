@@ -567,7 +567,7 @@ static void initializeHooks(void) {
     // Install CNCopyCurrentNetworkInfo hook using ellekit
     void *symbol = dlsym(RTLD_DEFAULT, "CNCopyCurrentNetworkInfo");
     if (symbol) {
-        int result = EKHook(symbol, 
+        int result = MSHookFunction(symbol, 
                            (void *)replaced_CNCopyCurrentNetworkInfo, 
                            (void **)&orig_CNCopyCurrentNetworkInfo);
         
@@ -577,7 +577,7 @@ static void initializeHooks(void) {
             if (captiveNetworkLib) {
                 symbol = dlsym(captiveNetworkLib, "CNCopyCurrentNetworkInfo");
                 if (symbol) {
-                    EKHook(symbol, 
+                    MSHookFunction(symbol, 
                           (void *)replaced_CNCopyCurrentNetworkInfo, 
                           (void **)&orig_CNCopyCurrentNetworkInfo);
                 }
@@ -623,7 +623,7 @@ static void initializeHooks(void) {
         // Hook WiFiManagerClientCreate
         symbol = dlsym(mobileWiFiLib, "WiFiManagerClientCreate");
         if (symbol) {
-            EKHook(symbol, 
+            MSHookFunction(symbol, 
                   (void *)replaced_WiFiManagerClientCreate, 
                   (void **)&orig_WiFiManagerClientCreate);
         }
@@ -631,7 +631,7 @@ static void initializeHooks(void) {
         // Hook WiFiDeviceClientCopyCurrentNetwork
         symbol = dlsym(mobileWiFiLib, "WiFiDeviceClientCopyCurrentNetwork");
         if (symbol) {
-            EKHook(symbol, 
+            MSHookFunction(symbol, 
                   (void *)replaced_WiFiDeviceClientCopyCurrentNetwork, 
                   (void **)&orig_WiFiDeviceClientCopyCurrentNetwork);
         }
@@ -639,7 +639,7 @@ static void initializeHooks(void) {
         // Hook WiFiNetworkGetSSID
         symbol = dlsym(mobileWiFiLib, "WiFiNetworkGetSSID");
         if (symbol) {
-            EKHook(symbol, 
+            MSHookFunction(symbol, 
                   (void *)replaced_WiFiNetworkGetSSID, 
                   (void **)&orig_WiFiNetworkGetSSID);
         }
@@ -647,7 +647,7 @@ static void initializeHooks(void) {
         // Hook WiFiNetworkGetBSSID
         symbol = dlsym(mobileWiFiLib, "WiFiNetworkGetBSSID");
         if (symbol) {
-            EKHook(symbol, 
+            MSHookFunction(symbol, 
                   (void *)replaced_WiFiNetworkGetBSSID, 
                   (void **)&orig_WiFiNetworkGetBSSID);
         }

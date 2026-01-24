@@ -1528,7 +1528,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
         );
         
         // Force ElleKit hooks to be applied regardless of environment detection
-        // This is needed for rootless jailbreaks where EKIsElleKitEnv() might fail
+        // This is needed for rootless jailbreaks where 0 might fail
         IOSVERSION_LOG(@"Setting up ElleKit hooks for build number spoofing");
         
         // Hook CoreFoundation version dictionary function
@@ -1551,7 +1551,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
             }
             
             if (cfCopySystemVersionDictionaryPtr) {
-                EKHook(cfCopySystemVersionDictionaryPtr, (void *)replaced_CFCopySystemVersionDictionary, (void **)&original_CFCopySystemVersionDictionary);
+                MSHookFunction(cfCopySystemVersionDictionaryPtr, (void *)replaced_CFCopySystemVersionDictionary, (void **)&original_CFCopySystemVersionDictionary);
                 IOSVERSION_LOG(@"Successfully hooked CFCopySystemVersionDictionary");
             } else {
                 // If we can't find the symbol, create a stub implementation
@@ -1579,7 +1579,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
             }
             
             if (cfBundleGetValueForInfoDictionaryKeyPtr) {
-                EKHook(cfBundleGetValueForInfoDictionaryKeyPtr, (void *)replaced_CFBundleGetValueForInfoDictionaryKey, (void **)&original_CFBundleGetValueForInfoDictionaryKey);
+                MSHookFunction(cfBundleGetValueForInfoDictionaryKeyPtr, (void *)replaced_CFBundleGetValueForInfoDictionaryKey, (void **)&original_CFBundleGetValueForInfoDictionaryKey);
                 IOSVERSION_LOG(@"Successfully hooked CFBundleGetValueForInfoDictionaryKey");
             } else {
                 // If we can't find the symbol, create a stub implementation
@@ -1598,7 +1598,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
         if (libSystemHandle) {
             void *sysctlbynamePtr = dlsym(libSystemHandle, "sysctlbyname");
             if (sysctlbynamePtr) {
-                EKHook(sysctlbynamePtr, (void *)hooked_sysctlbyname, (void **)&original_sysctlbyname);
+                MSHookFunction(sysctlbynamePtr, (void *)hooked_sysctlbyname, (void **)&original_sysctlbyname);
                 IOSVERSION_LOG(@"Hooked sysctlbyname");
             } else {
                 IOSVERSION_LOG(@"⚠️ Failed to find sysctlbyname symbol");

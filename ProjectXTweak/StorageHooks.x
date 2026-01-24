@@ -1014,28 +1014,28 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
             if (handle) {
                 orig_statfs = dlsym(handle, "statfs");
                 if (orig_statfs) {
-                    EKHook((void *)orig_statfs, (void *)replaced_statfs, (void **)&orig_statfs);
+                    MSHookFunction((void *)orig_statfs, (void *)replaced_statfs, (void **)&orig_statfs);
                     PXLog(@"[StorageHooks] Hooked statfs successfully");
                 }
                 
                 // Hook statfs64 (if available)
                 orig_statfs64 = dlsym(handle, "statfs64");
                 if (orig_statfs64) {
-                    EKHook((void *)orig_statfs64, (void *)replaced_statfs64, (void **)&orig_statfs64);
+                    MSHookFunction((void *)orig_statfs64, (void *)replaced_statfs64, (void **)&orig_statfs64);
                     PXLog(@"[StorageHooks] Hooked statfs64 successfully");
                 }
                 
                 // Hook getfsstat
                 orig_getfsstat = dlsym(handle, "getfsstat");
                 if (orig_getfsstat) {
-                    EKHook((void *)orig_getfsstat, (void *)replaced_getfsstat, (void **)&orig_getfsstat);
+                    MSHookFunction((void *)orig_getfsstat, (void *)replaced_getfsstat, (void **)&orig_getfsstat);
                     PXLog(@"[StorageHooks] Hooked getfsstat successfully");
                 }
                 
                 // Hook getfsstat64 (if available)
                 orig_getfsstat64 = dlsym(handle, "getfsstat64");
                 if (orig_getfsstat64) {
-                    EKHook((void *)orig_getfsstat64, (void *)replaced_getfsstat64, (void **)&orig_getfsstat64);
+                    MSHookFunction((void *)orig_getfsstat64, (void *)replaced_getfsstat64, (void **)&orig_getfsstat64);
                     PXLog(@"[StorageHooks] Hooked getfsstat64 successfully");
                 }
                 
@@ -1049,7 +1049,7 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
                 void *ioRegEntryCreateCFPropertyPtr = dlsym(ioKitHandle, "IORegistryEntryCreateCFProperty");
                 
                 if (ioRegEntryCreateCFPropertyPtr) {
-                    EKHook(ioRegEntryCreateCFPropertyPtr, (void *)replaced_IORegistryEntryCreateCFProperty, (void **)&orig_IORegistryEntryCreateCFProperty);
+                    MSHookFunction(ioRegEntryCreateCFPropertyPtr, (void *)replaced_IORegistryEntryCreateCFProperty, (void **)&orig_IORegistryEntryCreateCFProperty);
                     PXLog(@"[StorageHooks] Hooked IORegistryEntryCreateCFProperty successfully");
                 }
                 

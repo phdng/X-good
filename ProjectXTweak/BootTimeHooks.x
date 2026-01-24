@@ -415,28 +415,16 @@ static void installSystemCallHooks(void) {
         
         BOOL hookingSuccess = NO;
         
-        // Try ElleKit first (preferred for rootless jailbreaks)
-        if (EKIsElleKitEnv() || dlsym(RTLD_DEFAULT, "EKHook")) {
+        // Use Substrate for rootful jailbreaks (iOS 12+)
+        if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
             // Hook sysctl
-            void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
-            if (sysctlPtr && EKHook(sysctlPtr, (void *)hook_sysctl, (void **)&orig_sysctl) == 0) {
-                hookingSuccess = YES;
-            }
-            
-            // Hook sysctlbyname
-            void *sysctlbynamePtr = dlsym(RTLD_DEFAULT, "sysctlbyname");
-            if (sysctlbynamePtr && EKHook(sysctlbynamePtr, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname) == 0) {
-                hookingSuccess = YES;
-            }
-            
-        } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
-            // Fallback to Substrate
             void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
             if (sysctlPtr) {
                 MSHookFunction(sysctlPtr, (void *)hook_sysctl, (void **)&orig_sysctl);
                 hookingSuccess = YES;
             }
             
+            // Hook sysctlbyname
             void *sysctlbynamePtr = dlsym(RTLD_DEFAULT, "sysctlbyname");
             if (sysctlbynamePtr) {
                 MSHookFunction(sysctlbynamePtr, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname);
