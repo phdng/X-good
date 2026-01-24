@@ -2036,11 +2036,11 @@ static char* hook_GSSystemGetSerialNo(void) {
         // For regular apps, initialize normally but with a small delay to avoid boot loops
     }
     
-    // Register early initialization callback for ElleKit
-    if (dlsym(RTLD_DEFAULT, "EKEarlyInit")) {
-        EKEarlyInit(earlyInitCallback);
-        PXLog(@"Registered ElleKit early initialization handler");
-    }
+    // ElleKit early init removed for rootful - not needed with Substrate
+    // if (dlsym(RTLD_DEFAULT, "EKEarlyInit")) {
+    //     EKEarlyInit(earlyInitCallback);
+    //     PXLog(@"Registered ElleKit early initialization handler");
+    // }
     
     // Detect iOS version
     NSOperatingSystemVersion osVersion = [[NSProcessInfo processInfo] operatingSystemVersion];
@@ -2226,10 +2226,10 @@ static char* hook_GSSystemGetSerialNo(void) {
         if (jailbreakDetectionEnabled) {
             PXLog(@"Enabling anti-detection measures with ElleKit");
             
-            // Register callbacks for system events that could expose our tweak
-            if (dlsym(RTLD_DEFAULT, "EKRegisterCallback")) {
-                EKRegisterCallback(antiDetectionCallback);
-            }
+            // ElleKit callbacks removed for rootful - not available with Substrate
+            // if (dlsym(RTLD_DEFAULT, "EKRegisterCallback")) {
+            //     EKRegisterCallback(antiDetectionCallback);
+            // }
         } else {
             PXLog(@"Jailbreak detection bypass is disabled, skipping anti-detection measures");
         }
