@@ -2317,26 +2317,41 @@
         // Enhanced visual feedback for copy action
         UIColor *originalColor = sender.tintColor;
         
-        // Create a checkmark configuration for success feedback
-        UIButtonConfiguration *originalConfig = sender.configuration;
-        UIButtonConfiguration *successConfig = [originalConfig copy];
-        successConfig.image = [UIImage systemImageNamed:@"checkmark"];
-        successConfig.baseForegroundColor = [UIColor systemGreenColor];
-        
-        // Animate the change
-        [UIView animateWithDuration:0.2 animations:^{
-            sender.configuration = successConfig;
-        } completion:^(BOOL finished) {
-            // Show success state for a moment
-            dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-                // Animate back to original state
-                [UIView animateWithDuration:0.2 animations:^{
-                    UIButtonConfiguration *revertConfig = [originalConfig copy];
-                    revertConfig.baseForegroundColor = originalColor;
-                    sender.configuration = revertConfig;
-                }];
-            });
-        }];
+        if (@available(iOS 15.0, *)) {
+            // Create a checkmark configuration for success feedback
+            UIButtonConfiguration *originalConfig = sender.configuration;
+            UIButtonConfiguration *successConfig = [originalConfig copy];
+            successConfig.image = [UIImage systemImageNamed:@"checkmark"];
+            successConfig.baseForegroundColor = [UIColor systemGreenColor];
+            
+            // Animate the change
+            [UIView animateWithDuration:0.2 animations:^{
+                sender.configuration = successConfig;
+            } completion:^(BOOL finished) {
+                // Show success state for a moment
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    // Animate back to original state
+                    [UIView animateWithDuration:0.2 animations:^{
+                        UIButtonConfiguration *revertConfig = [originalConfig copy];
+                        revertConfig.baseForegroundColor = originalColor;
+                        sender.configuration = revertConfig;
+                    }];
+                });
+            }];
+        } else {
+            // Fallback for iOS < 15 using tint color change
+            [UIView animateWithDuration:0.2 animations:^{
+                [sender setImage:[UIImage systemImageNamed:@"checkmark"] forState:UIControlStateNormal];
+                sender.tintColor = [UIColor systemGreenColor];
+            } completion:^(BOOL finished) {
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+                    [UIView animateWithDuration:0.2 animations:^{
+                        [sender setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
+                        sender.tintColor = originalColor;
+                    }];
+                });
+            }];
+        }
     }
 }
 
