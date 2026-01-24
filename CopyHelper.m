@@ -1,5 +1,6 @@
 #import "CopyHelper.h"
 #import <UIKit/UIKit.h>
+#import "common/UIButton+SafeConfiguration.h"
 
 static const void *const kCopyTextKey = &kCopyTextKey;
 
@@ -25,7 +26,7 @@ static const void *const kCopyTextKey = &kCopyTextKey;
         config.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
         config.baseForegroundColor = [UIColor systemBlueColor];
         config.contentInsets = NSDirectionalEdgeInsetsMake(8, 8, 8, 8);
-        copyButton.configuration = config;
+        [copyButton safeSetConfiguration:config];
     } else {
         [copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
         copyButton.tintColor = [UIColor systemBlueColor];
@@ -62,7 +63,7 @@ static const void *const kCopyTextKey = &kCopyTextKey;
             
             // Animate the change
             [UIView animateWithDuration:0.2 animations:^{
-                sender.configuration = successConfig;
+                [sender safeSetConfiguration:successConfig];
             } completion:^(BOOL finished) {
                 // Show success state for a moment
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -70,7 +71,7 @@ static const void *const kCopyTextKey = &kCopyTextKey;
                     [UIView animateWithDuration:0.2 animations:^{
                         UIButtonConfiguration *revertConfig = [originalConfig copy];
                         revertConfig.baseForegroundColor = originalColor;
-                        sender.configuration = revertConfig;
+                        [sender safeSetConfiguration:revertConfig];
                     }];
                 });
             }];

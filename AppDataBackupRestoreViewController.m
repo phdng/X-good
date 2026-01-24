@@ -1,4 +1,5 @@
 #import "AppDataBackupRestoreViewController.h"
+#import "common/UIButton+SafeConfiguration.h"
 
 @interface AppDataBackupRestoreViewController ()
 @property (nonatomic, strong) UILabel *appLabel;
@@ -78,7 +79,7 @@
         backupConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
         backupConfig.baseBackgroundColor = [UIColor clearColor];
         backupConfig.baseForegroundColor = [UIColor systemBlueColor];
-        backupButton.configuration = backupConfig;
+        [backupButton safeSetConfiguration:backupConfig];
     } else {
         [backupButton setTitle:@"Backup App Data" forState:UIControlStateNormal];
         [backupButton setImage:[UIImage systemImageNamed:@"arrow.down.doc.fill"] forState:UIControlStateNormal];
@@ -109,7 +110,7 @@
         restoreConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
         restoreConfig.baseBackgroundColor = [UIColor clearColor];
         restoreConfig.baseForegroundColor = [UIColor systemGreenColor];
-        restoreButton.configuration = restoreConfig;
+        [restoreButton safeSetConfiguration:restoreConfig];
     } else {
         [restoreButton setTitle:@"Restore App Data" forState:UIControlStateNormal];
         [restoreButton setImage:[UIImage systemImageNamed:@"arrow.up.doc.fill"] forState:UIControlStateNormal];

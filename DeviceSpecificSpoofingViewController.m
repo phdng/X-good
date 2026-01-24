@@ -1,4 +1,4 @@
-#import "DeviceSpecificSpoofingViewController.h"
+﻿#import "DeviceSpecificSpoofingViewController.h"
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "IdentifierManager.h"
@@ -8,6 +8,7 @@
 #import "ProfileButtonsView.h"
 #import "ProfileManagerViewController.h"
 #import "DeviceSpecificSpoofingViewController+EditLabel.h"
+#import "common/UIButton+SafeConfiguration.h"
 
 @interface DeviceSpecificSpoofingViewController ()
 @property (nonatomic, strong) UIView *profileIndicatorView;
@@ -206,7 +207,7 @@
         config.imagePlacement = NSDirectionalRectEdgeTrailing;
         config.imagePadding = 8;
         config.contentInsets = NSDirectionalEdgeInsetsMake(8, 16, 8, 16);
-        self.showAdvancedButton.configuration = config;
+        [self.showAdvancedButton safeSetConfiguration:config];
     } else {
         // Fallback for older iOS versions
 #pragma clang diagnostic push
@@ -265,7 +266,7 @@
             config.title = @"Show Advanced Identifiers";
             config.image = [UIImage systemImageNamed:@"chevron.down"];
         }
-        self.showAdvancedButton.configuration = config;
+        [self.showAdvancedButton safeSetConfiguration:config];
     } else {
         // Update for older iOS versions
         if (self.showAdvancedIdentifiers) {
@@ -480,7 +481,7 @@
         [titleLabel addGestureRecognizer:tap];
         objc_setAssociatedObject(tap, "identifierKey", key, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
     } else {
-        titleLabel.text = [NSString stringWithFormat:@"%@ ✏️", title];
+        titleLabel.text = [NSString stringWithFormat:@"%@ âœï¸", title];
         UITapGestureRecognizer *tap = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(editIdentifierLabelTapped:)];
         titleLabel.userInteractionEnabled = YES;
         [titleLabel addGestureRecognizer:tap];
@@ -495,7 +496,7 @@
         copyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
         copyConfig.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
         copyConfig.contentInsets = NSDirectionalEdgeInsetsMake(8, 8, 8, 8);
-        copyButton.configuration = copyConfig;
+        [copyButton safeSetConfiguration:copyConfig];
     } else {
         [copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
         copyButton.tintColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
@@ -519,7 +520,7 @@
             infoConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
             infoConfig.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
             infoConfig.contentInsets = NSDirectionalEdgeInsetsMake(8, 8, 8, 8);
-            infoButton.configuration = infoConfig;
+            [infoButton safeSetConfiguration:infoConfig];
         } else {
             [infoButton setImage:[UIImage systemImageNamed:@"info.circle"] forState:UIControlStateNormal];
             infoButton.tintColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
@@ -626,7 +627,7 @@
         generateConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
         generateConfig.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
         generateConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 6, 4, 6);
-        generateButton.configuration = generateConfig;
+        [generateButton safeSetConfiguration:generateConfig];
         generateButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
         generateButton.layer.cornerRadius = 10;
         generateButton.clipsToBounds = YES;
@@ -739,7 +740,7 @@
         }
     }
     if (self.profileLabel) {
-        self.profileLabel.text = [NSString stringWithFormat:@"←------------------ Profile Num: %@ -----------------→", profileId];
+        self.profileLabel.text = [NSString stringWithFormat:@"â†------------------ Profile Num: %@ -----------------â†’", profileId];
     }
     
     // Update IMEI/MEID labels
@@ -809,7 +810,7 @@
                             if (@available(iOS 15.0, *)) {
                                 UIButtonConfiguration *cfg = [button.configuration copy];
                                 cfg.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
-                                button.configuration = cfg;
+                                [button safeSetConfiguration:cfg];
                             } else {
                                 button.tintColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
                             }
@@ -895,7 +896,7 @@
             successConfig.image = [UIImage systemImageNamed:@"checkmark"];
             successConfig.baseForegroundColor = [UIColor systemGreenColor];
             [UIView animateWithDuration:0.2 animations:^{
-                sender.configuration = successConfig;
+                [sender safeSetConfiguration:successConfig];
             } completion:^(BOOL finished) {
                 // Show success state for a moment
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -903,7 +904,7 @@
                     [UIView animateWithDuration:0.2 animations:^{
                         UIButtonConfiguration *revertConfig = [originalConfig copy];
                         revertConfig.baseForegroundColor = originalColor;
-                        sender.configuration = revertConfig;
+                        [sender safeSetConfiguration:revertConfig];
                     }];
                 });
             }];
@@ -972,12 +973,12 @@
         if (copyButton) {
             UIButtonConfiguration *cfg = [copyButton.configuration copy];
             cfg.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
-            copyButton.configuration = cfg;
+            [copyButton safeSetConfiguration:cfg];
         }
         if (generateButton) {
             UIButtonConfiguration *cfg = [generateButton.configuration copy];
             cfg.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
-            generateButton.configuration = cfg;
+            [generateButton safeSetConfiguration:cfg];
         }
     } else {
         if (copyButton) copyButton.tintColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];

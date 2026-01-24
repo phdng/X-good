@@ -1,5 +1,6 @@
-#import "ProfileManagerViewController.h"
+﻿#import "ProfileManagerViewController.h"
 #import "ProfileManager.h"
+#import "common/UIButton+SafeConfiguration.h"
 
 // Custom ProfileTableViewCell class
 @interface ProfileTableViewCell : UITableViewCell
@@ -409,7 +410,7 @@
 - (void)updateCurrentProfileIdLabel {
     if (self.currentProfileIdLabel) {
         // Get the active profile from central info store
-        NSString *currentProfileId = @"—";
+        NSString *currentProfileId = @"â€”";
         
         // Get the current profile info from ProfileManager
         ProfileManager *manager = [ProfileManager sharedManager];
@@ -494,7 +495,7 @@
     [labelContainer addSubview:profileSubLabel];
     
     UILabel *idLabel = [[UILabel alloc] initWithFrame:CGRectMake(5, 4, 60, 24)];
-    idLabel.text = @"—"; // Will update after profiles are loaded
+    idLabel.text = @"â€”"; // Will update after profiles are loaded
     idLabel.font = [UIFont monospacedDigitSystemFontOfSize:12 weight:UIFontWeightMedium];
     idLabel.textColor = [UIColor systemGreenColor];
     idLabel.textAlignment = NSTextAlignmentCenter;
@@ -1093,7 +1094,7 @@
             // Reduce content insets to make button more compact
             importExportConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 8, 4, 8);
             
-            importExportButton.configuration = importExportConfig;
+            [importExportButton safeSetConfiguration:importExportConfig];
         } else {
             [importExportButton setTitle:importExportTitle forState:UIControlStateNormal];
             [importExportButton setImage:importExportIcon forState:UIControlStateNormal];
@@ -1141,7 +1142,7 @@
             // Reduce content insets to make button more compact
             trashConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 8, 4, 8);
             
-            trashAllButton.configuration = trashConfig;
+            [trashAllButton safeSetConfiguration:trashConfig];
         } else {
             [trashAllButton setTitle:trashTitle forState:UIControlStateNormal];
             [trashAllButton setImage:trashIcon forState:UIControlStateNormal];
@@ -1212,7 +1213,7 @@
                 showMoreConfig.baseBackgroundColor = [[UIColor systemBlueColor] colorWithAlphaComponent:0.1];
                 showMoreConfig.baseForegroundColor = [UIColor systemBlueColor];
                 
-                showMoreButton.configuration = showMoreConfig;
+                [showMoreButton safeSetConfiguration:showMoreConfig];
             } else {
                 [showMoreButton setTitle:title forState:UIControlStateNormal];
                 [showMoreButton setImage:addIcon forState:UIControlStateNormal];
@@ -1248,7 +1249,7 @@
                 searchConfig.baseBackgroundColor = [[UIColor systemPurpleColor] colorWithAlphaComponent:0.1];
                 searchConfig.baseForegroundColor = [UIColor systemPurpleColor];
                 
-                searchButton.configuration = searchConfig;
+                [searchButton safeSetConfiguration:searchConfig];
             } else {
                 [searchButton setTitle:searchTitle forState:UIControlStateNormal];
                 [searchButton setImage:searchIcon forState:UIControlStateNormal];
@@ -2641,7 +2642,7 @@
         renameConfig.image = [UIImage systemImageNamed:@"pencil"];
         renameConfig.baseForegroundColor = [UIColor secondaryLabelColor];
         renameConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-        self.renameButton.configuration = renameConfig;
+        [self.renameButton safeSetConfiguration:renameConfig];
     } else {
         [self.renameButton setImage:[UIImage systemImageNamed:@"pencil"] forState:UIControlStateNormal];
         self.renameButton.tintColor = [UIColor secondaryLabelColor];
@@ -2660,7 +2661,7 @@
         infoConfig.image = [UIImage systemImageNamed:@"info.circle"];
         infoConfig.baseForegroundColor = [UIColor systemBlueColor];
         infoConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-        self.infoButton.configuration = infoConfig;
+        [self.infoButton safeSetConfiguration:infoConfig];
     } else {
         [self.infoButton setImage:[UIImage systemImageNamed:@"info.circle"] forState:UIControlStateNormal];
         self.infoButton.tintColor = [UIColor systemBlueColor];
@@ -2697,7 +2698,7 @@
         timeConfig.image = [UIImage systemImageNamed:@"clock"];
         timeConfig.baseForegroundColor = [UIColor systemGrayColor];
         timeConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-        self.timeButton.configuration = timeConfig;
+        [self.timeButton safeSetConfiguration:timeConfig];
     } else {
         [self.timeButton setImage:[UIImage systemImageNamed:@"clock"] forState:UIControlStateNormal];
         self.timeButton.tintColor = [UIColor systemGrayColor];
@@ -2717,7 +2718,7 @@
         exportConfig.image = [UIImage systemImageNamed:@"square.and.arrow.up.on.square"];
         exportConfig.baseForegroundColor = [UIColor systemBlueColor];
         exportConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-        self.exportButton.configuration = exportConfig;
+        [self.exportButton safeSetConfiguration:exportConfig];
     } else {
         [self.exportButton setImage:[UIImage systemImageNamed:@"square.and.arrow.up.on.square"] forState:UIControlStateNormal];
         self.exportButton.tintColor = [UIColor systemBlueColor];
@@ -2738,7 +2739,7 @@
         switchConfig.image = [UIImage systemImageNamed:@"arrow.triangle.2.circlepath"];
         switchConfig.baseForegroundColor = [UIColor systemBlueColor];
         switchConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-        self.switchButton.configuration = switchConfig;
+        [self.switchButton safeSetConfiguration:switchConfig];
     } else {
         [self.switchButton setImage:[UIImage systemImageNamed:@"arrow.triangle.2.circlepath"] forState:UIControlStateNormal];
         self.switchButton.tintColor = [UIColor systemBlueColor];
@@ -2758,7 +2759,7 @@
         deleteConfig.image = [UIImage systemImageNamed:@"trash"];
         deleteConfig.baseForegroundColor = [UIColor systemRedColor];
         deleteConfig.contentInsets = NSDirectionalEdgeInsetsMake(5, 5, 5, 5);
-        self.deleteButton.configuration = deleteConfig;
+        [self.deleteButton safeSetConfiguration:deleteConfig];
     } else {
         [self.deleteButton setImage:[UIImage systemImageNamed:@"trash"] forState:UIControlStateNormal];
         self.deleteButton.tintColor = [UIColor systemRedColor];

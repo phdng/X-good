@@ -20,6 +20,7 @@
 #import <sys/wait.h>
 #import <dlfcn.h>
 #import <objc/runtime.h>
+#import "common/UIButton+SafeConfiguration.h"
 
 // Add missing methods via category
 @interface LSApplicationWorkspace (ProjectX)
@@ -839,7 +840,7 @@
             return newAttributes;
         };
         config.contentInsets = NSDirectionalEdgeInsetsMake(4, 10, 4, 10);
-        toolsButton.configuration = config;
+        [toolsButton safeSetConfiguration:config];
     } else {
         // Fall back to older style for iOS 14 and below
         #pragma clang diagnostic push
@@ -1017,7 +1018,7 @@
         
         generateAllConfig.imagePlacement = NSDirectionalRectEdgeLeading;
         generateAllConfig.imagePadding = 2;
-        generateAllButton.configuration = generateAllConfig;
+        [generateAllButton safeSetConfiguration:generateAllConfig];
     } else {
         // iOS 12-14 fallback
         [generateAllButton setTitle:@"Generate All" forState:UIControlStateNormal];
@@ -1643,7 +1644,7 @@
         copyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
         copyConfig.baseForegroundColor = [UIColor systemBlueColor];
         copyConfig.contentInsets = NSDirectionalEdgeInsetsMake(8, 8, 8, 8);
-        copyButton.configuration = copyConfig;
+        [copyButton safeSetConfiguration:copyConfig];
     } else {
         [copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
         copyButton.tintColor = [UIColor systemBlueColor];
@@ -1691,7 +1692,7 @@
         generateConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
         generateConfig.baseForegroundColor = [UIColor systemBlueColor];
         generateConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 6, 4, 6);
-        generateButton.configuration = generateConfig;
+        [generateButton safeSetConfiguration:generateConfig];
     } else {
         [generateButton setTitle:@"Generate" forState:UIControlStateNormal];
         [generateButton setImage:[UIImage systemImageNamed:@"arrow.clockwise"] forState:UIControlStateNormal];
@@ -1787,7 +1788,7 @@
         addButtonConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
         addButtonConfig.background.backgroundColor = [UIColor.systemGreenColor colorWithAlphaComponent:0.15];
         addButtonConfig.baseForegroundColor = [UIColor systemGreenColor];
-        addButton.configuration = addButtonConfig;
+        [addButton safeSetConfiguration:addButtonConfig];
     } else {
         [addButton setTitle:@"Add App" forState:UIControlStateNormal];
         addButton.tintColor = [UIColor systemGreenColor];
@@ -2326,7 +2327,7 @@
             
             // Animate the change
             [UIView animateWithDuration:0.2 animations:^{
-                sender.configuration = successConfig;
+                [sender safeSetConfiguration:successConfig];
             } completion:^(BOOL finished) {
                 // Show success state for a moment
                 dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.8 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
@@ -2334,7 +2335,7 @@
                     [UIView animateWithDuration:0.2 animations:^{
                         UIButtonConfiguration *revertConfig = [originalConfig copy];
                         revertConfig.baseForegroundColor = originalColor;
-                        sender.configuration = revertConfig;
+                        [sender safeSetConfiguration:revertConfig];
                     }];
                 });
             }];
@@ -4478,7 +4479,7 @@ else if ([identifierType isEqualToString:@"AppContainerUUID"])
         config.imagePlacement = NSDirectionalRectEdgeTrailing;
         config.imagePadding = 8;
         config.contentInsets = NSDirectionalEdgeInsetsMake(8, 16, 8, 16);
-        self.showAdvancedButton.configuration = config;
+        [self.showAdvancedButton safeSetConfiguration:config];
     } else {
         // Fallback for older iOS versions - use classic button styling
         [self.showAdvancedButton setTitle:@"Show Advanced Identifiers" forState:UIControlStateNormal];
@@ -4566,7 +4567,7 @@ else if ([identifierType isEqualToString:@"AppContainerUUID"])
             config.title = @"Show Advanced Identifiers";
             config.image = [UIImage systemImageNamed:@"chevron.down"];
         }
-        self.showAdvancedButton.configuration = config;
+        [self.showAdvancedButton safeSetConfiguration:config];
     } else {
         // Update for older iOS versions
         if (self.showAdvancedIdentifiers) {
