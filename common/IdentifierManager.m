@@ -1978,6 +1978,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
                                   userInfo:@{NSLocalizedDescriptionKey: @"Failed to save global scoped apps"}];
         return;
     }
+}
     
 
 
