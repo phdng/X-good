@@ -120,7 +120,6 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 %group Identifiers
 
 // MGCopyAnswer hook for various system identifiers
-%hookf(NSString *, MGCopyAnswer, CFStringRef property) {
 %hookf(CFTypeRef, MGCopyAnswer, CFStringRef property) {
     if (!%c(IdentifierManager)) {
         return %orig;
