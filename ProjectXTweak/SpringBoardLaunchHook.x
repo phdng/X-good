@@ -1,4 +1,5 @@
 #import "UIKit/UIKit.h"
+#import <objc/runtime.h>
 // #import "include/ellekit/ellekit.h" // Removed for rootful - using Substrate
 #include <dlfcn.h>
 
