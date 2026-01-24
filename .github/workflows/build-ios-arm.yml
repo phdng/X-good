@@ -41,36 +41,6 @@ jobs:
           echo "SDKVERSION=$SDK_VERSION" >> "$GITHUB_ENV"
           echo "TARGET=iphone:clang:$SDK_VERSION:15.0" >> "$GITHUB_ENV"
 
-      - name: Install AltList headers and framework
-        run: |
-          TMP_DIR="$(mktemp -d)"
-          git clone --depth=1 https://github.com/opa334/AltList.git "$TMP_DIR/AltList"
-          ALT_DIR="$TMP_DIR/AltList"
-          HEADER_PATH="$(find "$ALT_DIR" -name ATLApplicationListMultiSelectionController.h -print -quit)"
-          if [[ -n "$HEADER_PATH" ]]; then
-            HEADER_DIR="$(dirname "$HEADER_PATH")"
-            mkdir -p "$THEOS/include/AltList"
-            cp -R "$HEADER_DIR/"* "$THEOS/include/AltList/"
-          else
-            echo "AltList headers not found" >&2
-            exit 1
-          fi
-          DEB_URL="https://github.com/opa334/AltList/releases/latest/download/AltList.deb"
-          curl -fsSL "$DEB_URL" -o "$TMP_DIR/AltList.deb"
-          dpkg-deb -x "$TMP_DIR/AltList.deb" "$TMP_DIR/altlist_extract"
-          FRAMEWORK_PATH="$(find "$TMP_DIR/altlist_extract" -name AltList.framework -print -quit)"
-          if [[ -n "$FRAMEWORK_PATH" ]]; then
-            mkdir -p "$THEOS/lib"
-            cp -R "$FRAMEWORK_PATH" "$THEOS/lib/"
-            if [[ -d "$FRAMEWORK_PATH/Headers" ]]; then
-              mkdir -p "$THEOS/include/AltList"
-              cp -R "$FRAMEWORK_PATH/Headers/"* "$THEOS/include/AltList/"
-            fi
-          else
-            echo "AltList.framework not found in release .deb" >&2
-            exit 1
-          fi
-
       - name: Ensure dm.pl is available
         run: |
           if ! command -v dm.pl >/dev/null; then
