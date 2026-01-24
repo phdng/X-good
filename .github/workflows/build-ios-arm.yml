@@ -61,10 +61,16 @@ jobs:
           echo "=== Checking dylib for constructor symbols ==="
           DYLIB_PATH=".theos/obj/arm64/ProjectXTweak.dylib"
           if [ -f "$DYLIB_PATH" ]; then
+            echo "--- File size ---"
+            ls -la "$DYLIB_PATH"
             echo "--- otool -l (looking for __mod_init_func) ---"
             otool -l "$DYLIB_PATH" | grep -A10 "__mod_init_func" || echo "NO __mod_init_func section found!"
-            echo "--- nm (looking for constructors) ---"
-            nm "$DYLIB_PATH" 2>/dev/null | grep -i "ctor\|init\|AAA" | head -20 || echo "nm failed or no matches"
+            echo "--- nm all symbols containing AAA or ctor ---"
+            nm "$DYLIB_PATH" 2>/dev/null | grep -iE "AAA|_ctor|TestCtor" || echo "No AAA/ctor symbols found"
+            echo "--- nm showing first 50 local symbols ---"
+            nm "$DYLIB_PATH" 2>/dev/null | head -50
+            echo "--- Check if .m file was compiled ---"
+            ls -la ../ProjectXTweak/AAA_TestCtor.* 2>/dev/null || echo "Test file not found"
             echo "--- strings (looking for test constructor) ---"
             strings "$DYLIB_PATH" | grep -i "AAA_TestCtor\|weaponx_ctor" | head -10
           else
