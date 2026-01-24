@@ -67,18 +67,27 @@
     [self.view addSubview:buttonStack];
     
     // Create stylish buttons with icons using UIButtonConfiguration (iOS 15+)
-    UIButtonConfiguration *backupConfig = [UIButtonConfiguration filledButtonConfiguration];
-    backupConfig.title = @"Backup App Data";
-    backupConfig.image = [UIImage systemImageNamed:@"arrow.down.doc.fill"];
-    backupConfig.imagePlacement = NSDirectionalRectEdgeLeading;
-    backupConfig.imagePadding = 8;
-    backupConfig.contentInsets = NSDirectionalEdgeInsetsMake(12, 20, 12, 20);
-    backupConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    backupConfig.baseBackgroundColor = [UIColor clearColor];
-    backupConfig.baseForegroundColor = [UIColor systemBlueColor];
-    
-    UIButton *backupButton = [UIButton buttonWithConfiguration:backupConfig primaryAction:nil];
-    backupButton.tintColor = [UIColor systemBlueColor];
+    UIButton *backupButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *backupConfig = [UIButtonConfiguration filledButtonConfiguration];
+        backupConfig.title = @"Backup App Data";
+        backupConfig.image = [UIImage systemImageNamed:@"arrow.down.doc.fill"];
+        backupConfig.imagePlacement = NSDirectionalRectEdgeLeading;
+        backupConfig.imagePadding = 8;
+        backupConfig.contentInsets = NSDirectionalEdgeInsetsMake(12, 20, 12, 20);
+        backupConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        backupConfig.baseBackgroundColor = [UIColor clearColor];
+        backupConfig.baseForegroundColor = [UIColor systemBlueColor];
+        backupButton.configuration = backupConfig;
+    } else {
+        [backupButton setTitle:@"Backup App Data" forState:UIControlStateNormal];
+        [backupButton setImage:[UIImage systemImageNamed:@"arrow.down.doc.fill"] forState:UIControlStateNormal];
+        backupButton.tintColor = [UIColor systemBlueColor];
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        backupButton.contentEdgeInsets = UIEdgeInsetsMake(12, 20, 12, 20);
+        #pragma clang diagnostic pop
+    }
     
     // Add rounded corners and border
     backupButton.layer.cornerRadius = 10;
@@ -89,18 +98,27 @@
     [buttonStack addArrangedSubview:backupButton];
     
     // Create restore button with UIButtonConfiguration (iOS 15+)
-    UIButtonConfiguration *restoreConfig = [UIButtonConfiguration filledButtonConfiguration];
-    restoreConfig.title = @"Restore App Data";
-    restoreConfig.image = [UIImage systemImageNamed:@"arrow.up.doc.fill"];
-    restoreConfig.imagePlacement = NSDirectionalRectEdgeLeading;
-    restoreConfig.imagePadding = 8;
-    restoreConfig.contentInsets = NSDirectionalEdgeInsetsMake(12, 20, 12, 20);
-    restoreConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    restoreConfig.baseBackgroundColor = [UIColor clearColor];
-    restoreConfig.baseForegroundColor = [UIColor systemGreenColor];
-    
-    UIButton *restoreButton = [UIButton buttonWithConfiguration:restoreConfig primaryAction:nil];
-    restoreButton.tintColor = [UIColor systemGreenColor];
+    UIButton *restoreButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *restoreConfig = [UIButtonConfiguration filledButtonConfiguration];
+        restoreConfig.title = @"Restore App Data";
+        restoreConfig.image = [UIImage systemImageNamed:@"arrow.up.doc.fill"];
+        restoreConfig.imagePlacement = NSDirectionalRectEdgeLeading;
+        restoreConfig.imagePadding = 8;
+        restoreConfig.contentInsets = NSDirectionalEdgeInsetsMake(12, 20, 12, 20);
+        restoreConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        restoreConfig.baseBackgroundColor = [UIColor clearColor];
+        restoreConfig.baseForegroundColor = [UIColor systemGreenColor];
+        restoreButton.configuration = restoreConfig;
+    } else {
+        [restoreButton setTitle:@"Restore App Data" forState:UIControlStateNormal];
+        [restoreButton setImage:[UIImage systemImageNamed:@"arrow.up.doc.fill"] forState:UIControlStateNormal];
+        restoreButton.tintColor = [UIColor systemGreenColor];
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        restoreButton.contentEdgeInsets = UIEdgeInsetsMake(12, 20, 12, 20);
+        #pragma clang diagnostic pop
+    }
     
     // Add rounded corners and border
     restoreButton.layer.cornerRadius = 10;

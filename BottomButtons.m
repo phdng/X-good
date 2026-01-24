@@ -225,13 +225,19 @@
     
     // Create kill button with soft minimalistic style
     UIButton *killButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    UIButtonConfiguration *killConfig = [UIButtonConfiguration plainButtonConfiguration];
-    killConfig.title = @"Kill Enabled Apps";
-    killConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    killConfig.background.backgroundColor = [UIColor.systemRedColor colorWithAlphaComponent:0.15];
-    killConfig.baseForegroundColor = [UIColor systemRedColor];
-    killConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
-    killButton.configuration = killConfig;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *killConfig = [UIButtonConfiguration plainButtonConfiguration];
+        killConfig.title = @"Kill Enabled Apps";
+        killConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        killConfig.background.backgroundColor = [UIColor.systemRedColor colorWithAlphaComponent:0.15];
+        killConfig.baseForegroundColor = [UIColor systemRedColor];
+        killConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
+        killButton.configuration = killConfig;
+    } else {
+        [killButton setTitle:@"Kill Enabled Apps" forState:UIControlStateNormal];
+        killButton.tintColor = [UIColor systemRedColor];
+        killButton.backgroundColor = [UIColor.systemRedColor colorWithAlphaComponent:0.15];
+    }
     [killButton addTarget:self action:@selector(killEnabledApps) forControlEvents:UIControlEventTouchUpInside];
     killButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     killButton.layer.cornerRadius = 10;
@@ -239,13 +245,19 @@
     
     // Create respring button with soft minimalistic style
     UIButton *applyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    UIButtonConfiguration *applyConfig = [UIButtonConfiguration plainButtonConfiguration];
-    applyConfig.title = @"Respring";
-    applyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    applyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
-    applyConfig.baseForegroundColor = [UIColor systemBlueColor];
-    applyConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
-    applyButton.configuration = applyConfig;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *applyConfig = [UIButtonConfiguration plainButtonConfiguration];
+        applyConfig.title = @"Respring";
+        applyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        applyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
+        applyConfig.baseForegroundColor = [UIColor systemBlueColor];
+        applyConfig.contentInsets = NSDirectionalEdgeInsetsMake(6, 8, 6, 8);
+        applyButton.configuration = applyConfig;
+    } else {
+        [applyButton setTitle:@"Respring" forState:UIControlStateNormal];
+        applyButton.tintColor = [UIColor systemBlueColor];
+        applyButton.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
+    }
     [applyButton addTarget:self action:@selector(applyChangesAndRespring) forControlEvents:UIControlEventTouchUpInside];
     applyButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     applyButton.layer.cornerRadius = 10;

@@ -1636,13 +1636,21 @@
     
     // Create copy button with enhanced style
     UIButton *copyButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    UIButtonConfiguration *copyConfig = [UIButtonConfiguration plainButtonConfiguration];
-    copyConfig.image = [UIImage systemImageNamed:@"doc.on.doc"];
-    copyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    copyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
-    copyConfig.baseForegroundColor = [UIColor systemBlueColor];
-    copyConfig.contentInsets = NSDirectionalEdgeInsetsMake(8, 8, 8, 8);
-    copyButton.configuration = copyConfig;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *copyConfig = [UIButtonConfiguration plainButtonConfiguration];
+        copyConfig.image = [UIImage systemImageNamed:@"doc.on.doc"];
+        copyConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        copyConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
+        copyConfig.baseForegroundColor = [UIColor systemBlueColor];
+        copyConfig.contentInsets = NSDirectionalEdgeInsetsMake(8, 8, 8, 8);
+        copyButton.configuration = copyConfig;
+    } else {
+        [copyButton setImage:[UIImage systemImageNamed:@"doc.on.doc"] forState:UIControlStateNormal];
+        copyButton.tintColor = [UIColor systemBlueColor];
+        copyButton.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
+        copyButton.layer.cornerRadius = 8;
+        copyButton.clipsToBounds = YES;
+    }
     
     copyButton.tag = [self tagForIdentifierType:type];
     copyButton.accessibilityValue = currentValue;
@@ -1673,17 +1681,24 @@
     
     // Create generate button with minimalistic style
     UIButton *generateButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    UIButtonConfiguration *generateConfig = [UIButtonConfiguration plainButtonConfiguration];
-    generateConfig.image = [UIImage systemImageNamed:@"arrow.clockwise"];
-    generateConfig.title = @"Generate";
-    generateConfig.imagePlacement = NSDirectionalRectEdgeLeading;
-    generateConfig.imagePadding = 4;
-    generateConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    generateConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
-    generateConfig.baseForegroundColor = [UIColor systemBlueColor];
-    generateConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 6, 4, 6);
-    generateButton.configuration = generateConfig;
-    generateButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *generateConfig = [UIButtonConfiguration plainButtonConfiguration];
+        generateConfig.image = [UIImage systemImageNamed:@"arrow.clockwise"];
+        generateConfig.title = @"Generate";
+        generateConfig.imagePlacement = NSDirectionalRectEdgeLeading;
+        generateConfig.imagePadding = 4;
+        generateConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        generateConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
+        generateConfig.baseForegroundColor = [UIColor systemBlueColor];
+        generateConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 6, 4, 6);
+        generateButton.configuration = generateConfig;
+    } else {
+        [generateButton setTitle:@"Generate" forState:UIControlStateNormal];
+        [generateButton setImage:[UIImage systemImageNamed:@"arrow.clockwise"] forState:UIControlStateNormal];
+        generateButton.tintColor = [UIColor systemBlueColor];
+        generateButton.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
+        generateButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    }
     generateButton.layer.cornerRadius = 10;
     generateButton.clipsToBounds = YES;
     
@@ -1765,16 +1780,22 @@
     
     // Add App button
     UIButton *addButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    UIButtonConfiguration *addButtonConfig = [UIButtonConfiguration plainButtonConfiguration];
-    addButtonConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 6, 4, 6);
-    addButtonConfig.title = @"Add App";
-    addButtonConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-    addButtonConfig.background.backgroundColor = [UIColor.systemGreenColor colorWithAlphaComponent:0.15];
-    addButtonConfig.baseForegroundColor = [UIColor systemGreenColor];
-    addButton.configuration = addButtonConfig;
+    if (@available(iOS 15.0, *)) {
+        UIButtonConfiguration *addButtonConfig = [UIButtonConfiguration plainButtonConfiguration];
+        addButtonConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 6, 4, 6);
+        addButtonConfig.title = @"Add App";
+        addButtonConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        addButtonConfig.background.backgroundColor = [UIColor.systemGreenColor colorWithAlphaComponent:0.15];
+        addButtonConfig.baseForegroundColor = [UIColor systemGreenColor];
+        addButton.configuration = addButtonConfig;
+    } else {
+        [addButton setTitle:@"Add App" forState:UIControlStateNormal];
+        addButton.tintColor = [UIColor systemGreenColor];
+        addButton.backgroundColor = [UIColor.systemGreenColor colorWithAlphaComponent:0.15];
+        addButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
+    }
     addButton.layer.cornerRadius = 10;
     addButton.clipsToBounds = YES;
-    addButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
     [addButton addTarget:self action:@selector(showInstalledAppsPopup:) forControlEvents:UIControlEventTouchUpInside];
     [addButton setContentHuggingPriority:UILayoutPriorityRequired forAxis:UILayoutConstraintAxisHorizontal];
     [buttonsStack addArrangedSubview:addButton];
@@ -4444,16 +4465,17 @@ else if ([identifierType isEqualToString:@"AppContainerUUID"])
         config.contentInsets = NSDirectionalEdgeInsetsMake(8, 16, 8, 16);
         self.showAdvancedButton.configuration = config;
     } else {
-        // Fallback for older iOS versions - create a tinted button without using deprecated properties
-        UIButtonConfiguration *config = [UIButtonConfiguration plainButtonConfiguration];
-        config.title = @"Show Advanced Identifiers";
-        config.background.backgroundColor = [UIColor systemBlueColor];
-        config.baseForegroundColor = [UIColor whiteColor];
-        config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-        
-        // Set content insets equivalent to UIEdgeInsetsMake(8, 16, 8, 16)
-        config.contentInsets = NSDirectionalEdgeInsetsMake(8, 16, 8, 16);
-        self.showAdvancedButton.configuration = config;
+        // Fallback for older iOS versions - use classic button styling
+        [self.showAdvancedButton setTitle:@"Show Advanced Identifiers" forState:UIControlStateNormal];
+        self.showAdvancedButton.backgroundColor = [UIColor systemBlueColor];
+        [self.showAdvancedButton setTitleColor:[UIColor whiteColor] forState:UIControlStateNormal];
+        self.showAdvancedButton.titleLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightMedium];
+        self.showAdvancedButton.layer.cornerRadius = 10;
+        self.showAdvancedButton.clipsToBounds = YES;
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        self.showAdvancedButton.contentEdgeInsets = UIEdgeInsetsMake(8, 16, 8, 16);
+        #pragma clang diagnostic pop
         
         // Add chevron icon manually for older iOS
         UIImageView *chevronIcon = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"chevron.down"]];
