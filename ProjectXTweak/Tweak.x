@@ -121,6 +121,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
 // MGCopyAnswer hook for various system identifiers
 %hookf(NSString *, MGCopyAnswer, CFStringRef property) {
+%hookf(CFTypeRef, MGCopyAnswer, CFStringRef property) {
     if (!%c(IdentifierManager)) {
         return %orig;
     }
@@ -132,7 +133,8 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     PXLog(@"MGCopyAnswer requested for property: %@ by app: %@", propertyString, currentBundleID);
     
     if (![manager isApplicationEnabled:currentBundleID]) {
-        PXLog(@"App not in scope or disabled, passing through original value");
+        // Only log verbose if needed to avoid spam
+        // PXLog(@"App not in scope or disabled, passing through original value");
         return %orig;
     }
     
@@ -144,7 +146,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             NSString *spoofedUDID = [manager currentValueForIdentifier:@"UDID"];
             if (spoofedUDID) {
                 PXLog(@"Spoofing UDID with: %@", spoofedUDID);
-                return spoofedUDID;
+                return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)spoofedUDID);
             }
         }
     } 
@@ -154,14 +156,14 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             [currentBundleID isEqualToString:@"com.tigisoftware.ADManager"]) {
             NSString *hardcodedSerial = @"FCCC15Q4HG04";
             PXLog(@"[WeaponX] 📱 Returning hardcoded serial number for %@: %@", currentBundleID, hardcodedSerial);
-            return hardcodedSerial;
+            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)hardcodedSerial);
         }
         
         if ([manager isIdentifierEnabled:@"SerialNumber"]) {
             NSString *spoofedSerial = [manager currentValueForIdentifier:@"SerialNumber"];
             if (spoofedSerial) {
                 PXLog(@"Spoofing Serial Number with: %@", spoofedSerial);
-                return spoofedSerial;
+                return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)spoofedSerial);
             }
         }
     }
@@ -172,7 +174,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             NSString *spoofedIMEI = [manager currentValueForIdentifier:@"IMEI"];
             if (spoofedIMEI) {
                 PXLog(@"Spoofing IMEI with: %@", spoofedIMEI);
-                return spoofedIMEI;
+                return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)spoofedIMEI);
             }
         }
     }
