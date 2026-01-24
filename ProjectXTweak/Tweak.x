@@ -54,24 +54,71 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             strcmp(name, "kern.hostname") == 0 ||
             strcmp(name, "hw.product") == 0) {
             
-            PXLog(@"Intercepted sysctlbyname call for: %s", name);
+            PXLog(@"[WeaponX] 🎯 sysctlbyname called for: %s", name);
             
-            // Allow the original call to execute
-            int result = sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-            
-            // Check if we should modify the result
+            // Check if we should spoof the result
             IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
             NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
             
-            if ([manager isApplicationEnabled:currentBundleID]) {
-                // We'd modify the device identifier here if needed
-                // For demonstration, just logging the interception
-                if (oldp && oldlenp && *oldlenp > 0) {
-                    PXLog(@"sysctlbyname returned value for %s", name);
+            if (!currentBundleID || !manager || ![manager isApplicationEnabled:currentBundleID]) {
+                PXLog(@"[WeaponX] App %@ not enabled, passing through original value", currentBundleID ?: @"(null)");
+                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+            }
+            
+            // App is enabled - check if we should spoof this specific identifier
+            NSString *spoofedValue = nil;
+            
+            if (strcmp(name, "hw.machine") == 0) {
+                // hw.machine returns device model (e.g., "iPhone12,1")
+                if ([manager isIdentifierEnabled:@"DeviceModel"]) {
+                    spoofedValue = [manager currentValueForIdentifier:@"DeviceModel"];
+                    PXLog(@"[WeaponX] 🎯 Spoofing hw.machine with DeviceModel: %@", spoofedValue);
+                }
+            } 
+            else if (strcmp(name, "hw.model") == 0) {
+                // hw.model can also return model identifier
+                if ([manager isIdentifierEnabled:@"DeviceModel"]) {
+                    spoofedValue = [manager currentValueForIdentifier:@"DeviceModel"];
+                    PXLog(@"[WeaponX] 🎯 Spoofing hw.model with DeviceModel: %@", spoofedValue);
+                }
+            }
+            else if (strcmp(name, "kern.hostname") == 0) {
+                // kern.hostname returns device name
+                if ([manager isIdentifierEnabled:@"DeviceName"]) {
+                    spoofedValue = [manager currentValueForIdentifier:@"DeviceName"];
+                    PXLog(@"[WeaponX] 🎯 Spoofing kern.hostname with DeviceName: %@", spoofedValue);
+                }
+            }
+            else if (strcmp(name, "hw.product") == 0) {
+                // hw.product returns product name
+                if ([manager isIdentifierEnabled:@"DeviceModel"]) {
+                    spoofedValue = [manager currentValueForIdentifier:@"DeviceModel"];
+                    PXLog(@"[WeaponX] 🎯 Spoofing hw.product with DeviceModel: %@", spoofedValue);
                 }
             }
             
-            return result;
+            // If we have a spoofed value, substitute it
+            if (spoofedValue && oldp && oldlenp) {
+                const char *spoofedCString = [spoofedValue UTF8String];
+                size_t spoofedLen = strlen(spoofedCString) + 1; // +1 for null terminator
+                
+                if (*oldlenp >= spoofedLen) {
+                    // Copy spoofed value to output buffer
+                    memcpy(oldp, spoofedCString, spoofedLen);
+                    *oldlenp = spoofedLen;
+                    PXLog(@"[WeaponX] ✅ Successfully spoofed %s = %s", name, spoofedCString);
+                    return 0; // Success
+                } else {
+                    // Buffer too small - report required size
+                    *oldlenp = spoofedLen;
+                    PXLog(@"[WeaponX] ⚠️ Buffer too small for %s, required: %zu", name, spoofedLen);
+                    return -1; // ENOMEM
+                }
+            }
+            
+            // No spoofing requested - pass through to original
+            PXLog(@"[WeaponX] No spoofing for %s, passing through original", name);
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
         }
         
         // Jailbreak detection via sysctlbyname
@@ -2288,6 +2335,31 @@ static char* hook_GSSystemGetSerialNo(void) {
             }
         }
         dlclose(GSHandle);
+    }
+    
+    // Hook sysctlbyname for device identifier spoofing via sysctl
+    void *libcHandle = dlopen("/usr/lib/libc.dylib", RTLD_NOW);
+    if (!libcHandle) {
+        // Try alternative path
+        libcHandle = dlopen("/usr/lib/system/libsystem_c.dylib", RTLD_NOW);
+    }
+    if (libcHandle) {
+        void *sysctlbynamePtr = dlsym(libcHandle, "sysctlbyname");
+        if (sysctlbynamePtr) {
+            PXLog(@"[WeaponX] 🔧 Hooking sysctlbyname for device identifier spoofing");
+            if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
+                MSHookFunction(sysctlbynamePtr, (void *)sysctlbyname_hook, 
+                              (void **)&sysctlbyname_orig);
+                PXLog(@"[WeaponX] ✅ sysctlbyname hook registered successfully");
+            } else {
+                PXLog(@"[WeaponX] ❌ MSHookFunction not available, sysctlbyname hook skipped");
+            }
+        } else {
+            PXLog(@"[WeaponX] ⚠️ sysctlbyname symbol not found in libc");
+        }
+        dlclose(libcHandle);
+    } else {
+        PXLog(@"[WeaponX] ⚠️ Failed to open libc for sysctlbyname hooking");
     }
     
     // Initialize the location spoofing hooks
