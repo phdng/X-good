@@ -2066,6 +2066,17 @@ static char* hook_GSSystemGetSerialNo(void) {
 
 // Constructor
 %ctor {
+    // CRITICAL: Add simple NSLog to verify constructor runs
+    NSLog(@"[WeaponX-DEBUG] ========================================");
+    NSLog(@"[WeaponX-DEBUG] Constructor started in process: %@", [NSProcessInfo processInfo].processName);
+    NSLog(@"[WeaponX-DEBUG] ========================================");
+    
+    // VERIFICATION: Create a flag file to prove constructor ran
+    NSString *processName = [NSProcessInfo processInfo].processName;
+    NSString *flagPath = [NSString stringWithFormat:@"/tmp/weaponx_loaded_%@.txt", processName];
+    [@"Constructor executed!" writeToFile:flagPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    NSLog(@"[WeaponX-DEBUG] Created flag file: %@", flagPath);
+    
     // Add at beginning of ctor
     setupHookingEnvironment();
     
