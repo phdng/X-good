@@ -3,6 +3,7 @@
 #import <UIKit/UIKit.h>
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
+#import <dlfcn.h>
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <netinet/in.h>
 #import <CoreTelephony/CTTelephonyNetworkInfo.h>

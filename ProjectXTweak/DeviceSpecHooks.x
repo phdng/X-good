@@ -13,6 +13,7 @@
 #import <mach/mach_host.h>
 #import <objc/runtime.h>
 #import <substrate.h>
+#import <dlfcn.h>
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 
 // Define the swap usage structure if it's not available
