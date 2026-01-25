@@ -180,21 +180,34 @@ static NSString* getSpoofedDeviceModel() {
     // Try multiple methods to get the model value, with better error handling
     NSString *deviceModel = nil;
     @try {
+        // METHOD 0: Use IdentifierManager as the single source of truth (keeps consistency with other hooks)
+        if (NSClassFromString(@"IdentifierManager")) {
+            IdentifierManager *manager = [NSClassFromString(@"IdentifierManager") sharedManager];
+            if (manager) {
+                NSString *m = [manager currentValueForIdentifier:@"DeviceModel"];
+                if (m.length > 0) {
+                    deviceModel = m;
+                }
+            }
+        }
+
         // METHOD 1: Try direct access from profile plist for highest reliability
         // First get current profile ID
-        NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
-        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-        
-        NSString *profileId = centralInfo[@"ProfileId"];
-        if (profileId) {
-            // Get the model value from settings.plist in the profile directory
-            NSString *settingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
-            NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:settingsPath];
-            deviceModel = settings[@"deviceModel"];
-            
-            if (deviceModel.length > 0) {
-                PXLog(@"[model] Found device model %@ directly in profile %@ settings", deviceModel, profileId);
+        if (!deviceModel.length) {
+            NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
+            NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
+            NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
+
+            NSString *profileId = centralInfo[@"ProfileId"];
+            if (profileId) {
+                // Get the model value from settings.plist in the profile directory
+                NSString *settingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
+                NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:settingsPath];
+                deviceModel = settings[@"deviceModel"];
+
+                if (deviceModel.length > 0) {
+                    PXLog(@"[model] Found device model %@ directly in profile %@ settings", deviceModel, profileId);
+                }
             }
         }
         
@@ -993,12 +1006,8 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
             PXLog(@"[model] ERROR hooking uname(): %@", e);
         }
         
-        @try {
-            MSHookFunction(sysctlbyname, hook_sysctlbyname, (void **)&orig_sysctlbyname);
-            PXLog(@"[model] Hooked sysctlbyname() successfully");
-        } @catch (NSException *e) {
-            PXLog(@"[model] ERROR hooking sysctlbyname(): %@", e);
-        }
+        // NOTE: sysctlbyname is hooked in ProjectXTweak/Tweak.x (and DeviceSpecHooks.x).
+        // Hooking it here too makes the final returned value depend on hook ordering.
         
         @try {
             void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
