@@ -2031,5 +2031,22 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
         }
     }
     
+    // Log any unhandled successful sysctl queries for debugging
+    if (result == 0 && isSpoofingEnabled()) {
+        static NSMutableSet *loggedIgnoredKeys = nil;
+        static dispatch_once_t onceToken;
+        dispatch_once(&onceToken, ^{
+            loggedIgnoredKeys = [NSMutableSet set];
+        });
+        
+        @synchronized(loggedIgnoredKeys) {
+            NSString *keyStr = [NSString stringWithUTF8String:name];
+            if (![loggedIgnoredKeys containsObject:keyStr]) {
+                [loggedIgnoredKeys addObject:keyStr];
+                PXLog(@"[DeviceSpec DEBUG] Unhandled sysctl query: %s", name);
+            }
+        }
+    }
+
     return result;
 } 
