@@ -74,6 +74,7 @@ static void getConsistentMemoryStats(unsigned long long totalMemory,
                                     unsigned long long *inactiveMemory);
 static kern_return_t hook_host_statistics64(host_t host, host_flavor_t flavor, host_info64_t info, mach_msg_type_number_t *count);
 static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+static NXArchInfo* hook_nx_get_local_arch_info();
 static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo);
 static CGSize parseResolution(NSString *resolutionString);
 
