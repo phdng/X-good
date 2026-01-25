@@ -102,6 +102,44 @@ static BOOL isDeviceModelSpoofingEnabled() {
                     }
                 }
             }
+                }
+            }
+        }
+        
+        // METHOD 3: Fallback check - if we have a valid spoofed model available via legacy means (or any means),
+        // we should probably enable spoofing to match old behavior where existence of data implied enablement.
+        // This is critical for users migrating who haven't set up new profiles yet.
+        if (!shouldSpoof) {
+            // Check if we can get a model. Note: usage of getSpoofedDeviceModel() here might be expensive
+            // but we cache the "isEnabled" decision so it only happens once per 5 mins.
+            // We can't call getSpoofedDeviceModel() directly easily here because it's defined later.
+            // But we can check the Legacy CFPreference directly as a quick check.
+            
+            CFStringRef appID = CFSTR("com.projectx.phoneinfo");
+            CFStringRef key = CFSTR("PhoneInfo");
+            CFPropertyListRef value = CFPreferencesCopyValue(key, appID, kCFPreferencesAnyUser, kCFPreferencesAnyHost);
+            if (value) {
+                if (CFGetTypeID(value) == CFDictionaryGetTypeID()) {
+                    NSDictionary *dict = (__bridge NSDictionary *)value;
+                    if (dict[@"deviceModel"] && dict[@"deviceModel"][@"modelName"]) {
+                        shouldSpoof = YES;
+                    }
+                }
+                CFRelease(value);
+            }
+            
+            if (!shouldSpoof) {
+                 value = CFPreferencesCopyValue(key, appID, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+                 if (value) {
+                    if (CFGetTypeID(value) == CFDictionaryGetTypeID()) {
+                        NSDictionary *dict = (__bridge NSDictionary *)value;
+                         if (dict[@"deviceModel"] && dict[@"deviceModel"][@"modelName"]) {
+                            shouldSpoof = YES;
+                        }
+                    }
+                    CFRelease(value);
+                 }
+            }
         }
     } @catch (NSException *exception) {
         PXLog(@"[model] Exception checking if device model spoofing is enabled: %@", exception);
