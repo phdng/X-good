@@ -379,16 +379,35 @@ static NSDictionary *getDeviceSpecs() {
             NSDictionary *deviceModelDict = [NSDictionary dictionaryWithContentsOfFile:deviceModelPath];
             
             if (deviceModelDict && deviceModelDict.count > 0) {
-                // We have the full specs in the plist, use them directly
+                // We have specs in the plist; ensure board/hw identifiers exist for consistency
+                NSMutableDictionary *specsToUse = [deviceModelDict mutableCopy];
+                NSString *modelValue = specsToUse[@"value"];
+                if (modelValue.length > 0) {
+                    if (!specsToUse[@"boardID"] || ![specsToUse[@"boardID"] isKindOfClass:[NSString class]] || [specsToUse[@"boardID"] length] == 0) {
+                        DeviceModelManager *deviceManager = [NSClassFromString(@"DeviceModelManager") sharedManager];
+                        NSString *boardID = [deviceManager boardIDForModel:modelValue];
+                        if (boardID.length > 0 && ![boardID isEqualToString:@"Unknown"]) {
+                            specsToUse[@"boardID"] = boardID;
+                        }
+                    }
+                    if (!specsToUse[@"hwModel"] || ![specsToUse[@"hwModel"] isKindOfClass:[NSString class]] || [specsToUse[@"hwModel"] length] == 0) {
+                        DeviceModelManager *deviceManager = [NSClassFromString(@"DeviceModelManager") sharedManager];
+                        NSString *hwModel = [deviceManager hwModelForModel:modelValue];
+                        if (hwModel.length > 0 && ![hwModel isEqualToString:@"Unknown"]) {
+                            specsToUse[@"hwModel"] = hwModel;
+                        }
+                    }
+                }
+
                 PXLog(@"[DeviceSpec] Loaded device specs from device_model.plist");
-                
+
                 // Cache the specifications
                 @synchronized(deviceSpecsCache) {
-                    deviceSpecsCache[@"specs"] = deviceModelDict;
+                    deviceSpecsCache[@"specs"] = specsToUse;
                     cacheTimestamp = [NSDate date];
                 }
-                
-                return deviceModelDict;
+
+                return specsToUse;
             }
             
             // Fallback to device_ids.plist and reconstruct specs
@@ -410,6 +429,16 @@ static NSDictionary *getDeviceSpecs() {
                 specs[@"cpuCoreCount"] = deviceIds[@"CPUCoreCount"] ?: @(0);
                 specs[@"metalFeatureSet"] = deviceIds[@"MetalFeatureSet"] ?: @"Unknown";
                 
+                // Add board/hardware identifiers (used by apps like AIDA)
+                if (deviceIds[@"BoardID"]) {
+                    specs[@"boardID"] = deviceIds[@"BoardID"];
+                }
+                if (deviceIds[@"HwModel"]) {
+                    specs[@"hwModel"] = deviceIds[@"HwModel"];
+                } else if (deviceIds[@"BoardID"]) {
+                    specs[@"hwModel"] = deviceIds[@"BoardID"]; // Best-effort fallback
+                }
+
                 // Reconstruct webGLInfo
                 NSMutableDictionary *webGLInfo = [NSMutableDictionary dictionary];
                 webGLInfo[@"webglVendor"] = deviceIds[@"WebGLVendor"] ?: @"Apple";
@@ -1785,7 +1814,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             }
         }
     }
-    else if (strcmp(name, "hw.cpu.brand_string") == 0 || strcmp(name, "machdep.cpu.brand_string") == 0 || strcmp(name, "hw.cpubrand") == 0 || strcmp(name, "hw.model") == 0) {
+    else if (strcmp(name, "hw.cpu.brand_string") == 0 || strcmp(name, "machdep.cpu.brand_string") == 0 || strcmp(name, "hw.cpubrand") == 0) {
         // CPU Brand/Model Name - return the processor name like "Apple A11 Bionic"
         if (cpuArchitecture && cpuArchitecture.length > 0) {
             const char *cpuBrand = [cpuArchitecture UTF8String];
@@ -1803,6 +1832,33 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
                     }
                 } else {
                     PXLog(@"[DeviceSpec] WARNING: CPU brand string too long for buffer");
+                }
+            }
+        }
+    }
+    else if (strcmp(name, "hw.model") == 0) {
+        // Hardware model / board-id style string (e.g. N71AP / D431AP)
+        NSString *hwModel = specs[@"hwModel"];
+        if (!hwModel.length) {
+            hwModel = specs[@"boardID"];
+        }
+
+        if (hwModel.length > 0) {
+            const char *hwModelStr = [hwModel UTF8String];
+            if (hwModelStr && *oldlenp > 0) {
+                size_t hwModelLen = strlen(hwModelStr);
+                if (hwModelLen < *oldlenp) {
+                    *oldlenp = hwModelLen + 1;
+                    memset(oldp, 0, *oldlenp);
+                    strcpy((char *)oldp, hwModelStr);
+
+                    static BOOL loggedHWModel = NO;
+                    if (!loggedHWModel) {
+                        PXLog(@"[DeviceSpec] Spoofed hw.model to '%s'", hwModelStr);
+                        loggedHWModel = YES;
+                    }
+                } else {
+                    PXLog(@"[DeviceSpec] WARNING: hw.model string too long for buffer");
                 }
             }
         }
