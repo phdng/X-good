@@ -1976,7 +1976,7 @@ static void antiDetectionCallback(void) {
 // Hook IOKit's IORegistryEntryCreateCFProperty for serial number
 static CFTypeRef (*orig_IORegistryEntryCreateCFProperty)(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options);
 
-CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
+static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
     // Null checks to prevent crashes
     if (!entry || !key) {
         return NULL;
