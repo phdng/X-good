@@ -56,6 +56,30 @@ jobs:
           make clean
           make package ARCHS="$ARCHS" SDKVERSION="$SDKVERSION" TARGET="$TARGET"
 
+      - name: Build and check standalone test tweak
+        run: |
+          echo "=== Building standalone TestCtorTweak ==="
+          cd TestCtorTweak
+          make clean
+          make ARCHS="$ARCHS" SDKVERSION="$SDKVERSION" TARGET="$TARGET"
+          echo "=== Checking TestCtorTweak dylib ==="
+          TEST_DYLIB=".theos/obj/debug/arm64/TestCtorTweak.dylib"
+          if [ ! -f "$TEST_DYLIB" ]; then
+            TEST_DYLIB=".theos/obj/arm64/TestCtorTweak.dylib"
+          fi
+          if [ -f "$TEST_DYLIB" ]; then
+            echo "--- File size ---"
+            ls -la "$TEST_DYLIB"
+            echo "--- otool -l (looking for __mod_init_func) ---"
+            otool -l "$TEST_DYLIB" | grep -A10 "__mod_init_func" || echo "NO __mod_init_func section found!"
+            echo "--- nm (looking for ctor) ---"
+            nm "$TEST_DYLIB" 2>/dev/null | grep -i "ctor\|init" | head -10
+          else
+            echo "TestCtorTweak.dylib not found!"
+            find . -name "*.dylib" 2>/dev/null
+          fi
+          cd ..
+
       - name: Debug - Check dylib constructors
         run: |
           echo "=== Checking dylib for constructor symbols ==="
