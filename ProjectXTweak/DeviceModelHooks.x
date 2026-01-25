@@ -513,6 +513,100 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
     return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
 }
 
+// Hook for sysctl (array-based) - critical for older apps/low-level checks
+static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    if (!orig_sysctl) {
+        // Try to load if not already loaded (should happen in ctor but safety first)
+        void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
+        if (sysctlPtr) {
+            orig_sysctl = (int (*)(int *, u_int, void *, size_t *, void *, size_t))sysctlPtr;
+        } else {
+            return -1; // Can't call original
+        }
+    }
+    
+    // Safety check
+    if (!name) return -1;
+    
+    // Get the bundle ID first to determine if we should spoof
+    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    if (!bundleID) {
+        return orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen);
+    }
+    
+    // Safety: if caller passes NULL out pointers, don't interfere
+    if (!oldp || !oldlenp) {
+        return orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen);
+    }
+    
+    // Check if this is a hardware model query: CTL_HW (6) + HW_MACHINE (1) or HW_MODEL (2)
+    BOOL isHWMachine = (namelen >= 2 && name[0] == 6 /*CTL_HW*/ && name[1] == 1 /*HW_MACHINE*/);
+    BOOL isHWModel = (namelen >= 2 && name[0] == 6 /*CTL_HW*/ && name[1] == 2 /*HW_MODEL*/);
+    BOOL isModelQuery = isHWMachine || isHWModel;
+    
+    // Store original value for logging if needed
+    char originalValue[256] = "<not available>";
+    
+    if (isModelQuery && oldp && oldlenp && *oldlenp > 0) {
+        // Make a copy of oldp and oldlenp to get original value
+        void *origBuf = malloc(*oldlenp);
+        if (origBuf) {
+            size_t origLen = *oldlenp;
+            int origResult = orig_sysctl(name, namelen, origBuf, &origLen, NULL, 0);
+            if (origResult == 0) {
+                strlcpy(originalValue, origBuf, sizeof(originalValue));
+            }
+            free(origBuf);
+        }
+    }
+    
+    // Call original function
+    int ret = orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen);
+    
+    // If it failed or not a query we care about, return
+    if (ret != 0 || !isModelQuery) {
+        return ret;
+    }
+    
+    // Spoof if enabled
+    if (isDeviceModelSpoofingEnabled()) {
+        if (oldp && oldlenp && *oldlenp > 0) {
+            NSString *spoofedValue = nil;
+            
+            if (isHWMachine) {
+                spoofedValue = getSpoofedDeviceModel();
+            } else if (isHWModel) {
+                spoofedValue = getSpoofedHWModel();
+            }
+            
+            if (spoofedValue.length > 0) {
+                const char *valueToUse = [spoofedValue UTF8String];
+                if (valueToUse) {
+                    size_t valueLen = strlen(valueToUse);
+                    
+                    if (valueLen < *oldlenp) {
+                        memset(oldp, 0, *oldlenp);
+                        strcpy(oldp, valueToUse);
+                        PXLog(@"[model] Spoofed sysctl CTL_HW %@ from %s to: %s for app: %@", 
+                             isHWMachine ? @"hw.machine" : @"hw.model", originalValue, valueToUse, bundleID);
+                    } else {
+                        PXLog(@"[model] WARNING: Spoofed value too long for sysctl buffer");
+                    }
+                }
+            } else {
+                PXLog(@"[model] WARNING: Failed to get spoofed value for %@", 
+                     isHWMachine ? @"hw.machine" : @"hw.model");
+            }
+        }
+    } else {
+        // Log access
+        PXLog(@"[model] App %@ checked sysctl CTL_HW %@: %s", 
+              bundleID, isHWMachine ? @"hw.machine" : @"hw.model", originalValue);
+    }
+    
+    return ret;
+}
+
 // Hook for IOKit device property - used by some apps to get detailed device info
 static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
     // Call original first to avoid unnecessary operations
@@ -1031,8 +1125,6 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
             PXLog(@"[model] ERROR hooking sysctlbyname(): %@", e);
         }
         
-        @try {
-            void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
             if (sysctlPtr) {
                 MSHookFunction(sysctlPtr, (void *)hook_sysctl, (void **)&orig_sysctl);
                 PXLog(@"[model] Hooked sysctl() successfully");
