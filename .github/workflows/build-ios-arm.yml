@@ -40,7 +40,7 @@ jobs:
           SDK_VERSION="${SDK_NAME#iPhoneOS}"
           SDK_VERSION="${SDK_VERSION%.sdk}"
           echo "SDKVERSION=$SDK_VERSION" >> "$GITHUB_ENV"
-          echo "TARGET=iphone:clang:$SDK_VERSION:15.0" >> "$GITHUB_ENV"
+          echo "TARGET=iphone:clang:$SDK_VERSION:12.0" >> "$GITHUB_ENV"
 
       - name: Ensure dm.pl is available
         run: |
