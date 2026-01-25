@@ -125,9 +125,23 @@ static id new_applicationWithBundleIdentifier(id self, SEL _cmd, NSString *ident
 
 // Hook FBApplicationProcess to prevent frozen apps from spawning
 static BOOL new_launchWithDelegate(id self, SEL _cmd, id delegate) {
-    NSString *bundleIdentifier = [self performSelector:@selector(bundleIdentifier)];
-    NSString *executablePath = [self performSelector:@selector(executablePath)];
-    NSString *appName = [executablePath lastPathComponent];
+    NSString *bundleIdentifier = nil;
+    if ([self respondsToSelector:@selector(bundleIdentifier)]) {
+        bundleIdentifier = [self performSelector:@selector(bundleIdentifier)];
+    }
+    
+    NSString *appName = nil;
+    if ([self respondsToSelector:@selector(executablePath)]) {
+        NSString *executablePath = [self performSelector:@selector(executablePath)];
+        appName = [executablePath lastPathComponent];
+    } else if ([self respondsToSelector:@selector(name)]) {
+        appName = [self performSelector:@selector(name)];
+    }
+    
+    // Nếu vẫn không có appName, dùng bundleIdentifier làm fallback để check
+    if (!appName && bundleIdentifier) {
+        appName = bundleIdentifier;
+    }
     
     if (shouldBlockAppLaunch(bundleIdentifier, appName)) {
         NSLog(@"[FreezeManager] Blocked process launch for frozen app: %@", bundleIdentifier);
