@@ -28,6 +28,8 @@
 #import <CoreMotion/CoreMotion.h> // Import CoreMotion framework for sensor spoofing
 #import "LocationSpoofingManager.h" // Import location spoofing manager
 #import "MobileGestalt.h"
+#import "IOSVersionInfo.h"
+#import <CoreFoundation/CoreFoundation.h>
 // Forward declarations for classes we need to hook
 @interface SBScreenshotManager : NSObject
 - (void)saveScreenshotsWithCompletion:(id)completion;
@@ -45,6 +47,74 @@ static NSMutableDictionary *valueCache;
 // Function pointer declarations for additional system functions
 static int (*sysctlbyname_orig)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 
+// CoreFoundation system version dictionary
+static CFDictionaryRef (*CFCopySystemVersionDictionary_orig)(void);
+
+static CFDictionaryRef CFCopySystemVersionDictionary_hook(void) {
+    CFDictionaryRef original = CFCopySystemVersionDictionary_orig ? CFCopySystemVersionDictionary_orig() : NULL;
+
+    @autoreleasepool {
+        @try {
+            if (!%c(IdentifierManager)) {
+                return original;
+            }
+
+            IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
+            NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+            if (!manager || !bundleID || ![manager isApplicationEnabled:bundleID] || ![manager isIdentifierEnabled:@"IOSVersion"]) {
+                return original;
+            }
+
+            NSString *identityDir = [manager profileIdentityPath];
+            NSDictionary *ver = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"ios_version.plist"]] : nil;
+            NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+
+            NSString *spoofedVersion = ver[@"version"] ?: current[@"version"];
+            NSString *spoofedBuild = ver[@"build"] ?: current[@"build"];
+
+            if (!spoofedVersion.length && !spoofedBuild.length) {
+                return original;
+            }
+
+            CFMutableDictionaryRef dict = NULL;
+            if (original) {
+                dict = CFDictionaryCreateMutableCopy(kCFAllocatorDefault, 0, original);
+            } else {
+                dict = CFDictionaryCreateMutable(kCFAllocatorDefault, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
+            }
+
+            if (!dict) {
+                return original;
+            }
+
+            if (spoofedVersion.length) {
+                CFStringRef v = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedVersion UTF8String], kCFStringEncodingUTF8);
+                if (v) {
+                    CFDictionarySetValue(dict, CFSTR("ProductVersion"), v);
+                    CFRelease(v);
+                }
+            }
+
+            if (spoofedBuild.length) {
+                CFStringRef b = CFStringCreateWithCString(kCFAllocatorDefault, [spoofedBuild UTF8String], kCFStringEncodingUTF8);
+                if (b) {
+                    CFDictionarySetValue(dict, CFSTR("ProductBuildVersion"), b);
+                    CFRelease(b);
+                }
+            }
+
+            if (original) {
+                CFRelease(original);
+            }
+
+            PXLog(@"[WeaponX] 🎯 Spoofed CFCopySystemVersionDictionary for %@ (build=%@)", bundleID, spoofedBuild ?: @"<nil>");
+            return dict;
+        } @catch (NSException *e) {
+            return original;
+        }
+    }
+}
+
 // Implementation for sysctl hook - commonly used to get device identifiers and detect jailbreak
 static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     // Log and potentially modify certain sysctl calls
@@ -53,7 +123,10 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         if (strcmp(name, "hw.machine") == 0 || 
             strcmp(name, "hw.model") == 0 || 
             strcmp(name, "kern.hostname") == 0 ||
-            strcmp(name, "hw.product") == 0) {
+            strcmp(name, "hw.product") == 0 ||
+            strcmp(name, "kern.osversion") == 0 ||
+            strcmp(name, "kern.osrelease") == 0 ||
+            strcmp(name, "kern.version") == 0) {
             
             PXLog(@"[WeaponX] 🎯 sysctlbyname called for: %s", name);
             
@@ -87,6 +160,76 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                             spoofedValue = [dm boardIDForModel:model];
                         }
                         PXLog(@"[WeaponX] 🎯 Spoofing hw.model with HWModel/BoardID: %@", spoofedValue);
+                    }
+                }
+            }
+            else if (strcmp(name, "kern.osversion") == 0) {
+                // iOS build number (e.g. 20F66)
+                if ([manager isIdentifierEnabled:@"IOSVersion"]) {
+                    NSString *identityDir = [manager profileIdentityPath];
+                    NSString *build = nil;
+
+                    if (identityDir.length > 0) {
+                        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]];
+                        build = deviceIds[@"IOSBuild"];
+                        if (!build.length) {
+                            NSDictionary *ver = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"ios_version.plist"]];
+                            build = ver[@"build"];
+                        }
+                    }
+
+                    if (!build.length) {
+                        NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                        build = current[@"build"];
+                    }
+
+                    if (build.length > 0) {
+                        spoofedValue = build;
+                        PXLog(@"[WeaponX] 🎯 Spoofing kern.osversion with IOSBuild: %@", spoofedValue);
+                    }
+                }
+            }
+            else if (strcmp(name, "kern.osrelease") == 0) {
+                // Darwin version (e.g. 22.5.0)
+                if ([manager isIdentifierEnabled:@"IOSVersion"]) {
+                    NSString *identityDir = [manager profileIdentityPath];
+                    NSString *darwin = nil;
+
+                    if (identityDir.length > 0) {
+                        NSDictionary *ver = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"ios_version.plist"]];
+                        darwin = ver[@"darwin"];
+                    }
+
+                    if (!darwin.length) {
+                        NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                        darwin = current[@"darwin"];
+                    }
+
+                    if (darwin.length > 0) {
+                        spoofedValue = darwin;
+                        PXLog(@"[WeaponX] 🎯 Spoofing kern.osrelease with Darwin: %@", spoofedValue);
+                    }
+                }
+            }
+            else if (strcmp(name, "kern.version") == 0) {
+                // Full kernel version string
+                if ([manager isIdentifierEnabled:@"IOSVersion"]) {
+                    NSString *identityDir = [manager profileIdentityPath];
+                    NSString *kernel = nil;
+
+                    if (identityDir.length > 0) {
+                        NSDictionary *ver = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"ios_version.plist"]];
+                        kernel = ver[@"kernel_version"];
+                    }
+
+                    if (!kernel.length) {
+                        NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                        kernel = current[@"kernel_version"];
+                    }
+
+                    if (kernel.length > 0) {
+                        spoofedValue = kernel;
+                        PXLog(@"[WeaponX] 🎯 Spoofing kern.version with kernel string");
                     }
                 }
             }
@@ -233,6 +376,34 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                         return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)boardID);
                     }
                 }
+            }
+        }
+    }
+
+    // iOS build number (AIDA64 reads this on some paths)
+    if (propertyString && [manager isIdentifierEnabled:@"IOSVersion"]) {
+        if ([propertyString isEqualToString:@"ProductBuildVersion"] ||
+            [propertyString isEqualToString:@"BuildVersion"]) {
+            NSString *identityDir = [manager profileIdentityPath];
+            NSString *build = nil;
+
+            if (identityDir.length > 0) {
+                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]];
+                build = deviceIds[@"IOSBuild"];
+                if (!build.length) {
+                    NSDictionary *ver = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"ios_version.plist"]];
+                    build = ver[@"build"];
+                }
+            }
+
+            if (!build.length) {
+                NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                build = current[@"build"];
+            }
+
+            if (build.length > 0) {
+                PXLog(@"[WeaponX] 🎯 Spoofing MGCopyAnswer %@ with build: %@", propertyString, build);
+                return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)build);
             }
         }
     }
@@ -2267,13 +2438,13 @@ static char* hook_GSSystemGetSerialNo(void) {
                 MSHookFunction(gethostnameSymbol, (void *)gethostname_hook, (void **)&gethostname_orig);
             }
             
-            // Hook sysctlbyname which is commonly used to get device identifiers
-            void *sysctlbynameSymbol = dlsym(libSystemHandle, "sysctlbyname");
-            if (sysctlbynameSymbol) {
-                PXLog(@"Using ElleKit to hook sysctlbyname for system information protection");
-                MSHookFunction(sysctlbynameSymbol, (void *)sysctlbyname_hook, (void **)&sysctlbyname_orig);
-            }
-            
+    // Hook sysctlbyname which is commonly used to get device identifiers
+    void *sysctlbynameSymbol = dlsym(libSystemHandle, "sysctlbyname");
+    if (sysctlbynameSymbol) {
+        PXLog(@"Using ElleKit to hook sysctlbyname for system information protection");
+        MSHookFunction(sysctlbynameSymbol, (void *)sysctlbyname_hook, (void **)&sysctlbyname_orig);
+    }
+
             dlclose(libSystemHandle);
         }
     } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
@@ -2479,6 +2650,19 @@ static char* hook_GSSystemGetSerialNo(void) {
         dlclose(libcHandle);
     } else {
         PXLog(@"[WeaponX] ⚠️ Failed to open libc for sysctlbyname hooking");
+    }
+
+    // Also try to hook CFCopySystemVersionDictionary via CoreFoundation
+    void *cfHandle = dlopen("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation", RTLD_NOW);
+    if (cfHandle) {
+        void *cfSym = dlsym(cfHandle, "CFCopySystemVersionDictionary");
+        if (cfSym) {
+            PXLog(@"[WeaponX] 🔧 Hooking CFCopySystemVersionDictionary via CoreFoundation");
+            if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
+                MSHookFunction(cfSym, (void *)CFCopySystemVersionDictionary_hook, (void **)&CFCopySystemVersionDictionary_orig);
+            }
+        }
+        dlclose(cfHandle);
     }
     
     // Initialize the location spoofing hooks
