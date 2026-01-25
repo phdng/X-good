@@ -6,8 +6,8 @@ TWEAK_NAME = TestCtorTweak
 
 TestCtorTweak_FILES = Tweak.x
 TestCtorTweak_CFLAGS = -fobjc-arc
-# Force use of ld_classic linker (macOS 14+ uses new ld that may not handle constructors properly)
-TestCtorTweak_LDFLAGS = -Wl,-ld_classic
+# Try different linker flags to fix __mod_init_func issue on Xcode 15
+# -ld64 was the beta flag, -ld_classic is current
+TestCtorTweak_LDFLAGS = -Xlinker -ld64
 
 include $(THEOS_MAKE_PATH)/tweak.mk
-
