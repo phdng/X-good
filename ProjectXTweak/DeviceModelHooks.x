@@ -54,30 +54,52 @@ static BOOL isDeviceModelSpoofingEnabled() {
     // If not cached or expired, check if this app is enabled for spoofing
     BOOL shouldSpoof = NO;
     @try {
-        // Get IdentifierManager to check if app is in scope
-        if (!NSClassFromString(@"IdentifierManager")) {
-            return NO;
+        BOOL managerCheckPassed = NO;
+        
+        // METHOD 1: Check via IdentifierManager if available
+        if (NSClassFromString(@"IdentifierManager")) {
+            IdentifierManager *manager = [NSClassFromString(@"IdentifierManager") sharedManager];
+            if (manager && [manager isApplicationEnabled:currentBundleID]) {
+                if ([manager isIdentifierEnabled:@"DeviceModel"]) {
+                    shouldSpoof = YES;
+                    managerCheckPassed = YES;
+                }
+            }
         }
         
-        IdentifierManager *manager = [NSClassFromString(@"IdentifierManager") sharedManager];
-        if (!manager || ![manager isApplicationEnabled:currentBundleID]) {
-            shouldSpoof = NO;
-        } else {
-            // Check if device model spoofing is specifically enabled
-            shouldSpoof = [manager isIdentifierEnabled:@"DeviceModel"];
+        // METHOD 2: Fallback to direct profile settings if Manager check didn't pass
+        // (This handles cases where IdentifierManager is missing OR it says NO/Disabled, 
+        // but we might want to trust the plist if the user insists - typically we respect the Manager, 
+        // but if Manager is missing we MUST check plist)
+        if (!managerCheckPassed) {
+            // Try to get profile settings directly from file
+            NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
+            NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
+            NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
             
-            // If the direct check fails, try profile settings directly
-            if (!shouldSpoof) {
-                // Try to get profile settings directly from file
-                NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
-                NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-                NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-                
-                NSString *profileId = centralInfo[@"ProfileId"];
-                if (profileId) {
-                    NSString *profileSettingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
-                    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:profileSettingsPath];
+            NSString *profileId = centralInfo[@"ProfileId"];
+            if (profileId) {
+                NSString *profileSettingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
+                NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:profileSettingsPath];
+                // Check if global enabled or device model specifically enabled
+                if (settings && settings[@"deviceModelEnabled"]) {
                     shouldSpoof = [settings[@"deviceModelEnabled"] boolValue];
+                    
+                    // Also check if App is Scoped (Global Scope Plist)
+                    // If we are falling back to manual plist reading, we should ideally check scope too.
+                    NSString *scopePath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
+                    NSDictionary *scopeDict = [NSDictionary dictionaryWithContentsOfFile:scopePath];
+                    NSDictionary *scopedApps = scopeDict[@"ScopedApps"];
+                    if (scopedApps && scopedApps[currentBundleID]) {
+                        if ([scopedApps[currentBundleID][@"enabled"] boolValue]) {
+                            // Only set YES if both App is scoped AND DeviceModel is enabled in profile
+                            // (If shouldSpoof was already YES from profile settings)
+                        } else {
+                            shouldSpoof = NO;
+                        }
+                    } else {
+                        shouldSpoof = NO; // Not in scope
+                    }
                 }
             }
         }
@@ -157,6 +179,40 @@ static NSString* getSpoofedDeviceModel() {
             
             if (deviceModel.length > 0) {
                 PXLog(@"[model] Using model %@ from DeviceModelManager", deviceModel);
+            }
+        }
+        
+        // METHOD 4: Legacy Fallback (CFPreferences - Old Method)
+        // This is highly reliable for bypassing sandbox restrictions
+        if (!deviceModel.length) {
+            CFStringRef appID = CFSTR("com.projectx.phoneinfo");
+            CFStringRef key = CFSTR("PhoneInfo");
+            
+            // Try AnyUser/AnyHost combination first (most likely for system-wide tweaks)
+            CFPropertyListRef value = CFPreferencesCopyValue(key, appID, kCFPreferencesAnyUser, kCFPreferencesAnyHost);
+            
+            if (value && CFGetTypeID(value) == CFDictionaryGetTypeID()) {
+                NSDictionary *dict = (__bridge NSDictionary *)value;
+                NSDictionary *legacyModelDict = dict[@"deviceModel"];
+                if (legacyModelDict && legacyModelDict[@"modelName"]) {
+                    deviceModel = legacyModelDict[@"modelName"];
+                    PXLog(@"[model] Found device model %@ via Legacy CFPreferences (AnyUser/AnyHost)", deviceModel);
+                }
+                CFRelease(value);
+            }
+            
+            // Try CurrentUser if failed
+            if (!deviceModel.length) {
+                value = CFPreferencesCopyValue(key, appID, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+                if (value && CFGetTypeID(value) == CFDictionaryGetTypeID()) {
+                    NSDictionary *dict = (__bridge NSDictionary *)value;
+                    NSDictionary *legacyModelDict = dict[@"deviceModel"];
+                    if (legacyModelDict && legacyModelDict[@"modelName"]) {
+                        deviceModel = legacyModelDict[@"modelName"];
+                        PXLog(@"[model] Found device model %@ via Legacy CFPreferences (CurrentUser/AnyHost)", deviceModel);
+                    }
+                    CFRelease(value);
+                }
             }
         }
         

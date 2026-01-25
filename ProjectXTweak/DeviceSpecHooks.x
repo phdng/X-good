@@ -14,6 +14,7 @@
 #import <objc/runtime.h>
 #import <substrate.h>
 #import <dlfcn.h>
+#import <mach-o/arch.h>
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 
 // Define the swap usage structure if it's not available
@@ -31,6 +32,7 @@ typedef struct xsw_usage xsw_usage;
 // Original function pointers
 static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 static kern_return_t (*orig_host_statistics64)(host_t host, host_flavor_t flavor, host_info64_t info, mach_msg_type_number_t *count);
+static NXArchInfo* (* orig_nx_get_local_arch_info)();
 
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -225,21 +227,27 @@ static BOOL isSpoofingEnabled(void) {
             shouldSpoof = NO;
         } else {
             // Now check if device model spoofing is specifically enabled
+            BOOL managerCheckPassed = NO;
             if (NSClassFromString(@"IdentifierManager")) {
                 IdentifierManager *manager = [NSClassFromString(@"IdentifierManager") sharedManager];
-                shouldSpoof = [manager isIdentifierEnabled:@"DeviceModel"];
+                if (manager && [manager isIdentifierEnabled:@"DeviceModel"]) {
+                    shouldSpoof = YES;
+                    managerCheckPassed = YES;
+                }
+            }
+            
+            // If manager check failed (or class missing), try profile settings directly
+            if (!managerCheckPassed) {
+                // Try to get profile settings directly from file
+                NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
+                NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
+                NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
                 
-                // If the direct check fails, try profile settings directly
-                if (!shouldSpoof) {
-                    // Try to get profile settings directly from file
-                    NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
-                    NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
-                    NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
-                    
-                    NSString *profileId = centralInfo[@"ProfileId"];
-                    if (profileId) {
-                        NSString *profileSettingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
-                        NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:profileSettingsPath];
+                NSString *profileId = centralInfo[@"ProfileId"];
+                if (profileId) {
+                    NSString *profileSettingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
+                    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:profileSettingsPath];
+                    if (settings && settings[@"deviceModelEnabled"]) {
                         shouldSpoof = [settings[@"deviceModelEnabled"] boolValue];
                     }
                 }
@@ -294,7 +302,41 @@ static NSString *getSpoofedDeviceModel() {
             deviceModel = [deviceManager currentDeviceModel] ?: [deviceManager generateDeviceModel];
         }
         
-        // METHOD 3: Emergency fallback
+        // METHOD 3: Emergency fallback / Legacy
+        if (!deviceModel.length) {
+            // Legacy Fallback (CFPreferences - Old Method)
+            CFStringRef appID = CFSTR("com.projectx.phoneinfo");
+            CFStringRef key = CFSTR("PhoneInfo");
+            
+            // Try AnyUser/AnyHost first
+            CFPropertyListRef value = CFPreferencesCopyValue(key, appID, kCFPreferencesAnyUser, kCFPreferencesAnyHost);
+            
+            if (value && CFGetTypeID(value) == CFDictionaryGetTypeID()) {
+                NSDictionary *dict = (__bridge NSDictionary *)value;
+                NSDictionary *legacyModelDict = dict[@"deviceModel"];
+                if (legacyModelDict && legacyModelDict[@"modelName"]) {
+                    deviceModel = legacyModelDict[@"modelName"];
+                    PXLog(@"[DeviceSpec] Found device model %@ via Legacy CFPreferences (AnyUser/AnyHost)", deviceModel);
+                }
+                CFRelease(value);
+            }
+            
+            // Try CurrentUser next
+            if (!deviceModel.length) {
+                value = CFPreferencesCopyValue(key, appID, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
+                if (value && CFGetTypeID(value) == CFDictionaryGetTypeID()) {
+                    NSDictionary *dict = (__bridge NSDictionary *)value;
+                    NSDictionary *legacyModelDict = dict[@"deviceModel"];
+                    if (legacyModelDict && legacyModelDict[@"modelName"]) {
+                        deviceModel = legacyModelDict[@"modelName"];
+                        PXLog(@"[DeviceSpec] Found device model %@ via Legacy CFPreferences (CurrentUser/AnyHost)", deviceModel);
+                    }
+                    CFRelease(value);
+                }
+            }
+        }
+        
+        // METHOD 4: Hardcoded fallback (Last resort)
         if (!deviceModel.length) {
             deviceModel = @"iPhone14,6"; // iPhone SE (3rd Gen) as fallback
         }
@@ -1407,6 +1449,13 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
                     PXLog(@"[DeviceSpec] Successfully hooked host_statistics64 for memory stats spoofing");
                 }
                 
+                // Hook NXGetLocalArchInfo for CPU architecture spoofing
+                orig_nx_get_local_arch_info = dlsym(libSystem, "NXGetLocalArchInfo");
+                if (orig_nx_get_local_arch_info) {
+                    MSHookFunction(orig_nx_get_local_arch_info, (void *)hook_nx_get_local_arch_info, (void **)&orig_nx_get_local_arch_info);
+                    PXLog(@"[DeviceSpec] Successfully hooked NXGetLocalArchInfo for CPU architecture spoofing");
+                }
+                
                 dlclose(libSystem);
             }
             
@@ -1504,6 +1553,86 @@ static void getConsistentMemoryStats(unsigned long long totalMemory,
     if (inactiveMemory) {
         *inactiveMemory = (unsigned long long)(totalMemory * inactivePercentage);
     }
+}
+
+// NXGetLocalArchInfo hook for CPU architecture spoofing
+static NXArchInfo* hook_nx_get_local_arch_info() {
+    if (!orig_nx_get_local_arch_info) {
+        return NULL;
+    }
+    
+    NXArchInfo* original = orig_nx_get_local_arch_info();
+    
+    if (!isSpoofingEnabled()) {
+        return original;
+    }
+    
+    NSDictionary *specs = getDeviceSpecs();
+    if (!specs) {
+        return original;
+    }
+    
+    NSString *cpuArchitecture = specs[@"cpuArchitecture"];
+    if (!cpuArchitecture || cpuArchitecture.length == 0) {
+        return original;
+    }
+    
+    // Create new struct to check, don't modify original
+    static NXArchInfo customArchInfo;
+    customArchInfo = *original; // Copy original values
+    
+    // Safely set subtype
+    cpu_subtype_t cpuSubtype = original->cpusubtype; // Keep original
+    const char *customDescription = original->description; // Default to original
+    
+    // Set subtype and description based on architecture
+    if ([cpuArchitecture containsString:@"A9"]) {
+        cpuSubtype = 2;
+    } else if ([cpuArchitecture containsString:@"A10"]) {
+        cpuSubtype = 3;
+    } else if ([cpuArchitecture containsString:@"A11"]) {
+        cpuSubtype = 4;
+        customDescription = "ARM64E";
+    } else if ([cpuArchitecture containsString:@"A12"]) {
+        cpuSubtype = 5;
+        customDescription = "ARM64E";
+    } else if ([cpuArchitecture containsString:@"A13"]) {
+        cpuSubtype = 6;
+        customDescription = "ARM64E";
+    } else if ([cpuArchitecture containsString:@"A14"]) {
+        cpuSubtype = 7;
+        customDescription = "ARM64E";
+    } else if ([cpuArchitecture containsString:@"A15"]) {
+        cpuSubtype = 8;
+        customDescription = "ARM64E";
+    } else if ([cpuArchitecture containsString:@"A16"]) {
+        cpuSubtype = 9;
+        customDescription = "ARM64E";
+    } else if ([cpuArchitecture containsString:@"A17"]) {
+        cpuSubtype = 10;
+        customDescription = "ARM64E";
+    } else if ([cpuArchitecture containsString:@"A18"]) {
+        cpuSubtype = 11;
+        customDescription = "ARM64E";
+    } else if ([cpuArchitecture containsString:@"M1"]) {
+        cpuSubtype = 12;
+        customDescription = "arm64v8 Apple M1";
+    } else if ([cpuArchitecture containsString:@"M2"]) {
+        cpuSubtype = 13;
+        customDescription = "arm64v8 Apple M2";
+    }
+    
+    customArchInfo.cpusubtype = cpuSubtype;
+    customArchInfo.description = customDescription;
+    
+    static BOOL loggedArchInfo = NO;
+    if (!loggedArchInfo) {
+        PXLog(@"[DeviceSpec] Spoofing NXArchInfo: cpusubtype %d->%d, description %s->%s", 
+              original->cpusubtype, cpuSubtype, original->description, customDescription);
+        loggedArchInfo = YES;
+    }
+    
+    return &customArchInfo;
 }
 
 // Host statistics hook for memory stats
@@ -1655,7 +1784,7 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             }
         }
     }
-    else if (strcmp(name, "hw.cpu.brand_string") == 0 || strcmp(name, "hw.cpubrand") == 0 || strcmp(name, "hw.model") == 0) {
+    else if (strcmp(name, "hw.cpu.brand_string") == 0 || strcmp(name, "machdep.cpu.brand_string") == 0 || strcmp(name, "hw.cpubrand") == 0 || strcmp(name, "hw.model") == 0) {
         // CPU Brand/Model Name - return the processor name like "Apple A11 Bionic"
         if (cpuArchitecture && cpuArchitecture.length > 0) {
             const char *cpuBrand = [cpuArchitecture UTF8String];
