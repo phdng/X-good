@@ -1125,6 +1125,8 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
             PXLog(@"[model] ERROR hooking sysctlbyname(): %@", e);
         }
         
+        @try {
+            void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
             if (sysctlPtr) {
                 MSHookFunction(sysctlPtr, (void *)hook_sysctl, (void **)&orig_sysctl);
                 PXLog(@"[model] Hooked sysctl() successfully");
