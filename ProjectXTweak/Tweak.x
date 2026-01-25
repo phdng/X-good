@@ -77,10 +77,17 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                 }
             } 
             else if (strcmp(name, "hw.model") == 0) {
-                // hw.model can also return model identifier
+                // hw.model is a hardware/board model style identifier (e.g. N71AP / D431AP)
                 if ([manager isIdentifierEnabled:@"DeviceModel"]) {
-                    spoofedValue = [manager currentValueForIdentifier:@"DeviceModel"];
-                    PXLog(@"[WeaponX] 🎯 Spoofing hw.model with DeviceModel: %@", spoofedValue);
+                    NSString *model = [manager currentValueForIdentifier:@"DeviceModel"];
+                    if (model.length > 0) {
+                        DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
+                        spoofedValue = [dm hwModelForModel:model];
+                        if (!spoofedValue.length || [spoofedValue isEqualToString:@"Unknown"]) {
+                            spoofedValue = [dm boardIDForModel:model];
+                        }
+                        PXLog(@"[WeaponX] 🎯 Spoofing hw.model with HWModel/BoardID: %@", spoofedValue);
+                    }
                 }
             }
             else if (strcmp(name, "kern.hostname") == 0) {
@@ -99,21 +106,30 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             }
             
             // If we have a spoofed value, substitute it
-            if (spoofedValue && oldp && oldlenp) {
+            if (spoofedValue && oldlenp) {
                 const char *spoofedCString = [spoofedValue UTF8String];
-                size_t spoofedLen = strlen(spoofedCString) + 1; // +1 for null terminator
-                
-                if (*oldlenp >= spoofedLen) {
-                    // Copy spoofed value to output buffer
-                    memcpy(oldp, spoofedCString, spoofedLen);
-                    *oldlenp = spoofedLen;
-                    PXLog(@"[WeaponX] ✅ Successfully spoofed %s = %s", name, spoofedCString);
-                    return 0; // Success
-                } else {
-                    // Buffer too small - report required size
-                    *oldlenp = spoofedLen;
-                    PXLog(@"[WeaponX] ⚠️ Buffer too small for %s, required: %zu", name, spoofedLen);
-                    return -1; // ENOMEM
+                if (spoofedCString) {
+                    size_t spoofedLen = strlen(spoofedCString) + 1; // +1 for null terminator
+
+                    // Size query (common pattern): oldp == NULL
+                    if (!oldp) {
+                        *oldlenp = spoofedLen;
+                        PXLog(@"[WeaponX] ✅ Reported size for %s = %zu", name, spoofedLen);
+                        return 0;
+                    }
+
+                    if (*oldlenp >= spoofedLen) {
+                        // Copy spoofed value to output buffer
+                        memcpy(oldp, spoofedCString, spoofedLen);
+                        *oldlenp = spoofedLen;
+                        PXLog(@"[WeaponX] ✅ Successfully spoofed %s = %s", name, spoofedCString);
+                        return 0; // Success
+                    } else {
+                        // Buffer too small - report required size
+                        *oldlenp = spoofedLen;
+                        PXLog(@"[WeaponX] ⚠️ Buffer too small for %s, required: %zu", name, spoofedLen);
+                        return -1; // ENOMEM
+                    }
                 }
             }
             
