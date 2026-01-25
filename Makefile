@@ -45,6 +45,24 @@ ProjectX_APPLICATION_MODE = 0755
 all::
 	@echo "Building tweak, application, and daemon..."
 
+# Tweak Configuration (Moved from ProjectXTweak/Makefile)
+TWEAK_NAME = ProjectXTweak
+
+# Files - Adjusted paths for root compilation
+ProjectXTweak_FILES = $(wildcard ProjectXTweak/*.x) $(wildcard ProjectXTweak/*.m) $(wildcard common/*.m)
+
+# CFlags - Adjusted include paths
+ProjectXTweak_CFLAGS = -fobjc-arc -Wno-error=unused-variable -Wno-error=unused-function -I./common -I./include -D USES_LIBUNDIRECT=1 -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1
+
+# Frameworks and Libraries
+ProjectXTweak_FRAMEWORKS = UIKit Foundation AdSupport UserNotifications IOKit Security CoreLocation CoreFoundation Network CoreTelephony SystemConfiguration WebKit SafariServices   
+ProjectXTweak_PRIVATE_FRAMEWORKS = MobileCoreServices AppSupport SpringBoardServices 
+ProjectXTweak_LIBRARIES = MobileGestalt
+
+# Linker Flags - Keep manual initialization fix for safety
+ProjectXTweak_LDFLAGS = -lobjc -Wl,-ObjC
+
+# Include makefiles
 include $(THEOS_MAKE_PATH)/application.mk
 include $(THEOS_MAKE_PATH)/tweak.mk
 include $(THEOS_MAKE_PATH)/tool.mk
@@ -118,5 +136,6 @@ after-package::
 	@echo "✅ Checking Guardian directory and log files..."
 	@ls -la $(THEOS_STAGING_DIR)/../debug/Library/WeaponX/Guardian/ || echo "❌ Guardian directory not found!"
 	@echo "Package check completed!"
-SUBPROJECTS += ProjectXTweak
-include $(THEOS_MAKE_PATH)/aggregate.mk
+
+# SUBPROJECTS += ProjectXTweak
+# include $(THEOS_MAKE_PATH)/aggregate.mk
