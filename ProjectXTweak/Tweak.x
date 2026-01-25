@@ -1,4 +1,5 @@
 #import "ProjectX.h"
+#import "DeviceModelManager.h"
 #import "IdentifierManager.h"
 #import <AdSupport/ASIdentifierManager.h>
 #import <UIKit/UIKit.h>
@@ -184,6 +185,42 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         return %orig;
     }
     
+    // Device model / hardware identifiers (keep consistent across sysctl/IOKit/MobileGestalt)
+    if (propertyString) {
+        BOOL deviceModelEnabled = [manager isIdentifierEnabled:@"DeviceModel"];
+        if (deviceModelEnabled) {
+            NSString *model = [manager currentValueForIdentifier:@"DeviceModel"];
+            if (model.length > 0) {
+                if ([propertyString isEqualToString:@"ProductType"]) {
+                    return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)model);
+                }
+
+                if ([propertyString isEqualToString:@"HWModelStr"] ||
+                    [propertyString isEqualToString:@"HardwareModel"] ||
+                    [propertyString isEqualToString:@"HWModel"] ||
+                    [propertyString isEqualToString:@"hw-model"]) {
+                    DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
+                    NSString *hwModel = [dm hwModelForModel:model];
+                    if (!hwModel.length || [hwModel isEqualToString:@"Unknown"]) {
+                        hwModel = [dm boardIDForModel:model];
+                    }
+                    if (hwModel.length > 0 && ![hwModel isEqualToString:@"Unknown"]) {
+                        return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)hwModel);
+                    }
+                }
+
+                if ([propertyString isEqualToString:@"BoardId"] ||
+                    [propertyString isEqualToString:@"board-id"]) {
+                    DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
+                    NSString *boardID = [dm boardIDForModel:model];
+                    if (boardID.length > 0 && ![boardID isEqualToString:@"Unknown"]) {
+                        return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)boardID);
+                    }
+                }
+            }
+        }
+    }
+
     // Handle various identifier types
     if ([propertyString isEqualToString:@"UniqueDeviceID"] || 
         [propertyString isEqualToString:@"UniqueDeviceIDData"]) {
@@ -1939,7 +1976,7 @@ static void antiDetectionCallback(void) {
 // Hook IOKit's IORegistryEntryCreateCFProperty for serial number
 static CFTypeRef (*orig_IORegistryEntryCreateCFProperty)(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options);
 
-CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
+static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
     // Null checks to prevent crashes
     if (!entry || !key) {
         return NULL;
@@ -2008,6 +2045,59 @@ CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStri
             if (spoofedUUID) {
                 PXLog(@"Spoofing IOPlatformUUID with: %@", spoofedUUID);
                 return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)spoofedUUID);
+            }
+        }
+
+        // Device model / hardware identifiers (AIDA, CPU Dash, etc.)
+        if ([manager isIdentifierEnabled:@"DeviceModel"] && keyString.length > 0) {
+            NSString *model = [manager currentValueForIdentifier:@"DeviceModel"];
+            if (model.length > 0) {
+                BOOL wantsProductType = [keyString isEqualToString:@"device-model"] || [keyString isEqualToString:@"hw.machine"];
+                BOOL wantsHWModel = [keyString isEqualToString:@"model"] || [keyString isEqualToString:@"hw.model"];
+                BOOL wantsBoardID = [keyString isEqualToString:@"board-id"] || [keyString isEqualToString:@"BoardId"];
+
+                if (wantsProductType || wantsHWModel || wantsBoardID) {
+                    CFTypeRef original = orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
+
+                    DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
+                    NSString *replacementString = nil;
+                    if (wantsProductType) {
+                        replacementString = model;
+                    } else if (wantsBoardID) {
+                        replacementString = [dm boardIDForModel:model];
+                    } else if (wantsHWModel) {
+                        replacementString = [dm hwModelForModel:model];
+                        if (!replacementString.length || [replacementString isEqualToString:@"Unknown"]) {
+                            replacementString = [dm boardIDForModel:model];
+                        }
+                    }
+
+                    if (replacementString.length > 0 && ![replacementString isEqualToString:@"Unknown"]) {
+                        CFTypeRef replacement = NULL;
+                        if (original && CFGetTypeID(original) == CFDataGetTypeID()) {
+                            const char *s = [replacementString UTF8String];
+                            if (s) {
+                                size_t len = strlen(s) + 1; // include null terminator
+                                replacement = CFDataCreate(kCFAllocatorDefault, (const UInt8 *)s, (CFIndex)len);
+                            }
+                        }
+
+                        if (!replacement) {
+                            replacement = CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)replacementString);
+                        }
+
+                        if (original) {
+                            CFRelease(original);
+                        }
+
+                        if (replacement) {
+                            return replacement;
+                        }
+                    }
+
+                    // No replacement; return original (may be NULL)
+                    return original;
+                }
             }
         }
     } @catch (NSException *exception) {
