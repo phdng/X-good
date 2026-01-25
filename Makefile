@@ -59,8 +59,12 @@ ProjectXTweak_FRAMEWORKS = UIKit Foundation AdSupport UserNotifications IOKit Se
 ProjectXTweak_PRIVATE_FRAMEWORKS = MobileCoreServices AppSupport SpringBoardServices 
 ProjectXTweak_LIBRARIES = MobileGestalt
 
-# Linker Flags - Keep manual initialization fix for safety
-ProjectXTweak_LDFLAGS = -lobjc -Wl,-ObjC
+# Linker Flags
+# -lobjc: force link libobjc
+# -Wl,-ObjC: load all ObjC classes/categories
+# -Wl,-no_fixup_chains: DISABLE chained fixups (Xcode 15+ default) which break iOS 12/13 compatibility
+# -Wl,-undefined,dynamic_lookup: standard for tweaks
+ProjectXTweak_LDFLAGS = -lobjc -Wl,-ObjC -Wl,-no_fixup_chains -Wl,-undefined,dynamic_lookup
 
 # Include makefiles
 include $(THEOS_MAKE_PATH)/application.mk
