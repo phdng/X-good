@@ -66,7 +66,7 @@ static BOOL isDeviceModelSpoofingEnabled() {
                 }
             }
         }
-        
+
         // METHOD 2: Fallback to direct profile settings if Manager check didn't pass
         // (This handles cases where IdentifierManager is missing OR it says NO/Disabled, 
         // but we might want to trust the plist if the user insists - typically we respect the Manager, 
@@ -84,7 +84,7 @@ static BOOL isDeviceModelSpoofingEnabled() {
                 // Check if global enabled or device model specifically enabled
                 if (settings && settings[@"deviceModelEnabled"]) {
                     shouldSpoof = [settings[@"deviceModelEnabled"] boolValue];
-                    
+
                     // Also check if App is Scoped (Global Scope Plist)
                     // If we are falling back to manual plist reading, we should ideally check scope too.
                     NSString *scopePath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -102,8 +102,7 @@ static BOOL isDeviceModelSpoofingEnabled() {
                     }
                 }
             }
-                }
-            }
+        }
         
         // METHOD 3: Fallback check - if we have a valid spoofed model available via legacy means (or any means),
         // we should probably enable spoofing to match old behavior where existence of data implied enablement.
