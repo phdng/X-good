@@ -169,6 +169,12 @@ static CFDictionaryRef CFCopySystemVersionDictionary_hook(void) {
                 }
             }
 
+            // Some tools (including AIDA64) use ReleaseType to display OS state.
+            // Ensure the key exists so the UI doesn't end up blank.
+            if (!CFDictionaryGetValue(dict, CFSTR("ReleaseType"))) {
+                CFDictionarySetValue(dict, CFSTR("ReleaseType"), CFSTR("User"));
+            }
+
             if (original) {
                 CFRelease(original);
             }
@@ -192,7 +198,9 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             strcmp(name, "hw.product") == 0 ||
             strcmp(name, "kern.osversion") == 0 ||
             strcmp(name, "kern.osrelease") == 0 ||
-            strcmp(name, "kern.version") == 0) {
+            strcmp(name, "kern.version") == 0 ||
+            strcmp(name, "kern.osvariant") == 0 ||
+            strcmp(name, "kern.osvariant_status") == 0) {
             
             PXLog(@"[WeaponX] 🎯 sysctlbyname called for: %s", name);
             
@@ -297,6 +305,28 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                         spoofedValue = kernel;
                         PXLog(@"[WeaponX] 🎯 Spoofing kern.version with kernel string");
                     }
+                }
+            }
+            else if (strcmp(name, "kern.osvariant") == 0) {
+                // Variant string used to classify OS state
+                spoofedValue = @"release";
+                PXLog(@"[WeaponX] 🎯 Spoofing kern.osvariant with: %@", spoofedValue);
+            }
+            else if (strcmp(name, "kern.osvariant_status") == 0) {
+                // Integer status: 0 = stable/release on production iOS
+                if (oldlenp) {
+                    if (!oldp) {
+                        *oldlenp = sizeof(int);
+                        return 0;
+                    }
+                    if (*oldlenp >= sizeof(int)) {
+                        *(int *)oldp = 0;
+                        *oldlenp = sizeof(int);
+                        PXLog(@"[WeaponX] 🎯 Spoofing kern.osvariant_status with: 0");
+                        return 0;
+                    }
+                    *oldlenp = sizeof(int);
+                    return -1;
                 }
             }
             else if (strcmp(name, "kern.hostname") == 0) {
@@ -448,6 +478,10 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
     // iOS build number (AIDA64 reads this on some paths)
     if (propertyString && [manager isIdentifierEnabled:@"IOSVersion"]) {
+        if ([propertyString isEqualToString:@"ReleaseType"]) {
+            return CFStringCreateCopy(kCFAllocatorDefault, CFSTR("User"));
+        }
+
         if ([propertyString isEqualToString:@"ProductBuildVersion"] ||
             [propertyString isEqualToString:@"BuildVersion"]) {
             NSString *identityDir = [manager profileIdentityPath];
