@@ -774,100 +774,13 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
     return result;
 }
 
-// MGCopyAnswer hook for device model
-%hookf(NSString *, MGCopyAnswer, CFStringRef property) {
-    if (!property) {
-        return %orig; // Handle null property case
-    }
-    
-    NSString *propertyString = (__bridge NSString *)property;
-    NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-    
-    // Comprehensive list of hardware model identifier properties
-    static NSSet *modelProperties = nil;
-    static NSSet *boardIDProperties = nil;
-    static NSSet *hwModelProperties = nil;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        modelProperties = [NSSet setWithArray:@[
-            @"HWModelStr",
-            @"DeviceName",
-            @"ProductType",
-            @"ProductModel",
-            @"HardwareModel",
-            @"ModelNumber",
-            @"DeviceClass",
-            @"DeviceVariant"
-        ]];
-        
-        boardIDProperties = [NSSet setWithArray:@[
-            @"BoardId",
-            @"board-id"
-        ]];
-        
-        hwModelProperties = [NSSet setWithArray:@[
-            @"hw-model",
-            @"HWModel"
-        ]];
-    });
-    
-    BOOL isModelProperty = [modelProperties containsObject:propertyString];
-    BOOL isBoardIDProperty = [boardIDProperties containsObject:propertyString];
-    BOOL isHWModelProperty = [hwModelProperties containsObject:propertyString];
-    
-    // Get the original value first for logging
-    NSString *originalValue = %orig;
-    
-    // Check if device model spoofing is enabled
-    if (isDeviceModelSpoofingEnabled()) {
-        // Handle device model properties
-        if (isModelProperty) {
-            // Log regardless of whether spoofing is enabled
-            PXLog(@"[model] MGCopyAnswer(%@) called by app: %@ - original value: %@", 
-                propertyString, currentBundleID, originalValue ?: @"<nil>");
-            
-            NSString *spoofedModel = getSpoofedDeviceModel();
-            
-            if (spoofedModel.length > 0) {
-                PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                    propertyString, originalValue ?: @"<nil>", spoofedModel, currentBundleID);
-                return [spoofedModel copy];
-            } else {
-                PXLog(@"[model] WARNING: getSpoofedDeviceModel returned empty for MGCopyAnswer property: %@", 
-                    propertyString);
-            }
-        }
-        // Handle board ID properties
-        else if (isBoardIDProperty) {
-            PXLog(@"[model] MGCopyAnswer BoardID(%@) called by app: %@ - original value: %@", 
-                propertyString, currentBundleID, originalValue ?: @"<nil>");
-            
-            NSString *spoofedBoardID = getSpoofedBoardID();
-            
-            if (spoofedBoardID.length > 0) {
-                PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                    propertyString, originalValue ?: @"<nil>", spoofedBoardID, currentBundleID);
-                return [spoofedBoardID copy];
-            }
-        }
-        // Handle hw.model properties
-        else if (isHWModelProperty) {
-            PXLog(@"[model] MGCopyAnswer HWModel(%@) called by app: %@ - original value: %@", 
-                propertyString, currentBundleID, originalValue ?: @"<nil>");
-            
-            NSString *spoofedHWModel = getSpoofedHWModel();
-            
-            if (spoofedHWModel.length > 0) {
-                PXLog(@"[model] Spoofed MGCopyAnswer %@ from: %@ to: %@ for app: %@", 
-                    propertyString, originalValue ?: @"<nil>", spoofedHWModel, currentBundleID);
-                return [spoofedHWModel copy];
-            }
-        }
-    }
-    
-    // For all other properties, pass through to the original implementation
-    return originalValue;
+// MGCopyAnswer hook moved to ProjectXTweak/Tweak.x to avoid duplicate hooks.
+// Keeping a second MGCopyAnswer hook here causes ordering issues and inconsistent results.
+#if 0
+%hookf(CFTypeRef, MGCopyAnswer, CFStringRef property) {
+    return %orig;
 }
+#endif
 
 // Hook for UIDevice methods - many apps use combinations of these
 %hook UIDevice
@@ -1099,23 +1012,7 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
             PXLog(@"[model] ERROR hooking sysctl(): %@", e);
         }
         
-        // Look up IOKit functions dynamically
-        void *IOKitHandle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
-        if (IOKitHandle) {
-            void *IORegEntryCreateCFPropertyPtr = dlsym(IOKitHandle, "IORegistryEntryCreateCFProperty");
-            if (IORegEntryCreateCFPropertyPtr) {
-                @try {
-                    MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, (void **)&orig_IORegistryEntryCreateCFProperty);
-                    PXLog(@"[model] Hooked IORegistryEntryCreateCFProperty successfully");
-                } @catch (NSException *e) {
-                    PXLog(@"[model] ERROR hooking IORegistryEntryCreateCFProperty: %@", e);
-                }
-            } else {
-                PXLog(@"[model] Could not find IORegistryEntryCreateCFProperty symbol");
-            }
-            dlclose(IOKitHandle);
-        } else {
-            PXLog(@"[model] Could not open IOKit framework");
-        }
+        // NOTE: IORegistryEntryCreateCFProperty is hooked in ProjectXTweak/Tweak.x.
+        // Hooking it here too leads to non-deterministic behavior (double-hook ordering).
     }
 }
