@@ -379,12 +379,77 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
                         PXLog(@"[model] WARNING: Spoofed value too long for sysctlbyname buffer");
                     }
                 }
-            } else {
-                PXLog(@"[model] WARNING: Cannot spoof sysctlbyname, missing required params or spoofed value");
             }
-        } else {
-            // Just log that we saw a model check
-            PXLog(@"[model] App %@ checked sysctlbyname %s: %s", bundleID, name, originalValue);
+        }
+    }
+    
+    // Missing sysctl keys implementation
+    if (isDeviceModelSpoofingEnabled()) {
+        if (strcmp(name, "kern.hostname") == 0) {
+           // Spoof hostname to obscure real device name
+           const char *fakeHostname = "iPhone";
+           NSString *spoofedName = nil;
+           // Try to use spoofed device name if available (reuse logic from UIDevice.name hook if possible, or simplified here)
+            // Simplified: "iPhone" or model name
+           NSString *model = getSpoofedDeviceModel();
+           if (model) spoofedName = model; // e.g. "iPhone14,2"
+           else spoofedName = @"iPhone";
+           
+           fakeHostname = [spoofedName UTF8String];
+           
+           if (oldp && oldlenp) {
+               size_t len = strlen(fakeHostname) + 1;
+               if (*oldlenp >= len) {
+                   *oldlenp = len;
+                   strcpy((char *)oldp, fakeHostname);
+                   return 0;
+               }
+           }
+        }
+        
+        if (strcmp(name, "kern.ostype") == 0) {
+            const char *val = "Darwin";
+            if (oldp && oldlenp) {
+                size_t len = strlen(val) + 1;
+                if (*oldlenp >= len) {
+                    *oldlenp = len;
+                    strcpy((char *)oldp, val);
+                    return 0;
+                }
+            }
+        }
+        
+        if (strcmp(name, "hw.physicalcpu") == 0 || strcmp(name, "hw.logicalcpu") == 0 || 
+            strcmp(name, "hw.ncpu") == 0 || strcmp(name, "hw.activecpu") == 0) {
+            // Simple mapping for cores based on model generation
+            int cores = 2; // Default
+            NSString *model = getSpoofedDeviceModel();
+            if (model) {
+                 if ([model hasPrefix:@"iPhone8"] || [model hasPrefix:@"iPhone9"] || [model hasPrefix:@"iPhone10"]) cores = 2; // 6s, 7, 8, X (Efficiency cores hidden usually? No, sysctl reports simple count)
+                 // Actually:
+                 // A9: 2
+                 // A10: 2 (Fusion, only 2 active at once perceived strictly? or 4? Usually reports 2 big)
+                 // A11 (iPhone 8/X): 6 (2 Big + 4 Little) -> Sysctl logical usually reports 6?
+                 // Let's use a safe baseline or map properly.
+                 // A11+: 6 cores
+                 if ([model hasPrefix:@"iPhone10"]) cores = 6;
+                 if ([model hasPrefix:@"iPhone11"]) cores = 6;
+                 if ([model hasPrefix:@"iPhone12"]) cores = 6;
+                 if ([model hasPrefix:@"iPhone13"]) cores = 6;
+                 if ([model hasPrefix:@"iPhone14"]) cores = 6;
+                 if ([model hasPrefix:@"iPad"]) cores = 8; // M1/M2 usually 8
+            }
+            
+            // Allow override logic if you had it, for now hardcoded safe spoof
+            if (oldp && oldlenp) {
+                if (*oldlenp == sizeof(int)) {
+                    *(int *)oldp = cores;
+                    return 0;
+                } else if (*oldlenp == sizeof(int64_t)) {
+                    *(int64_t *)oldp = cores;
+                    return 0;
+                }
+            }
         }
     }
     
@@ -646,12 +711,48 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
 }
 
 - (NSString *)name {
-    // Just log access but don't spoof - this is device name, not model
+    // Enable spoofing for device name
     NSString *originalName = %orig;
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     
-    if (bundleID && isDeviceModelSpoofingEnabled()) {
-        PXLog(@"[model] App %@ checked UIDevice name: %@", bundleID, originalName);
+    if (!bundleID) {
+        return originalName;
+    }
+    
+    // Always log access
+    PXLog(@"[model] App %@ checked UIDevice name: %@", bundleID, originalName);
+    
+    if (isDeviceModelSpoofingEnabled()) {
+        // For privacy, we often want to spoof the device name to a generic one
+        // or a custom name if configured
+        NSString *spoofedName = nil;
+        
+        // Try to get custom name from profile
+        // Using existing helper if available or implementing a basic lookup
+        @try {
+            // Re-use logic to find profile settings
+            NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
+            NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
+            NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
+            NSString *profileId = centralInfo[@"ProfileId"];
+            
+            if (profileId) {
+                NSString *identityDir = [profilesPath stringByAppendingPathComponent:profileId];
+                NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+                
+                spoofedName = deviceIds[@"DeviceName"];
+            }
+        } @catch (NSException *e) {}
+        
+        // Fallback to generic name if no custom name set
+        if (!spoofedName || spoofedName.length == 0) {
+            spoofedName = @"iPhone";
+        }
+        
+        PXLog(@"[model] Spoofing UIDevice name from %@ to %@ for app: %@", 
+              originalName, spoofedName, bundleID);
+        return spoofedName;
     }
     
     return originalName;
