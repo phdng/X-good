@@ -59,7 +59,7 @@ jobs:
       - name: Debug - Check dylib constructors
         run: |
           echo "=== Checking dylib for constructor symbols ==="
-          DYLIB_PATH=".theos/obj/arm64/ProjectXTweak.dylib"
+          DYLIB_PATH=".theos/obj/debug/arm64/ProjectXTweak.dylib"
           if [ -f "$DYLIB_PATH" ]; then
             echo "--- File size ---"
             ls -la "$DYLIB_PATH"
