@@ -15,6 +15,7 @@
 #import <netinet/in.h>
 #import <IOKit/IOKitLib.h>
 #import <sys/sysctl.h>  // For sysctlbyname hooks
+#import <errno.h>
 #import <dirent.h>     // For DIR type
 #import <sys/mount.h>  // For statfs
 #import "ProfileManager.h" // For accessing current profile
@@ -46,6 +47,71 @@ static NSMutableDictionary *valueCache;
 
 // Function pointer declarations for additional system functions
 static int (*sysctlbyname_orig)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+static int (*sysctl_orig)(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+
+static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    @autoreleasepool {
+        @try {
+            if (!name || namelen < 2 || !oldlenp) {
+                return sysctl_orig ? sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen) : -1;
+            }
+
+            // Only spoof string sysctls under CTL_KERN
+            BOOL isKern = (name[0] == CTL_KERN);
+            if (isKern && (name[1] == KERN_OSVERSION || name[1] == KERN_OSRELEASE || name[1] == KERN_VERSION)) {
+                if (!%c(IdentifierManager)) {
+                    return sysctl_orig ? sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen) : -1;
+                }
+
+                IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
+                NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+                if (!manager || !bundleID || ![manager isApplicationEnabled:bundleID] || ![manager isIdentifierEnabled:@"IOSVersion"]) {
+                    return sysctl_orig ? sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen) : -1;
+                }
+
+                NSString *identityDir = [manager profileIdentityPath];
+                NSDictionary *ver = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"ios_version.plist"]] : nil;
+                NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                NSString *value = nil;
+
+                if (name[1] == KERN_OSVERSION) {
+                    value = ver[@"build"] ?: current[@"build"];
+                } else if (name[1] == KERN_OSRELEASE) {
+                    value = ver[@"darwin"] ?: current[@"darwin"];
+                } else if (name[1] == KERN_VERSION) {
+                    value = ver[@"kernel_version"] ?: current[@"kernel_version"];
+                }
+
+                if (value.length > 0) {
+                    const char *s = [value UTF8String];
+                    if (s) {
+                        size_t len = strlen(s) + 1;
+
+                        // Size query
+                        if (!oldp) {
+                            *oldlenp = len;
+                            return 0;
+                        }
+
+                        if (*oldlenp >= len) {
+                            memcpy(oldp, s, len);
+                            *oldlenp = len;
+                            return 0;
+                        }
+
+                        *oldlenp = len;
+                        errno = ENOMEM;
+                        return -1;
+                    }
+                }
+            }
+        } @catch (NSException *e) {
+            // fall through
+        }
+    }
+
+    return sysctl_orig ? sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen) : -1;
+}
 
 // CoreFoundation system version dictionary
 static CFDictionaryRef (*CFCopySystemVersionDictionary_orig)(void);
@@ -2445,6 +2511,13 @@ static char* hook_GSSystemGetSerialNo(void) {
         MSHookFunction(sysctlbynameSymbol, (void *)sysctlbyname_hook, (void **)&sysctlbyname_orig);
     }
 
+            // Hook sysctl (MIB-based) for build/version keys
+            void *sysctlSym = dlsym(libSystemHandle, "sysctl");
+            if (sysctlSym) {
+                PXLog(@"Hooking sysctl for iOS version/build spoofing");
+                MSHookFunction(sysctlSym, (void *)sysctl_hook, (void **)&sysctl_orig);
+            }
+
             dlclose(libSystemHandle);
         }
     } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
@@ -2646,6 +2719,14 @@ static char* hook_GSSystemGetSerialNo(void) {
             }
         } else {
             PXLog(@"[WeaponX] ⚠️ sysctlbyname symbol not found in libc");
+        }
+
+        void *sysctlPtr = dlsym(libcHandle, "sysctl");
+        if (sysctlPtr) {
+            PXLog(@"[WeaponX] 🔧 Hooking sysctl for iOS version/build spoofing");
+            if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
+                MSHookFunction(sysctlPtr, (void *)sysctl_hook, (void **)&sysctl_orig);
+            }
         }
         dlclose(libcHandle);
     } else {
