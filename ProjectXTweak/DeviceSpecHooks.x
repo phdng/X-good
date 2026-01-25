@@ -16,6 +16,7 @@
 #import <dlfcn.h>
 #import <mach-o/arch.h>
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
+#import "IOSVersionInfo.h"
 
 // Define the swap usage structure if it's not available
 #ifndef HAVE_XSW_USAGE
@@ -1792,9 +1793,60 @@ static kern_return_t hook_host_statistics64(host_t host, host_flavor_t flavor, h
 static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     // Always call original function first to ensure proper behavior
     int result = orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
-    
-    // Return original result if conditions not met
-    if (result != 0 || !name || !oldp || !oldlenp || *oldlenp == 0 || !isSpoofingEnabled()) {
+
+    // iOS version/build consistency (AIDA64 build number)
+    // Handle these early and preserve sysctl size-query semantics (oldp can be NULL).
+    if (name && oldlenp && (strcmp(name, "kern.osversion") == 0 || strcmp(name, "kern.osrelease") == 0 || strcmp(name, "kern.version") == 0)) {
+        @try {
+            IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
+            NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+            if (manager && bundleID && [manager isApplicationEnabled:bundleID] && [manager isIdentifierEnabled:@"IOSVersion"]) {
+                NSString *identityDir = [manager profileIdentityPath];
+                NSDictionary *ver = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"ios_version.plist"]] : nil;
+                NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                NSString *value = nil;
+
+                if (strcmp(name, "kern.osversion") == 0) {
+                    value = ver[@"build"] ?: current[@"build"];
+                } else if (strcmp(name, "kern.osrelease") == 0) {
+                    value = ver[@"darwin"] ?: current[@"darwin"];
+                } else if (strcmp(name, "kern.version") == 0) {
+                    value = ver[@"kernel_version"] ?: current[@"kernel_version"];
+                }
+
+                if (value.length > 0) {
+                    const char *s = [value UTF8String];
+                    if (s) {
+                        size_t len = strlen(s) + 1;
+
+                        // Size query: oldp can be NULL in normal sysctlbyname usage.
+                        if (!oldp && oldlenp) {
+                            *oldlenp = len;
+                            return 0;
+                        }
+
+                        if (oldp && oldlenp) {
+                            if (*oldlenp >= len) {
+                                *oldlenp = len;
+                                memset(oldp, 0, len);
+                                strcpy((char *)oldp, s);
+                                return 0;
+                            }
+
+                            // Buffer too small: report required size.
+                            *oldlenp = len;
+                            return 0;
+                        }
+                    }
+                }
+            }
+        } @catch (NSException *e) {
+            // Fall through to other spoofing logic
+        }
+    }
+
+    // Return original result if conditions not met for the remaining spec/memory spoofing
+    if (result != 0 || !name || !oldlenp || !isSpoofingEnabled() || !oldp || *oldlenp == 0) {
         return result;
     }
     
