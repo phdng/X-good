@@ -16,10 +16,16 @@
 
 @end
 
-// Also try constructor
+// Constructor using __attribute__((constructor))
 __attribute__((constructor))
 static void AAA_TestCtor_init(void) {
     [@"AAA_TEST_CTOR_RAN" writeToFile:@"/var/mobile/Library/Logs/ProjectX/AAA_ctor_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [@"AAA_TEST_CTOR_RAN" writeToFile:@"/tmp/AAA_ctor_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [@"AAA_TEST_CTOR_RAN" writeToFile:@"/var/mobile/AAA_ctor_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
 }
+
+// FORCE: Manually register constructor in __mod_init_func section
+// This is a workaround for linkers that don't properly handle __attribute__((constructor))
+typedef void (*init_func_t)(void);
+__attribute__((used, section("__DATA,__mod_init_func")))
+static init_func_t AAA_init_ptr = &AAA_TestCtor_init;

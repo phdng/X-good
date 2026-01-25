@@ -14,7 +14,8 @@ ProjectXTweak_FRAMEWORKS = UIKit Foundation AdSupport UserNotifications IOKit Se
 ProjectXTweak_PRIVATE_FRAMEWORKS = MobileCoreServices AppSupport SpringBoardServices 
 ProjectXTweak_LIBRARIES = MobileGestalt
 
-# CRITICAL: Prevent constructor stripping - ensures __mod_init_func section is kept
-# ProjectXTweak_LDFLAGS = -Wl,-no_dead_strip -Wl,-ObjC
+# CRITICAL: Force ObjC runtime to properly initialize +load methods
+# -lobjc ensures libobjc is linked, -ObjC forces all ObjC symbols to be loaded
+ProjectXTweak_LDFLAGS = -lobjc -Wl,-ObjC
 
 include $(THEOS_MAKE_PATH)/tweak.mk
