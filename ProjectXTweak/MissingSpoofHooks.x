@@ -3,6 +3,7 @@
 #import <Metal/Metal.h>
 #import <substrate.h>
 #import <objc/runtime.h>
+#import <dlfcn.h>
 #import "ProjectXLogging.h"
 
 // Helper declarations
