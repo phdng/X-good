@@ -104,7 +104,6 @@ static BOOL isDeviceModelSpoofingEnabled() {
             }
                 }
             }
-        }
         
         // METHOD 3: Fallback check - if we have a valid spoofed model available via legacy means (or any means),
         // we should probably enable spoofing to match old behavior where existence of data implied enablement.
