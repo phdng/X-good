@@ -20,7 +20,7 @@
 set -e
 
 # === Configuration ===
-HELPER_TOOL_PATH="/Library/WeaponX/KeychainHelper"
+HELPER_TOOL_PATH="/Library/WeaponX/backup_helper"
 TEMP_DIR="/tmp/keychain_helper_$$"
 VERBOSE=0
 
