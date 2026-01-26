@@ -6,6 +6,7 @@
 @property (nonatomic, strong) UILabel *appLabel;
 @property (nonatomic, strong) UISwitch *includeGroupsSwitch;
 @property (nonatomic, strong) UISwitch *includePrefsSwitch;
+@property (nonatomic, strong) UISwitch *includeKeychainSwitch;
 @end
 
 @implementation AppDataBackupRestoreViewController
@@ -108,6 +109,10 @@
     UIView *prefsRow = makeOptionRow(@"Include Global Preferences (rare)", &_includePrefsSwitch);
     self.includePrefsSwitch.on = YES;
     [optionsStack addArrangedSubview:prefsRow];
+    
+    UIView *keychainRow = makeOptionRow(@"Include Keychain Items", &_includeKeychainSwitch);
+    self.includeKeychainSwitch.on = NO; // Off by default - keychain backup is sensitive
+    [optionsStack addArrangedSubview:keychainRow];
     
     UIStackView *buttonStack = [[UIStackView alloc] init];
     buttonStack.axis = UILayoutConstraintAxisVertical;
@@ -226,6 +231,9 @@
         }
         if (self.includePrefsSwitch.on) {
             options |= PXBackupOptionIncludePreferences;
+        }
+        if (self.includeKeychainSwitch.on) {
+            options |= PXBackupOptionIncludeKeychain;
         }
 
         [[AppDataBackupManager shared] createBackupForBundleID:self.bundleID
