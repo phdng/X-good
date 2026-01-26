@@ -43,6 +43,9 @@ static const NSTimeInterval kScopedAppsCacheValidDuration = 30.0; // 30 seconds
 // Global flag to track if hooks are installed
 static BOOL hooksInstalled = NO;
 
+// Recursion guard to prevent infinite loops when UptimeManager calls sysctl
+static __thread BOOL isInsideHook = NO;
+
 // Forward declarations
 static BOOL shouldSpoofBootTimeForApp(void);
 static NSString *getCurrentProfilePath(void);
@@ -277,18 +280,27 @@ static void updateCachedBootTimeValues(void) {
 // Log boot time access attempts for debugging
 static void logBootTimeAccess(const char *method, NSString *bundleID) {
     @try {
+        // Early exit if parameters are invalid
+        if (!method || !bundleID || [bundleID length] == 0) return;
+        
         static NSMutableSet *loggedMethods = nil;
         static dispatch_once_t onceToken;
         dispatch_once(&onceToken, ^{
-            loggedMethods = [NSMutableSet set];
+            loggedMethods = [[NSMutableSet alloc] init];
         });
         
-        if (!method || !bundleID) return;
+        if (!loggedMethods) return;
         
-        NSString *methodKey = [NSString stringWithFormat:@"%s:%@", method, bundleID];
+        // Use safer string creation
+        NSString *methodStr = [NSString stringWithUTF8String:method];
+        if (!methodStr) return;
+        
+        NSString *methodKey = [NSString stringWithFormat:@"%@:%@", methodStr, bundleID];
+        if (!methodKey) return;
+        
         if (![loggedMethods containsObject:methodKey]) {
             [loggedMethods addObject:methodKey];
-            PXLog(@"[BootTimeHooks] 🕵️ App %@ accessed boot time via %s", bundleID, method);
+            PXLog(@"[BootTimeHooks] 🕵️ App %@ accessed boot time via %@", bundleID, methodStr);
         }
     } @catch (NSException *e) {
         // Silent failure
@@ -335,6 +347,14 @@ static BOOL isBootTimeOrUptimeEnabled(void) {
 
 // Hook sysctl() for KERN_BOOTTIME queries - ONLY method that App Store apps commonly use
 int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    // CRITICAL: Recursion guard - if we're already inside hook, pass through to original
+    if (isInsideHook) {
+        if (orig_sysctl) {
+            return orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen);
+        }
+        return -1;
+    }
+    
     @try {
         // Check if this is a KERN_BOOTTIME query
         if (namelen >= 2 && name && name[0] == CTL_KERN && name[1] == KERN_BOOTTIME) {
@@ -343,7 +363,12 @@ int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *new
                 if (bundleID) {
                     logBootTimeAccess("sysctl(KERN_BOOTTIME)", bundleID);
                 }
+                
+                // Set recursion guard before calling UptimeManager
+                isInsideHook = YES;
                 updateCachedBootTimeValues();
+                isInsideHook = NO;
+                
                 if (cachedBootTime && oldp && oldlenp && *oldlenp >= sizeof(struct timeval)) {
                     struct timeval boottime;
                     boottime.tv_sec = (time_t)[cachedBootTime timeIntervalSince1970];
@@ -355,6 +380,7 @@ int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *new
             }
         }
     } @catch (NSException *e) {
+        isInsideHook = NO; // Reset guard on exception
         // Silent failure, pass through to original
     }
     // Call original function for all other cases
@@ -366,6 +392,14 @@ int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *new
 
 // Hook sysctlbyname() for "kern.boottime" queries - ONLY method that App Store apps commonly use
 int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    // CRITICAL: Recursion guard - if we're already inside hook, pass through to original
+    if (isInsideHook) {
+        if (orig_sysctlbyname) {
+            return orig_sysctlbyname(name, oldp, oldlenp, newp, newlen);
+        }
+        return -1;
+    }
+    
     @try {
         if (name && strcmp(name, "kern.boottime") == 0) {
             if (shouldSpoofBootTimeForApp() && isBootTimeOrUptimeEnabled()) {
@@ -373,7 +407,12 @@ int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp,
                 if (bundleID) {
                     logBootTimeAccess("sysctlbyname(kern.boottime)", bundleID);
                 }
+                
+                // Set recursion guard before calling UptimeManager
+                isInsideHook = YES;
                 updateCachedBootTimeValues();
+                isInsideHook = NO;
+                
                 if (cachedBootTime && oldp && oldlenp && *oldlenp >= sizeof(struct timeval)) {
                     struct timeval boottime;
                     boottime.tv_sec = (time_t)[cachedBootTime timeIntervalSince1970];
@@ -385,6 +424,7 @@ int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp,
             }
         }
     } @catch (NSException *e) {
+        isInsideHook = NO; // Reset guard on exception
         // Silent failure, pass through to original
     }
     // Call original function for all other cases
@@ -397,8 +437,16 @@ int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *newp,
 // Hook for -[NSProcessInfo systemUptime]
 static NSTimeInterval (*orig_systemUptime)(NSProcessInfo *, SEL);
 static NSTimeInterval hook_systemUptime(NSProcessInfo *self, SEL _cmd) {
+    // Recursion guard
+    if (isInsideHook) {
+        return orig_systemUptime(self, _cmd);
+    }
+    
     if (shouldSpoofBootTimeForApp() && isBootTimeOrUptimeEnabled()) {
+        isInsideHook = YES;
         updateCachedBootTimeValues();
+        isInsideHook = NO;
+        
         if (cachedUptime > 0) {
             return cachedUptime;
         }
