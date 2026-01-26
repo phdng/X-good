@@ -286,76 +286,106 @@ parse_app_identifier() {
 }
 
 # === Generate entitlements plist for helper tool ===
+# For system apps, we copy the full entitlements and add our extras
+# For App Store apps, we generate minimal entitlements
 generate_helper_entitlements() {
     local keychain_groups="$1"
     local app_groups="$2"
     local output_file="$3"
-    local app_identifier="$4"  # Optional: application-identifier from target app
+    local app_identifier="$4"
+    local source_ent_file="$5"  # Optional: full entitlements file from target app
     
     log_verbose "Generating entitlements to: $output_file"
     log_verbose "Keychain groups: $keychain_groups"
     log_verbose "App identifier: $app_identifier"
+    log_verbose "Source entitlements: $source_ent_file"
     
-    # Use printf to avoid heredoc CRLF issues
-    {
-        printf '<?xml version="1.0" encoding="UTF-8"?>\n'
-        printf '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
-        printf '<plist version="1.0">\n'
-        printf '<dict>\n'
+    # Check if this is a system app (use full entitlements)
+    if [ -n "$source_ent_file" ] && [ -f "$source_ent_file" ]; then
+        log_verbose "Using full entitlements from target app (system app mode)"
         
-        # Platform application - required for system-level access
-        printf '    <key>platform-application</key>\n'
-        printf '    <true/>\n'
+        # Copy source entitlements and inject our security overrides
+        # We'll modify the plist to add no-sandbox and no-container
+        cp "$source_ent_file" "$output_file"
         
-        # Application identifier - critical for keychain access matching
-        if [ -n "$app_identifier" ]; then
-            printf '    <key>application-identifier</key>\n'
-            printf '    <string>%s</string>\n' "$app_identifier"
+        # Add our security entitlements using plutil if available
+        local plutil_path
+        plutil_path=$(find_plutil) || true
+        
+        if [ -n "$plutil_path" ]; then
+            # Add security entitlements
+            "$plutil_path" -replace "com.apple.private.security.no-sandbox" -bool true "$output_file" 2>/dev/null || true
+            "$plutil_path" -replace "com.apple.private.security.no-container" -bool true "$output_file" 2>/dev/null || true
+            "$plutil_path" -replace "com.apple.private.security.container-required" -bool false "$output_file" 2>/dev/null || true
+            
+            log_verbose "Injected security entitlements via plutil"
+        else
+            log_warn "plutil not available, using source entitlements as-is"
         fi
+    else
+        log_verbose "Generating custom entitlements (App Store app mode)"
         
-        # Security entitlements
-        printf '    <key>com.apple.private.security.no-sandbox</key>\n'
-        printf '    <true/>\n'
-        printf '    <key>com.apple.private.security.no-container</key>\n'
-        printf '    <true/>\n'
-        printf '    <key>com.apple.private.security.container-required</key>\n'
-        printf '    <false/>\n'
-        
-        # Keychain specific entitlements
-        printf '    <key>com.apple.keystore.access-keychain-keys</key>\n'
-        printf '    <true/>\n'
-        printf '    <key>com.apple.keystore.device</key>\n'
-        printf '    <true/>\n'
-        
-        # Add keychain-access-groups
-        if [ -n "$keychain_groups" ]; then
-            printf '    <key>keychain-access-groups</key>\n'
-            printf '    <array>\n'
+        # Use printf to avoid heredoc CRLF issues
+        {
+            printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+            printf '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+            printf '<plist version="1.0">\n'
+            printf '<dict>\n'
             
-            IFS=',' read -ra GROUPS <<< "$keychain_groups"
-            for group in "${GROUPS[@]}"; do
-                printf '        <string>%s</string>\n' "$group"
-            done
+            # Platform application - required for system-level access
+            printf '    <key>platform-application</key>\n'
+            printf '    <true/>\n'
             
-            printf '    </array>\n'
-        fi
-        
-        # Add application-groups if present
-        if [ -n "$app_groups" ]; then
-            printf '    <key>com.apple.security.application-groups</key>\n'
-            printf '    <array>\n'
+            # Application identifier - critical for keychain access matching
+            if [ -n "$app_identifier" ]; then
+                printf '    <key>application-identifier</key>\n'
+                printf '    <string>%s</string>\n' "$app_identifier"
+            fi
             
-            IFS=',' read -ra GROUPS <<< "$app_groups"
-            for group in "${GROUPS[@]}"; do
-                printf '        <string>%s</string>\n' "$group"
-            done
+            # Security entitlements
+            printf '    <key>com.apple.private.security.no-sandbox</key>\n'
+            printf '    <true/>\n'
+            printf '    <key>com.apple.private.security.no-container</key>\n'
+            printf '    <true/>\n'
+            printf '    <key>com.apple.private.security.container-required</key>\n'
+            printf '    <false/>\n'
             
-            printf '    </array>\n'
-        fi
-        
-        printf '</dict>\n'
-        printf '</plist>\n'
-    } > "$output_file"
+            # Keychain specific entitlements
+            printf '    <key>com.apple.keystore.access-keychain-keys</key>\n'
+            printf '    <true/>\n'
+            printf '    <key>com.apple.keystore.device</key>\n'
+            printf '    <true/>\n'
+            
+            # Add keychain-access-groups
+            if [ -n "$keychain_groups" ]; then
+                printf '    <key>keychain-access-groups</key>\n'
+                printf '    <array>\n'
+                
+                IFS=',' read -ra GROUPS <<< "$keychain_groups"
+                for group in "${GROUPS[@]}"; do
+                    printf '        <string>%s</string>\n' "$group"
+                done
+                
+                printf '    </array>\n'
+            fi
+            
+            # Add application-groups if present
+            if [ -n "$app_groups" ]; then
+                printf '    <key>com.apple.security.application-groups</key>\n'
+                printf '    <array>\n'
+                
+                IFS=',' read -ra GROUPS <<< "$app_groups"
+                for group in "${GROUPS[@]}"; do
+                    printf '        <string>%s</string>\n' "$group"
+                done
+                
+                printf '    </array>\n'
+            fi
+            
+            printf '</dict>\n'
+            printf '</plist>\n'
+        } > "$output_file"
+    fi
     
     # Verify file was created
     if [ ! -f "$output_file" ]; then
@@ -469,10 +499,19 @@ do_backup() {
         app_identifier="$bundle_id"
     fi
     
+    # Detect if this is a system app (in /Applications)
+    local is_system_app=0
+    local source_ent_for_system=""
+    if echo "$app_binary" | grep -q "^/Applications/"; then
+        is_system_app=1
+        source_ent_for_system="$ent_file"
+        log_info "Detected system app - will use full entitlements"
+    fi
+    
     # Generate helper entitlements
     log_info "Generating helper entitlements..."
     local helper_ent="$TEMP_DIR/helper_ent.plist"
-    if ! generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier"; then
+    if ! generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier" "$source_ent_for_system"; then
         log_error "Failed to generate helper entitlements"
         return 1
     fi
@@ -532,8 +571,15 @@ do_restore() {
     app_identifier=$(parse_app_identifier "$ent_file")
     [ -z "$app_identifier" ] && app_identifier="$bundle_id"
     
+    # Detect system app
+    local source_ent_for_system=""
+    if echo "$app_binary" | grep -q "^/Applications/"; then
+        source_ent_for_system="$ent_file"
+        log_info "Detected system app - will use full entitlements"
+    fi
+    
     local helper_ent="$TEMP_DIR/helper_ent.plist"
-    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier"
+    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier" "$source_ent_for_system"
     
     log_info "Resigning KeychainHelper..."
     resign_helper "$helper_ent" || return 1
@@ -590,8 +636,14 @@ do_wipe() {
     app_identifier=$(parse_app_identifier "$ent_file")
     [ -z "$app_identifier" ] && app_identifier="$bundle_id"
     
+    # Detect system app
+    local source_ent_for_system=""
+    if echo "$app_binary" | grep -q "^/Applications/"; then
+        source_ent_for_system="$ent_file"
+    fi
+    
     local helper_ent="$TEMP_DIR/helper_ent.plist"
-    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier"
+    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier" "$source_ent_for_system"
     
     resign_helper "$helper_ent" || return 1
     
@@ -630,8 +682,14 @@ do_list() {
     app_identifier=$(parse_app_identifier "$ent_file")
     [ -z "$app_identifier" ] && app_identifier="$bundle_id"
     
+    # Detect system app
+    local source_ent_for_system=""
+    if echo "$app_binary" | grep -q "^/Applications/"; then
+        source_ent_for_system="$ent_file"
+    fi
+    
     local helper_ent="$TEMP_DIR/helper_ent.plist"
-    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier"
+    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier" "$source_ent_for_system"
     
     resign_helper "$helper_ent" || return 1
     
