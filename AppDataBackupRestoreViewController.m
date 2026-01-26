@@ -71,7 +71,7 @@
     optionsStack.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:optionsStack];
 
-    UIView *(^makeOptionRow)(NSString *, UISwitch **) = ^UIView *(NSString *title, UISwitch **outSwitch) {
+    UIView *(^makeOptionRow)(NSString *, UISwitch * __strong *) = ^UIView *(NSString *title, UISwitch * __strong *outSwitch) {
         UIView *row = [[UIView alloc] init];
         row.translatesAutoresizingMaskIntoConstraints = NO;
 
