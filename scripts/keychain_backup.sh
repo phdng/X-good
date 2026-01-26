@@ -25,10 +25,18 @@ TEMP_DIR="/tmp/keychain_helper_$$"
 VERBOSE=0
 
 # === Color Output ===
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-NC='\033[0m' # No Color
+# Only use colors if running in a TTY (interactive terminal)
+if [ -t 1 ]; then
+    RED='\033[0;31m'
+    GREEN='\033[0;32m'
+    YELLOW='\033[1;33m'
+    NC='\033[0m' # No Color
+else
+    RED=''
+    GREEN=''
+    YELLOW=''
+    NC=''
+fi
 
 log_info() {
     echo -e "${GREEN}[INFO]${NC} $1"
@@ -442,11 +450,37 @@ resign_helper() {
         return 1
     }
     
+    # Check if helper exists
+    if [ ! -f "$HELPER_TOOL_PATH" ]; then
+        log_error "Helper tool not found at: $HELPER_TOOL_PATH"
+        return 1
+    fi
+    
+    # Check if entitlements file exists
+    if [ ! -f "$ent_file" ]; then
+        log_error "Entitlements file not found: $ent_file"
+        return 1
+    fi
+    
     log_verbose "Resigning helper with: $ent_file"
+    log_verbose "Using ldid: $ldid_path"
+    log_verbose "Helper path: $HELPER_TOOL_PATH"
     
-    "$ldid_path" -S"$ent_file" "$HELPER_TOOL_PATH" 2>/dev/null
+    # Run ldid and capture any errors
+    local ldid_output
+    ldid_output=$("$ldid_path" -S"$ent_file" "$HELPER_TOOL_PATH" 2>&1)
+    local exit_code=$?
     
-    return $?
+    if [ $exit_code -ne 0 ]; then
+        log_error "ldid failed with exit code $exit_code"
+        if [ -n "$ldid_output" ]; then
+            log_error "ldid output: $ldid_output"
+        fi
+        return 1
+    fi
+    
+    log_verbose "Helper resigned successfully"
+    return 0
 }
 
 # === Main functions ===
