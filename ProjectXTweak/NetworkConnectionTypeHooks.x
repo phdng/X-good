@@ -891,72 +891,77 @@ Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SC
 // Enable getifaddrs hook for local IP spoofing
 static int (*original_getifaddrs)(struct ifaddrs **);
 static int hooked_getifaddrs(struct ifaddrs **ifap) {
-    if (shouldShowAsWiFi()) {
-        return original_getifaddrs(ifap);
-    }
     int result = original_getifaddrs(ifap);
-    if (result == 0 && ifap && *ifap && shouldSpoofConnectionType()) {
-        struct ifaddrs *ifa = *ifap;
-        NetworkConnectionType type = getNetworkConnectionType();
-        NSString *spoofedIP = getProfileLocalIPAddress();
-        NSString *spoofedIPv6 = [NetworkManager getSavedLocalIPv6Address];
-        if (!spoofedIPv6) {
-            spoofedIPv6 = @"fe80::1234:abcd:5678:9abc";
+    if (result != 0 || !ifap || !*ifap) {
+        return result;
+    }
+    
+    // Get spoofed IP values from profile
+    NSString *spoofedIPv4 = getProfileLocalIPAddress();
+    NSString *spoofedIPv6 = [NetworkManager getSavedLocalIPv6Address];
+    
+    // Check if we have any custom IP to spoof (not default values)
+    BOOL hasSpoofedIPv4 = spoofedIPv4 && ![spoofedIPv4 isEqualToString:@"192.168.1.1"];
+    BOOL hasSpoofedIPv6 = spoofedIPv6 && spoofedIPv6.length > 0;
+    
+    // If no custom IPs are set, don't modify anything
+    if (!hasSpoofedIPv4 && !hasSpoofedIPv6) {
+        return result;
+    }
+    
+    PXLog(@"[NetworkHook] Spoofing local IPs - IPv4: %@, IPv6: %@", 
+          spoofedIPv4 ?: @"(none)", spoofedIPv6 ?: @"(none)");
+    
+    struct ifaddrs *ifa = *ifap;
+    
+    // Determine interface to modify based on connection type setting
+    NetworkConnectionType type = getNetworkConnectionType();
+    BOOL useWiFiInterface = YES; // Default to en0 (WiFi)
+    
+    if (shouldSpoofConnectionType()) {
+        // If connection type spoofing is enabled, respect the setting
+        if (type == NetworkConnectionTypeCellular || 
+            (type == NetworkConnectionTypeAuto && !shouldUseWiFiForAutoMode())) {
+            useWiFiInterface = NO; // Use pdp_ip0 (cellular)
         }
-        // Generate plausible carrier IPv4/IPv6 for pdp_ip0
-        NSString *carrierIPv4 = @"10.0.0.5";
-        NSString *carrierIPv6 = @"2607:f8b0:4005:805::200e"; // Example global IPv6
-        while (ifa) {
-            if (ifa->ifa_addr) {
-                if (ifa->ifa_addr->sa_family == AF_INET) {
-                    if (type == NetworkConnectionTypeWiFi || (type == NetworkConnectionTypeAuto && shouldUseWiFiForAutoMode())) {
-                        if (strcmp(ifa->ifa_name, "en0") == 0 && spoofedIP) {
-                            struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
-                            sin->sin_addr.s_addr = inet_addr([spoofedIP UTF8String]);
-                        }
-                        // Optionally, clear pdp_ip0
-                        if (strcmp(ifa->ifa_name, "pdp_ip0") == 0) {
-                            struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
-                            sin->sin_addr.s_addr = 0;
-                        }
-                    } else if (type == NetworkConnectionTypeCellular || (type == NetworkConnectionTypeAuto && !shouldUseWiFiForAutoMode())) {
-                        if (strcmp(ifa->ifa_name, "pdp_ip0") == 0 && carrierIPv4) {
-                            struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
-                            sin->sin_addr.s_addr = inet_addr([carrierIPv4 UTF8String]);
-                        }
-                        // Optionally, clear en0
-                        if (strcmp(ifa->ifa_name, "en0") == 0) {
-                            struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
-                            sin->sin_addr.s_addr = 0;
-                        }
-                    }
-                } else if (ifa->ifa_addr->sa_family == AF_INET6) {
-                    if (type == NetworkConnectionTypeWiFi || (type == NetworkConnectionTypeAuto && shouldUseWiFiForAutoMode())) {
-                        if (strcmp(ifa->ifa_name, "en0") == 0 && spoofedIPv6) {
-                            struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
-                            inet_pton(AF_INET6, [spoofedIPv6 UTF8String], &sin6->sin6_addr);
-                        }
-                        // Optionally, clear pdp_ip0
-                        if (strcmp(ifa->ifa_name, "pdp_ip0") == 0) {
-                            struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
-                            memset(&sin6->sin6_addr, 0, sizeof(sin6->sin6_addr));
-                        }
-                    } else if (type == NetworkConnectionTypeCellular || (type == NetworkConnectionTypeAuto && !shouldUseWiFiForAutoMode())) {
-                        if (strcmp(ifa->ifa_name, "pdp_ip0") == 0 && carrierIPv6) {
-                            struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
-                            inet_pton(AF_INET6, [carrierIPv6 UTF8String], &sin6->sin6_addr);
-                        }
-                        // Optionally, clear en0
-                        if (strcmp(ifa->ifa_name, "en0") == 0) {
-                            struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
-                            memset(&sin6->sin6_addr, 0, sizeof(sin6->sin6_addr));
-                        }
-                    }
+    }
+    
+    // Interface names
+    const char *targetInterface = useWiFiInterface ? "en0" : "pdp_ip0";
+    const char *clearInterface = useWiFiInterface ? "pdp_ip0" : "en0";
+    
+    while (ifa) {
+        if (ifa->ifa_addr) {
+            // Handle IPv4
+            if (ifa->ifa_addr->sa_family == AF_INET) {
+                if (strcmp(ifa->ifa_name, targetInterface) == 0 && hasSpoofedIPv4) {
+                    struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
+                    sin->sin_addr.s_addr = inet_addr([spoofedIPv4 UTF8String]);
+                    PXLog(@"[NetworkHook] Spoofed %s IPv4 to %@", targetInterface, spoofedIPv4);
+                }
+                // Clear the other interface if connection type spoofing is active
+                if (shouldSpoofConnectionType() && strcmp(ifa->ifa_name, clearInterface) == 0) {
+                    struct sockaddr_in *sin = (struct sockaddr_in *)ifa->ifa_addr;
+                    sin->sin_addr.s_addr = 0;
                 }
             }
-            ifa = ifa->ifa_next;
+            // Handle IPv6
+            else if (ifa->ifa_addr->sa_family == AF_INET6) {
+                if (strcmp(ifa->ifa_name, targetInterface) == 0 && hasSpoofedIPv6) {
+                    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
+                    inet_pton(AF_INET6, [spoofedIPv6 UTF8String], &sin6->sin6_addr);
+                    PXLog(@"[NetworkHook] Spoofed %s IPv6 to %@", targetInterface, spoofedIPv6);
+                }
+                // Clear the other interface if connection type spoofing is active
+                if (shouldSpoofConnectionType() && strcmp(ifa->ifa_name, clearInterface) == 0) {
+                    struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)ifa->ifa_addr;
+                    memset(&sin6->sin6_addr, 0, sizeof(sin6->sin6_addr));
+                }
+            }
         }
+        ifa = ifa->ifa_next;
     }
+    
     return result;
 }
 
