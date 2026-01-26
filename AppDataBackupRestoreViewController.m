@@ -105,7 +105,7 @@
     self.includeGroupsSwitch.on = YES;
     [optionsStack addArrangedSubview:groupsRow];
 
-    UIView *prefsRow = makeOptionRow(@"Include Preferences", &_includePrefsSwitch);
+    UIView *prefsRow = makeOptionRow(@"Include Global Preferences (rare)", &_includePrefsSwitch);
     self.includePrefsSwitch.on = YES;
     [optionsStack addArrangedSubview:prefsRow];
     

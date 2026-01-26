@@ -39,6 +39,23 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
     return out.length ? out : @"unknown";
 }
 
+- (NSString *)_preferencesDirectory {
+    // Support rootful + common jailbreak layouts.
+    CommandRunner *runner = [CommandRunner shared];
+    NSString *dir = [runner firstExistingPath:@[
+        @"/var/mobile/Library/Preferences",
+        @"/private/var/mobile/Library/Preferences",
+        @"/var/jb/var/mobile/Library/Preferences",
+        @"/private/var/jb/var/mobile/Library/Preferences"
+    ]];
+    return dir ?: @"/var/mobile/Library/Preferences";
+}
+
+- (NSString *)_preferencesPlistPathForBundleID:(NSString *)bundleID {
+    NSString *prefsDir = [self _preferencesDirectory];
+    return [prefsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", bundleID]];
+}
+
 - (NSString *)_backupRoot {
     NSString *profileId = [self _activeProfileId];
     if (profileId.length) {
@@ -276,7 +293,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
         }
 
         BOOL prefsIncluded = (options & PXBackupOptionIncludePreferences) != 0;
-        NSString *prefSourcePath = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bundleID];
+        NSString *prefSourcePath = [self _preferencesPlistPathForBundleID:bundleID];
         NSString *prefDestPath = [prefsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", bundleID]];
         if (prefsIncluded) {
             if ([fm fileExistsAtPath:prefSourcePath]) {
@@ -284,7 +301,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
                 [runner run:cpCmd];
                 [runner run:[NSString stringWithFormat:@"chmod 600 %@ 2>/dev/null || true", PXShellQuote(prefDestPath)]];
             } else {
-                [warnings addObject:@"Preferences plist not found; skipping"];
+                [warnings addObject:@"Global preferences plist not found (OK for most apps); skipping"];
             }
         }
 
@@ -481,7 +498,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
         }
         if (includePrefs) {
             NSString *prefBackup = [[backupDir stringByAppendingPathComponent:@"preferences"] stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", bundleID]];
-            NSString *prefDest = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bundleID];
+            NSString *prefDest = [self _preferencesPlistPathForBundleID:bundleID];
             if ([fm fileExistsAtPath:prefBackup]) {
                 [runner run:[NSString stringWithFormat:@"cp -f %@ %@ 2>/dev/null || true", PXShellQuote(prefBackup), PXShellQuote(prefDest)]];
                 [runner run:[NSString stringWithFormat:@"chown mobile:mobile %@ 2>/dev/null || true", PXShellQuote(prefDest)]];

@@ -3,6 +3,8 @@
 #import "AppDataCleaner.h"
 #import "CommandRunner.h"
 
+#import <objc/message.h>
+
 static NSString * const PXEntitlementsErrorDomain = @"com.hydra.projectx.entitlements";
 
 @implementation AppEntitlementsReader
@@ -90,6 +92,72 @@ static NSString *PXShellQuote(NSString *s) {
 
 - (NSString *)mainExecutablePathForBundleID:(NSString *)bundleID
                                      error:(NSError **)error {
+    // Preferred: resolve via LSApplicationProxy (more reliable than filesystem UUID scans).
+    Class LSApplicationProxyClass = NSClassFromString(@"LSApplicationProxy");
+    SEL proxySel = NSSelectorFromString(@"applicationProxyForIdentifier:");
+    if (LSApplicationProxyClass && [LSApplicationProxyClass respondsToSelector:proxySel]) {
+        @try {
+            id proxy = ((id (*)(id, SEL, id))objc_msgSend)(LSApplicationProxyClass, proxySel, bundleID);
+            if (proxy) {
+                NSString *bundlePath = nil;
+
+                id bundleURL = nil;
+                @try { bundleURL = [proxy valueForKey:@"bundleURL"]; } @catch (__unused NSException *e) {}
+                if ([bundleURL isKindOfClass:[NSURL class]]) {
+                    bundlePath = [(NSURL *)bundleURL path];
+                } else if ([bundleURL isKindOfClass:[NSString class]]) {
+                    bundlePath = (NSString *)bundleURL;
+                }
+
+                if (!bundlePath.length) {
+                    id bundleContainerURL = nil;
+                    @try { bundleContainerURL = [proxy valueForKey:@"bundleContainerURL"]; } @catch (__unused NSException *e) {}
+                    if ([bundleContainerURL isKindOfClass:[NSURL class]]) {
+                        bundlePath = [(NSURL *)bundleContainerURL path];
+                    } else if ([bundleContainerURL isKindOfClass:[NSString class]]) {
+                        bundlePath = (NSString *)bundleContainerURL;
+                    }
+                }
+
+                if (bundlePath.length) {
+                    // If we got the container directory, find the .app inside.
+                    NSFileManager *fm = [NSFileManager defaultManager];
+                    BOOL isDir = NO;
+                    if ([fm fileExistsAtPath:bundlePath isDirectory:&isDir] && isDir) {
+                        NSString *appPath = bundlePath;
+                        if (![appPath hasSuffix:@".app"]) {
+                            NSArray<NSString *> *items = [fm contentsOfDirectoryAtPath:bundlePath error:nil];
+                            for (NSString *item in items) {
+                                if ([item hasSuffix:@".app"]) {
+                                    appPath = [bundlePath stringByAppendingPathComponent:item];
+                                    break;
+                                }
+                            }
+                        }
+
+                        NSString *exeName = nil;
+                        @try { exeName = [proxy valueForKey:@"bundleExecutable"]; } @catch (__unused NSException *e) {}
+                        if (!exeName.length) {
+                            NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:[appPath stringByAppendingPathComponent:@"Info.plist"]];
+                            if ([info isKindOfClass:[NSDictionary class]]) {
+                                exeName = info[@"CFBundleExecutable"]; 
+                            }
+                        }
+
+                        if (exeName.length) {
+                            NSString *binaryPath = [appPath stringByAppendingPathComponent:exeName];
+                            if ([fm fileExistsAtPath:binaryPath]) {
+                                return binaryPath;
+                            }
+                        }
+                    }
+                }
+            }
+        } @catch (__unused NSException *e) {
+            // Fall back to filesystem method below
+        }
+    }
+
     AppDataCleaner *cleaner = [AppDataCleaner sharedManager];
     NSString *bundleUUID = [cleaner findBundleContainerUUIDForBundleID:bundleID];
     if (!bundleUUID.length) {
