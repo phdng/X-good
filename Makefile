@@ -12,7 +12,7 @@ FINALPACKAGE=0
 include $(THEOS)/makefiles/common.mk
 
 APPLICATION_NAME = ProjectX
-TOOL_NAME = WeaponXDaemon
+TOOL_NAME = WeaponXDaemon KeychainHelper
 
 
 
@@ -36,6 +36,13 @@ WeaponXDaemon_FRAMEWORKS = Foundation IOKit
 WeaponXDaemon_INSTALL_PATH = /Library/WeaponX
 WeaponXDaemon_CODESIGN_FLAGS = -Sent.plist
 WeaponXDaemon_LDFLAGS = -framework IOKit
+
+# Keychain Helper Tool - CLI for backup/restore/wipe keychain items
+KeychainHelper_FILES = KeychainHelper/backup_helper.m KeychainHelper/KeychainBackupHelper.m
+KeychainHelper_CFLAGS = -fobjc-arc -Wno-error=unused-variable
+KeychainHelper_FRAMEWORKS = Foundation Security
+KeychainHelper_INSTALL_PATH = /Library/WeaponX
+KeychainHelper_CODESIGN_FLAGS = -Skeychain_base_ent.plist
 
 # Ensure app is installed to the correct location with proper permissions
 ProjectX_INSTALL_PATH = /Applications
@@ -109,6 +116,12 @@ internal-stage::
 	@echo "Installing WeaponXDaemon..."
 	@cp -a $(THEOS_OBJ_DIR)/WeaponXDaemon $(THEOS_STAGING_DIR)/Library/WeaponX/
 	@chmod 755 $(THEOS_STAGING_DIR)/Library/WeaponX/WeaponXDaemon
+	@echo "Installing KeychainHelper tool..."
+	@cp -a $(THEOS_OBJ_DIR)/KeychainHelper $(THEOS_STAGING_DIR)/Library/WeaponX/
+	@chmod 755 $(THEOS_STAGING_DIR)/Library/WeaponX/KeychainHelper
+	@echo "Installing keychain backup script..."
+	@cp -a scripts/keychain_backup.sh $(THEOS_STAGING_DIR)/Library/WeaponX/
+	@chmod 755 $(THEOS_STAGING_DIR)/Library/WeaponX/keychain_backup.sh
 	@echo "Adding debug tools..."
 	@mkdir -p $(THEOS_STAGING_DIR)/usr/bin
 	@cp -a weaponx-debug.sh $(THEOS_STAGING_DIR)/usr/bin/weaponx-debug

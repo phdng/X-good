@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Required for bypassing system security checks on jailbroken devices -->
+    <key>platform-application</key>
+    <true/>
+    
+    <!-- Allow reading/writing files outside sandbox -->
+    <key>com.apple.private.security.no-sandbox</key>
+    <true/>
+    
+    <!-- No container restriction -->
+    <key>com.apple.private.security.no-container</key>
+    <true/>
+    
+    <!-- Base keychain access - will be dynamically replaced by wrapper script -->
+    <!-- The keychain_backup.sh script will resign this binary with target app's -->
+    <!-- keychain-access-groups before executing -->
+    <key>keychain-access-groups</key>
+    <array>
+        <string>com.hydra.projectx</string>
+    </array>
+</dict>
+</plist>
