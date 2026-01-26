@@ -261,14 +261,40 @@ parse_keychain_groups() {
     echo "$groups"
 }
 
+# === Parse application-identifier from entitlements ===
+parse_app_identifier() {
+    local ent_file="$1"
+    local identifier=""
+    
+    # Look for application-identifier key and extract the string value
+    local found_key=0
+    while IFS= read -r line; do
+        if echo "$line" | grep -q "application-identifier"; then
+            found_key=1
+            continue
+        fi
+        
+        if [ "$found_key" -eq 1 ]; then
+            if echo "$line" | grep -q "<string>"; then
+                identifier=$(echo "$line" | sed -n 's/.*<string>\(.*\)<\/string>.*/\1/p')
+                break
+            fi
+        fi
+    done < "$ent_file"
+    
+    echo "$identifier"
+}
+
 # === Generate entitlements plist for helper tool ===
 generate_helper_entitlements() {
     local keychain_groups="$1"
     local app_groups="$2"
     local output_file="$3"
+    local app_identifier="$4"  # Optional: application-identifier from target app
     
     log_verbose "Generating entitlements to: $output_file"
     log_verbose "Keychain groups: $keychain_groups"
+    log_verbose "App identifier: $app_identifier"
     
     # Use printf to avoid heredoc CRLF issues
     {
@@ -276,11 +302,29 @@ generate_helper_entitlements() {
         printf '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
         printf '<plist version="1.0">\n'
         printf '<dict>\n'
+        
+        # Platform application - required for system-level access
         printf '    <key>platform-application</key>\n'
         printf '    <true/>\n'
+        
+        # Application identifier - critical for keychain access matching
+        if [ -n "$app_identifier" ]; then
+            printf '    <key>application-identifier</key>\n'
+            printf '    <string>%s</string>\n' "$app_identifier"
+        fi
+        
+        # Security entitlements
         printf '    <key>com.apple.private.security.no-sandbox</key>\n'
         printf '    <true/>\n'
         printf '    <key>com.apple.private.security.no-container</key>\n'
+        printf '    <true/>\n'
+        printf '    <key>com.apple.private.security.container-required</key>\n'
+        printf '    <false/>\n'
+        
+        # Keychain specific entitlements
+        printf '    <key>com.apple.keystore.access-keychain-keys</key>\n'
+        printf '    <true/>\n'
+        printf '    <key>com.apple.keystore.device</key>\n'
         printf '    <true/>\n'
         
         # Add keychain-access-groups
@@ -415,10 +459,20 @@ do_backup() {
     local app_groups
     app_groups=$(parse_app_groups "$ent_file")
     
+    # Parse application-identifier (critical for keychain access)
+    local app_identifier
+    app_identifier=$(parse_app_identifier "$ent_file")
+    if [ -n "$app_identifier" ]; then
+        log_info "Found application-identifier: $app_identifier"
+    else
+        log_warn "No application-identifier found, using bundle ID"
+        app_identifier="$bundle_id"
+    fi
+    
     # Generate helper entitlements
     log_info "Generating helper entitlements..."
     local helper_ent="$TEMP_DIR/helper_ent.plist"
-    if ! generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent"; then
+    if ! generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier"; then
         log_error "Failed to generate helper entitlements"
         return 1
     fi
@@ -474,9 +528,12 @@ do_restore() {
     keychain_groups=$(parse_keychain_groups "$ent_file")
     local app_groups
     app_groups=$(parse_app_groups "$ent_file")
+    local app_identifier
+    app_identifier=$(parse_app_identifier "$ent_file")
+    [ -z "$app_identifier" ] && app_identifier="$bundle_id"
     
     local helper_ent="$TEMP_DIR/helper_ent.plist"
-    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent"
+    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier"
     
     log_info "Resigning KeychainHelper..."
     resign_helper "$helper_ent" || return 1
@@ -529,9 +586,12 @@ do_wipe() {
     
     local app_groups
     app_groups=$(parse_app_groups "$ent_file")
+    local app_identifier
+    app_identifier=$(parse_app_identifier "$ent_file")
+    [ -z "$app_identifier" ] && app_identifier="$bundle_id"
     
     local helper_ent="$TEMP_DIR/helper_ent.plist"
-    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent"
+    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier"
     
     resign_helper "$helper_ent" || return 1
     
@@ -566,9 +626,12 @@ do_list() {
     
     local app_groups
     app_groups=$(parse_app_groups "$ent_file")
+    local app_identifier
+    app_identifier=$(parse_app_identifier "$ent_file")
+    [ -z "$app_identifier" ] && app_identifier="$bundle_id"
     
     local helper_ent="$TEMP_DIR/helper_ent.plist"
-    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent"
+    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier"
     
     resign_helper "$helper_ent" || return 1
     
