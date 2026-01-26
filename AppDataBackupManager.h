@@ -5,6 +5,7 @@ NS_ASSUME_NONNULL_BEGIN
 typedef NS_OPTIONS(NSUInteger, PXBackupOptions) {
     PXBackupOptionIncludeAppGroups   = 1 << 0,
     PXBackupOptionIncludePreferences = 1 << 1,
+    PXBackupOptionIncludeKeychain    = 1 << 2,
 };
 
 @interface PXBackupResult : NSObject

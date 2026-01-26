@@ -151,6 +151,74 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
     return [prefsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", bundleID]];
 }
 
+#pragma mark - Keychain Backup/Restore Helpers
+
+- (NSString *)_keychainBackupScriptPath {
+    CommandRunner *runner = [CommandRunner shared];
+    return [runner firstExistingPath:@[
+        @"/Library/WeaponX/keychain_backup.sh",
+        @"/var/jb/Library/WeaponX/keychain_backup.sh"
+    ]];
+}
+
+- (BOOL)_backupKeychainForBundleID:(NSString *)bundleID
+                            toFile:(NSString *)backupFile
+                          warnings:(NSMutableArray<NSString *> *)warnings {
+    NSString *scriptPath = [self _keychainBackupScriptPath];
+    if (!scriptPath) {
+        [warnings addObject:@"Keychain backup script not found; skipping keychain backup"];
+        return NO;
+    }
+    
+    CommandRunner *runner = [CommandRunner shared];
+    NSString *cmd = [NSString stringWithFormat:@"%@ backup %@ %@",
+                     PXShellQuote(scriptPath),
+                     PXShellQuote(bundleID),
+                     PXShellQuote(backupFile)];
+    
+    CommandResult *res = [runner runAndCapture:cmd];
+    if (res.exitCode != 0) {
+        NSString *msg = res.stderrString.length ? res.stderrString : @"Keychain backup failed";
+        [warnings addObject:[NSString stringWithFormat:@"Keychain backup: %@", msg]];
+        return NO;
+    }
+    
+    return [[NSFileManager defaultManager] fileExistsAtPath:backupFile];
+}
+
+- (BOOL)_restoreKeychainForBundleID:(NSString *)bundleID
+                           fromFile:(NSString *)backupFile
+                          overwrite:(BOOL)overwrite
+                           warnings:(NSMutableArray<NSString *> *)warnings {
+    NSString *scriptPath = [self _keychainBackupScriptPath];
+    if (!scriptPath) {
+        [warnings addObject:@"Keychain backup script not found; skipping keychain restore"];
+        return NO;
+    }
+    
+    if (![[NSFileManager defaultManager] fileExistsAtPath:backupFile]) {
+        [warnings addObject:@"Keychain backup file not found; skipping keychain restore"];
+        return NO;
+    }
+    
+    CommandRunner *runner = [CommandRunner shared];
+    NSString *overwriteArg = overwrite ? @"--overwrite" : @"";
+    NSString *cmd = [NSString stringWithFormat:@"%@ restore %@ %@ %@",
+                     PXShellQuote(scriptPath),
+                     PXShellQuote(bundleID),
+                     PXShellQuote(backupFile),
+                     overwriteArg];
+    
+    CommandResult *res = [runner runAndCapture:cmd];
+    if (res.exitCode != 0) {
+        NSString *msg = res.stderrString.length ? res.stderrString : @"Keychain restore failed";
+        [warnings addObject:[NSString stringWithFormat:@"Keychain restore: %@", msg]];
+        return NO;
+    }
+    
+    return YES;
+}
+
 - (NSString *)_backupRoot {
     NSString *profileId = [self _activeProfileId];
     if (profileId.length) {
@@ -428,6 +496,21 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             }
         }
 
+        // Keychain backup
+        BOOL keychainIncluded = (options & PXBackupOptionIncludeKeychain) != 0;
+        NSString *keychainBackupPath = nil;
+        if (keychainIncluded) {
+            keychainBackupPath = [backupDir stringByAppendingPathComponent:@"keychain.plist"];
+            BOOL keychainSuccess = [self _backupKeychainForBundleID:bundleID
+                                                            toFile:keychainBackupPath
+                                                          warnings:warnings];
+            if (!keychainSuccess) {
+                keychainBackupPath = nil; // Mark as not included if failed
+            } else {
+                [runner run:[NSString stringWithFormat:@"chmod 600 %@ 2>/dev/null || true", PXShellQuote(keychainBackupPath)]];
+            }
+        }
+
         UIDevice *device = [UIDevice currentDevice];
         NSString *iosVersion = device.systemVersion ?: @"";
         NSString *profileId = [self _activeProfileId] ?: @"";
@@ -449,6 +532,10 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
                 @"included": @(prefsIncluded),
                 @"archive": [NSString stringWithFormat:@"preferences/%@.plist", bundleID]
             },
+            @"keychain": @{
+                @"included": @(keychainBackupPath != nil),
+                @"archive": keychainBackupPath ? @"keychain.plist" : @""
+            },
             @"profileAppData": @{
                 @"included": @(profileAppDataArchivePath != nil),
                 @"archive": profileAppDataArchivePath ? @"profile_appdata.tar.gz" : @"",
@@ -461,7 +548,8 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             },
             @"options": @{
                 @"includeAppGroups": @((options & PXBackupOptionIncludeAppGroups) != 0),
-                @"includePreferences": @(prefsIncluded)
+                @"includePreferences": @(prefsIncluded),
+                @"includeKeychain": @(keychainIncluded)
             }
         };
 
@@ -729,6 +817,20 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             } else {
                 [warnings addObject:@"Preferences archive missing; skipping"];
             }
+        }
+
+        // Keychain restore
+        NSDictionary *keychainInfo = manifest[@"keychain"];
+        BOOL includeKeychain = NO;
+        if ([keychainInfo isKindOfClass:[NSDictionary class]] && [keychainInfo[@"included"] respondsToSelector:@selector(boolValue)]) {
+            includeKeychain = [keychainInfo[@"included"] boolValue];
+        }
+        if (includeKeychain) {
+            NSString *keychainBackupPath = [backupDir stringByAppendingPathComponent:@"keychain.plist"];
+            [self _restoreKeychainForBundleID:bundleID
+                                     fromFile:keychainBackupPath
+                                    overwrite:YES  // Overwrite to ensure clean restore
+                                     warnings:warnings];
         }
 
         PXRestoreResult *out = [[PXRestoreResult alloc] init];

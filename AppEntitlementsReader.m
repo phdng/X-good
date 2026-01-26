@@ -15,11 +15,11 @@ static NSString *PXShellQuote(NSString *s) {
     return [NSString stringWithFormat:@"'%@'", escaped];
 }
 
-- (NSArray<NSString *> *)applicationGroupsForBundleID:(NSString *)bundleID
-                                                error:(NSError **)error {
+- (NSDictionary *)fullEntitlementsForBundleID:(NSString *)bundleID
+                                        error:(NSError **)error {
     NSString *binaryPath = [self mainExecutablePathForBundleID:bundleID error:error];
     if (!binaryPath) {
-        return @[];
+        return nil;
     }
 
     CommandRunner *runner = [CommandRunner shared];
@@ -36,7 +36,7 @@ static NSString *PXShellQuote(NSString *s) {
                                          code:1
                                      userInfo:@{NSLocalizedDescriptionKey: @"ldid not found"}];
         }
-        return @[];
+        return nil;
     }
 
     NSString *cmd = [NSString stringWithFormat:@"%@ -e %@", PXShellQuote(ldidPath), PXShellQuote(binaryPath)];
@@ -48,7 +48,7 @@ static NSString *PXShellQuote(NSString *s) {
                                          code:2
                                      userInfo:@{NSLocalizedDescriptionKey: msg}];
         }
-        return @[];
+        return nil;
     }
 
     NSData *plistData = [res.stdoutString dataUsingEncoding:NSUTF8StringEncoding];
@@ -58,7 +58,7 @@ static NSString *PXShellQuote(NSString *s) {
                                          code:3
                                      userInfo:@{NSLocalizedDescriptionKey: @"Empty entitlements output"}];
         }
-        return @[];
+        return nil;
     }
 
     NSPropertyListFormat format = NSPropertyListXMLFormat_v1_0;
@@ -73,10 +73,41 @@ static NSString *PXShellQuote(NSString *s) {
                                                        code:4
                                                    userInfo:@{NSLocalizedDescriptionKey: @"Failed to parse entitlements plist"}];
         }
+        return nil;
+    }
+
+    return (NSDictionary *)obj;
+}
+
+- (NSArray<NSString *> *)applicationGroupsForBundleID:(NSString *)bundleID
+                                                error:(NSError **)error {
+    NSDictionary *entitlements = [self fullEntitlementsForBundleID:bundleID error:error];
+    if (!entitlements) {
         return @[];
     }
 
-    id groups = ((NSDictionary *)obj)[@"com.apple.security.application-groups"];
+    id groups = entitlements[@"com.apple.security.application-groups"];
+    if (![groups isKindOfClass:[NSArray class]]) {
+        return @[];
+    }
+
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+    for (id g in (NSArray *)groups) {
+        if ([g isKindOfClass:[NSString class]] && [(NSString *)g length] > 0) {
+            [out addObject:g];
+        }
+    }
+    return out;
+}
+
+- (NSArray<NSString *> *)keychainAccessGroupsForBundleID:(NSString *)bundleID
+                                                   error:(NSError **)error {
+    NSDictionary *entitlements = [self fullEntitlementsForBundleID:bundleID error:error];
+    if (!entitlements) {
+        return @[];
+    }
+
+    id groups = entitlements[@"keychain-access-groups"];
     if (![groups isKindOfClass:[NSArray class]]) {
         return @[];
     }
