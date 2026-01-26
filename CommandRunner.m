@@ -2,6 +2,9 @@
 
 #import <spawn.h>
 #import <sys/wait.h>
+#import <sys/select.h>
+#import <fcntl.h>
+#import <errno.h>
 
 @implementation CommandResult
 @end
@@ -85,20 +88,100 @@
         return result;
     }
 
+    // Prevent deadlocks: drain stdout/stderr concurrently.
+    // Without this, a chatty stderr can fill its pipe and block the child while we're still
+    // reading stdout (or vice versa).
+    int outFd = outPipe[0];
+    int errFd = errPipe[0];
+
+    (void)fcntl(outFd, F_SETFL, fcntl(outFd, F_GETFL) | O_NONBLOCK);
+    (void)fcntl(errFd, F_SETFL, fcntl(errFd, F_GETFL) | O_NONBLOCK);
+
     NSMutableData *outData = [NSMutableData data];
     NSMutableData *errData = [NSMutableData data];
-
     char buffer[4096];
-    ssize_t n = 0;
-    while ((n = read(outPipe[0], buffer, sizeof(buffer))) > 0) {
-        [outData appendBytes:buffer length:(NSUInteger)n];
-    }
-    while ((n = read(errPipe[0], buffer, sizeof(buffer))) > 0) {
-        [errData appendBytes:buffer length:(NSUInteger)n];
+
+    BOOL outOpen = YES;
+    BOOL errOpen = YES;
+    while (outOpen || errOpen) {
+        fd_set readfds;
+        FD_ZERO(&readfds);
+        int maxfd = -1;
+        if (outOpen) {
+            FD_SET(outFd, &readfds);
+            if (outFd > maxfd) maxfd = outFd;
+        }
+        if (errOpen) {
+            FD_SET(errFd, &readfds);
+            if (errFd > maxfd) maxfd = errFd;
+        }
+
+        // 1s timeout to avoid hard hangs.
+        struct timeval tv;
+        tv.tv_sec = 1;
+        tv.tv_usec = 0;
+
+        int sel = select(maxfd + 1, &readfds, NULL, NULL, &tv);
+        if (sel < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            break;
+        }
+
+        if (sel == 0) {
+            continue;
+        }
+
+        if (outOpen && FD_ISSET(outFd, &readfds)) {
+            for (;;) {
+                ssize_t n = read(outFd, buffer, sizeof(buffer));
+                if (n > 0) {
+                    [outData appendBytes:buffer length:(NSUInteger)n];
+                    continue;
+                }
+                if (n == 0) {
+                    close(outFd);
+                    outOpen = NO;
+                }
+                // n < 0
+                if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                    // drained for now
+                } else if (n < 0 && errno != EINTR) {
+                    close(outFd);
+                    outOpen = NO;
+                }
+                break;
+            }
+        }
+
+        if (errOpen && FD_ISSET(errFd, &readfds)) {
+            for (;;) {
+                ssize_t n = read(errFd, buffer, sizeof(buffer));
+                if (n > 0) {
+                    [errData appendBytes:buffer length:(NSUInteger)n];
+                    continue;
+                }
+                if (n == 0) {
+                    close(errFd);
+                    errOpen = NO;
+                }
+                if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+                } else if (n < 0 && errno != EINTR) {
+                    close(errFd);
+                    errOpen = NO;
+                }
+                break;
+            }
+        }
     }
 
-    close(outPipe[0]);
-    close(errPipe[0]);
+    if (outOpen) {
+        close(outFd);
+    }
+    if (errOpen) {
+        close(errFd);
+    }
 
     int waitStatus = 0;
     waitpid(pid, &waitStatus, 0);

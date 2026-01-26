@@ -39,6 +39,35 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
     return out.length ? out : @"unknown";
 }
 
+- (void)_killRelatedProcessesForBundleID:(NSString *)bundleID {
+    // Always kill the main app process via existing manager.
+    [[FreezeManager sharedManager] killApplication:bundleID];
+
+    // Safari has multiple helper processes that can keep databases open.
+    if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
+        CommandRunner *runner = [CommandRunner shared];
+        NSArray<NSString *> *names = @[
+            @"MobileSafari",
+            @"SafariViewService",
+            @"com.apple.WebKit.WebContent",
+            @"com.apple.WebKit.Networking"
+        ];
+        for (NSString *name in names) {
+            [runner run:[NSString stringWithFormat:@"killall -9 %@ 2>/dev/null || true", PXShellQuote(name)]];
+        }
+    }
+}
+
+- (NSString *)_globalSafariLibraryPath {
+    CommandRunner *runner = [CommandRunner shared];
+    return [runner firstExistingPath:@[
+        @"/var/mobile/Library/Safari",
+        @"/private/var/mobile/Library/Safari",
+        @"/var/jb/var/mobile/Library/Safari",
+        @"/private/var/jb/var/mobile/Library/Safari"
+    ]];
+}
+
 - (CommandResult *)_tarCreate:(NSString *)tarPath fromDir:(NSString *)sourceDir toArchive:(NSString *)archivePath {
     CommandRunner *runner = [CommandRunner shared];
 
@@ -240,6 +269,9 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
         NSFileManager *fm = [NSFileManager defaultManager];
         CommandRunner *runner = [CommandRunner shared];
 
+        // Ensure target app is not running while archiving.
+        [self _killRelatedProcessesForBundleID:bundleID];
+
         NSString *tarPath = [runner firstExistingPath:@[
             @"/usr/bin/tar",
             @"/var/jb/usr/bin/tar",
@@ -365,6 +397,24 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             }
         }
 
+        // Global Library storage for Safari (history/bookmarks live under /var/mobile/Library/Safari)
+        NSString *globalSafariPath = nil;
+        NSString *globalSafariArchivePath = nil;
+        if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
+            globalSafariPath = [self _globalSafariLibraryPath];
+            if (globalSafariPath.length) {
+                BOOL isDir = NO;
+                if ([fm fileExistsAtPath:globalSafariPath isDirectory:&isDir] && isDir) {
+                    globalSafariArchivePath = [backupDir stringByAppendingPathComponent:@"global_safari.tar.gz"];
+                    CommandResult *r = [self _tarCreate:tarPath fromDir:globalSafariPath toArchive:globalSafariArchivePath];
+                    if (r.exitCode != 0 || ![fm fileExistsAtPath:globalSafariArchivePath]) {
+                        [warnings addObject:@"Failed to archive global Safari library; continuing"];
+                        globalSafariArchivePath = nil;
+                    }
+                }
+            }
+        }
+
         BOOL prefsIncluded = (options & PXBackupOptionIncludePreferences) != 0;
         NSString *prefSourcePath = [self _preferencesPlistPathForBundleID:bundleID];
         NSString *prefDestPath = [prefsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", bundleID]];
@@ -403,6 +453,11 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
                 @"included": @(profileAppDataArchivePath != nil),
                 @"archive": profileAppDataArchivePath ? @"profile_appdata.tar.gz" : @"",
                 @"path": profileAppDataPath ?: @""
+            },
+            @"globalSafari": @{
+                @"included": @(globalSafariArchivePath != nil),
+                @"archive": globalSafariArchivePath ? @"global_safari.tar.gz" : @"",
+                @"path": globalSafariPath ?: @""
             },
             @"options": @{
                 @"includeAppGroups": @((options & PXBackupOptionIncludeAppGroups) != 0),
@@ -473,7 +528,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
         }
 
         // Kill app before restore
-        [[FreezeManager sharedManager] killApplication:bundleID];
+        [self _killRelatedProcessesForBundleID:bundleID];
 
         NSString *manifestProfileId = nil;
         if ([manifest[@"profileId"] isKindOfClass:[NSString class]]) {
@@ -589,6 +644,45 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
                 NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
                                                    code:309
                                                userInfo:@{NSLocalizedDescriptionKey: @"Profile appdata archive missing"}];
+                dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                return;
+            }
+        }
+
+        // Restore global Safari library (if present)
+        NSDictionary *globalSafari = manifest[@"globalSafari"];
+        BOOL includeGlobalSafari = NO;
+        if ([globalSafari isKindOfClass:[NSDictionary class]] && [globalSafari[@"included"] respondsToSelector:@selector(boolValue)]) {
+            includeGlobalSafari = [globalSafari[@"included"] boolValue];
+        }
+        if (includeGlobalSafari) {
+            NSString *globalSafariPath = [self _globalSafariLibraryPath];
+            NSString *archivePath = [backupDir stringByAppendingPathComponent:@"global_safari.tar.gz"];
+            if (globalSafariPath.length && [fm fileExistsAtPath:archivePath]) {
+                BOOL isDir = NO;
+                if ([fm fileExistsAtPath:globalSafariPath isDirectory:&isDir] && isDir) {
+                    [self _wipeDirectoryContents:globalSafariPath];
+                    CommandResult *r = [self _tarExtract:tarPath archive:archivePath toDir:globalSafariPath];
+                    if (r.exitCode != 0) {
+                        NSString *msg = r.stderrString.length ? r.stderrString : @"Failed to restore global Safari library";
+                        NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                           code:311
+                                                       userInfo:@{NSLocalizedDescriptionKey: msg}];
+                        dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                        return;
+                    }
+                    [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(globalSafariPath)]];
+                } else {
+                    NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                       code:312
+                                                   userInfo:@{NSLocalizedDescriptionKey: @"Global Safari directory missing"}];
+                    dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                    return;
+                }
+            } else {
+                NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                   code:313
+                                               userInfo:@{NSLocalizedDescriptionKey: @"Global Safari archive missing"}];
                 dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
                 return;
             }
