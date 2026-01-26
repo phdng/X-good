@@ -441,8 +441,10 @@ parse_app_groups() {
 }
 
 # === Resign helper tool with new entitlements ===
+# Usage: resign_helper <entitlements_file> <target_binary>
 resign_helper() {
     local ent_file="$1"
+    local binary_path="$2"
     local ldid_path
     
     ldid_path=$(find_ldid) || {
@@ -450,9 +452,9 @@ resign_helper() {
         return 1
     }
     
-    # Check if helper exists
-    if [ ! -f "$HELPER_TOOL_PATH" ]; then
-        log_error "Helper tool not found at: $HELPER_TOOL_PATH"
+    # Check if binary exists
+    if [ ! -f "$binary_path" ]; then
+        log_error "Binary not found at: $binary_path"
         return 1
     fi
     
@@ -462,13 +464,12 @@ resign_helper() {
         return 1
     fi
     
-    log_verbose "Resigning helper with: $ent_file"
-    log_verbose "Using ldid: $ldid_path"
-    log_verbose "Helper path: $HELPER_TOOL_PATH"
+    log_verbose "Resigning binary: $binary_path"
+    log_verbose "With entitlements: $ent_file"
     
     # Run ldid and capture any errors
     local ldid_output
-    ldid_output=$("$ldid_path" -S"$ent_file" "$HELPER_TOOL_PATH" 2>&1)
+    ldid_output=$("$ldid_path" -S"$ent_file" "$binary_path" 2>&1)
     local exit_code=$?
     
     if [ $exit_code -ne 0 ]; then
@@ -479,7 +480,12 @@ resign_helper() {
         return 1
     fi
     
-    log_verbose "Helper resigned successfully"
+    # Verify signing worked
+    if [ ! -x "$binary_path" ]; then
+        chmod +x "$binary_path"
+    fi
+    
+    log_verbose "Binary resigned successfully"
     return 0
 }
 
@@ -555,16 +561,24 @@ do_backup() {
         return 1
     fi
     
+    # Prepare working copy of helper tool
+    local working_helper="$TEMP_DIR/backup_helper"
+    if ! cp "$HELPER_TOOL_PATH" "$working_helper"; then
+        log_error "Failed to copy helper tool to temp: $working_helper"
+        return 1
+    fi
+    chmod 755 "$working_helper"
+    
     # Resign helper
     log_info "Resigning KeychainHelper..."
-    if ! resign_helper "$helper_ent"; then
+    if ! resign_helper "$helper_ent" "$working_helper"; then
         log_error "Failed to resign helper tool"
         return 1
     fi
     
-    # Execute backup
+    # Execute backup using the resigned copy
     log_info "Executing backup..."
-    "$HELPER_TOOL_PATH" --action backup --file "$backup_file" --groups "$keychain_groups"
+    "$working_helper" --action backup --file "$backup_file" --groups "$keychain_groups"
     
     local exit_code=$?
     if [ $exit_code -eq 0 ]; then
@@ -622,17 +636,25 @@ do_restore() {
     local helper_ent="$TEMP_DIR/helper_ent.plist"
     generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier" "$source_ent_for_system"
     
-    log_info "Resigning KeychainHelper..."
-    resign_helper "$helper_ent" || return 1
+    # Prepare working copy of helper tool
+    local working_helper="$TEMP_DIR/backup_helper"
+    if ! cp "$HELPER_TOOL_PATH" "$working_helper"; then
+        log_error "Failed to copy helper tool to temp: $working_helper"
+        return 1
+    fi
+    chmod 755 "$working_helper"
     
-    # Execute restore
+    log_info "Resigning KeychainHelper..."
+    resign_helper "$helper_ent" "$working_helper" || return 1
+    
+    # Execute restore using the resigned copy
     log_info "Executing restore..."
     local extra_args=""
     if [ "$overwrite" = "--overwrite" ]; then
         extra_args="--overwrite"
     fi
     
-    "$HELPER_TOOL_PATH" --action restore --file "$backup_file" $extra_args
+    "$working_helper" --action restore --file "$backup_file" $extra_args
     
     local exit_code=$?
     if [ $exit_code -eq 0 ]; then
@@ -688,9 +710,17 @@ do_wipe() {
     local helper_ent="$TEMP_DIR/helper_ent.plist"
     generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier" "$source_ent_for_system"
     
-    resign_helper "$helper_ent" || return 1
+    # Prepare working copy
+    local working_helper="$TEMP_DIR/backup_helper"
+    if ! cp "$HELPER_TOOL_PATH" "$working_helper"; then
+        log_error "Failed to copy helper"
+        return 1
+    fi
+    chmod 755 "$working_helper"
     
-    "$HELPER_TOOL_PATH" --action wipe --groups "$keychain_groups"
+    resign_helper "$helper_ent" "$working_helper" || return 1
+    
+    "$working_helper" --action wipe --groups "$keychain_groups"
     
     return $?
 }
@@ -736,9 +766,17 @@ do_list() {
     local helper_ent="$TEMP_DIR/helper_ent.plist"
     generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent" "$app_identifier" "$source_ent_for_system"
     
-    resign_helper "$helper_ent" || return 1
+    # Prepare working copy
+    local working_helper="$TEMP_DIR/backup_helper"
+    if ! cp "$HELPER_TOOL_PATH" "$working_helper"; then
+        log_error "Failed to copy helper"
+        return 1
+    fi
+    chmod 755 "$working_helper"
     
-    "$HELPER_TOOL_PATH" --action list --groups "$keychain_groups"
+    resign_helper "$helper_ent" "$working_helper" || return 1
+    
+    "$working_helper" --action list --groups "$keychain_groups"
     
     return $?
 }
