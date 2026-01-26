@@ -1,8 +1,11 @@
 #import "AppDataBackupRestoreViewController.h"
 #import "common/UIButton+SafeConfiguration.h"
+#import "AppDataBackupManager.h"
 
 @interface AppDataBackupRestoreViewController ()
 @property (nonatomic, strong) UILabel *appLabel;
+@property (nonatomic, strong) UISwitch *includeGroupsSwitch;
+@property (nonatomic, strong) UISwitch *includePrefsSwitch;
 @end
 
 @implementation AppDataBackupRestoreViewController
@@ -59,6 +62,52 @@
     descLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightRegular];
     descLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [self.view addSubview:descLabel];
+
+    // Options
+    UIStackView *optionsStack = [[UIStackView alloc] init];
+    optionsStack.axis = UILayoutConstraintAxisVertical;
+    optionsStack.spacing = 12;
+    optionsStack.alignment = UIStackViewAlignmentFill;
+    optionsStack.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.view addSubview:optionsStack];
+
+    UIView *(^makeOptionRow)(NSString *, UISwitch **) = ^UIView *(NSString *title, UISwitch **outSwitch) {
+        UIView *row = [[UIView alloc] init];
+        row.translatesAutoresizingMaskIntoConstraints = NO;
+
+        UILabel *label = [[UILabel alloc] init];
+        label.text = title;
+        label.font = [UIFont systemFontOfSize:15 weight:UIFontWeightRegular];
+        label.translatesAutoresizingMaskIntoConstraints = NO;
+
+        UISwitch *sw = [[UISwitch alloc] init];
+        sw.translatesAutoresizingMaskIntoConstraints = NO;
+
+        [row addSubview:label];
+        [row addSubview:sw];
+
+        [NSLayoutConstraint activateConstraints:@[
+            [label.leadingAnchor constraintEqualToAnchor:row.leadingAnchor],
+            [label.centerYAnchor constraintEqualToAnchor:sw.centerYAnchor],
+            [sw.trailingAnchor constraintEqualToAnchor:row.trailingAnchor],
+            [sw.topAnchor constraintEqualToAnchor:row.topAnchor],
+            [sw.bottomAnchor constraintEqualToAnchor:row.bottomAnchor]
+        ]];
+
+        if (outSwitch) {
+            *outSwitch = sw;
+        }
+
+        return row;
+    };
+
+    UIView *groupsRow = makeOptionRow(@"Include App Groups (via entitlements)", &_includeGroupsSwitch);
+    self.includeGroupsSwitch.on = YES;
+    [optionsStack addArrangedSubview:groupsRow];
+
+    UIView *prefsRow = makeOptionRow(@"Include Preferences", &_includePrefsSwitch);
+    self.includePrefsSwitch.on = YES;
+    [optionsStack addArrangedSubview:prefsRow];
     
     UIStackView *buttonStack = [[UIStackView alloc] init];
     buttonStack.axis = UILayoutConstraintAxisVertical;
@@ -139,9 +188,14 @@
         [descLabel.topAnchor constraintEqualToAnchor:self.appLabel.bottomAnchor constant:20],
         [descLabel.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:30],
         [descLabel.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-30],
-        
+
+        // Options stack constraints
+        [optionsStack.topAnchor constraintEqualToAnchor:descLabel.bottomAnchor constant:20],
+        [optionsStack.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor constant:30],
+        [optionsStack.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-30],
+         
         // Button stack constraints
-        [buttonStack.topAnchor constraintEqualToAnchor:descLabel.bottomAnchor constant:40],
+        [buttonStack.topAnchor constraintEqualToAnchor:optionsStack.bottomAnchor constant:30],
         [buttonStack.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor]
     ]];
 }
@@ -159,27 +213,58 @@
                                                                preferredStyle:UIAlertControllerStyleAlert];
     
     [confirmAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
-    [confirmAlert addAction:[UIAlertAction actionWithTitle:@"Backup" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
+     [confirmAlert addAction:[UIAlertAction actionWithTitle:@"Backup" style:UIAlertActionStyleDefault handler:^(UIAlertAction * _Nonnull action) {
         // Show processing alert
         UIAlertController *processingAlert = [UIAlertController alertControllerWithTitle:@"Backing Up"
                                                                           message:@"Please wait while we backup your app data..."
                                                                    preferredStyle:UIAlertControllerStyleAlert];
         [self presentViewController:processingAlert animated:YES completion:nil];
         
-        // Simulate processing time
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        PXBackupOptions options = 0;
+        if (self.includeGroupsSwitch.on) {
+            options |= PXBackupOptionIncludeAppGroups;
+        }
+        if (self.includePrefsSwitch.on) {
+            options |= PXBackupOptionIncludePreferences;
+        }
+
+        [[AppDataBackupManager shared] createBackupForBundleID:self.bundleID
+                                                      appName:self.appName
+                                                      options:options
+                                                   completion:^(PXBackupResult *result, NSError *error) {
             [processingAlert dismissViewControllerAnimated:YES completion:^{
-                // TODO: Implement actual backup logic here
-                
-                // Show success message
+                if (error) {
+                    UIAlertController *errAlert = [UIAlertController alertControllerWithTitle:@"Backup Failed"
+                                                                                     message:error.localizedDescription ?: @"Unknown error"
+                                                                              preferredStyle:UIAlertControllerStyleAlert];
+                    [errAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                    [self presentViewController:errAlert animated:YES completion:nil];
+                    return;
+                }
+
+                NSMutableString *msg = [NSMutableString stringWithFormat:@"Backup created for %@.\n\nPath:\n%@", appIdentifier, result.backupDirectory ?: @"(unknown)"];
+                if (result.warnings.count) {
+                    [msg appendString:@"\n\nWarnings:\n"]; 
+                    for (NSString *w in result.warnings) {
+                        [msg appendFormat:@"- %@\n", w];
+                    }
+                }
+
                 UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Backup Complete"
-                                                                               message:[NSString stringWithFormat:@"Data for %@ has been successfully backed up.", appIdentifier]
-                                                                        preferredStyle:UIAlertControllerStyleAlert];
-                [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                                                                                     message:msg
+                                                                              preferredStyle:UIAlertControllerStyleAlert];
+                [successAlert addAction:[UIAlertAction actionWithTitle:@"Copy Path"
+                                                                style:UIAlertActionStyleDefault
+                                                              handler:^(UIAlertAction * _Nonnull action) {
+                    if (result.backupDirectory.length) {
+                        [UIPasteboard generalPasteboard].string = result.backupDirectory;
+                    }
+                }]];
+                [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
                 [self presentViewController:successAlert animated:YES completion:nil];
             }];
-        });
-    }]];
+        }];
+     }]];
     
     [self presentViewController:confirmAlert animated:YES completion:nil];
 }
@@ -194,25 +279,79 @@
     
     [confirmAlert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
     [confirmAlert addAction:[UIAlertAction actionWithTitle:@"Restore" style:UIAlertActionStyleDestructive handler:^(UIAlertAction * _Nonnull action) {
-        // Show processing alert
-        UIAlertController *processingAlert = [UIAlertController alertControllerWithTitle:@"Restoring"
-                                                                          message:@"Please wait while we restore your app data..."
-                                                                   preferredStyle:UIAlertControllerStyleAlert];
-        [self presentViewController:processingAlert animated:YES completion:nil];
-        
-        // Simulate processing time
-        dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(2.0 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-            [processingAlert dismissViewControllerAnimated:YES completion:^{
-                // TODO: Implement actual restore logic here
-                
-                // Show success message
-                UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Restore Complete"
-                                                                               message:[NSString stringWithFormat:@"Data for %@ has been successfully restored.", appIdentifier]
-                                                                        preferredStyle:UIAlertControllerStyleAlert];
-                [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                [self presentViewController:successAlert animated:YES completion:nil];
-            }];
-        });
+        NSArray<NSString *> *backups = [[AppDataBackupManager shared] listBackupDirectoriesForBundleID:self.bundleID];
+        if (!backups.count) {
+            UIAlertController *noAlert = [UIAlertController alertControllerWithTitle:@"No Backups Found"
+                                                                            message:@"No backups were found for this bundle ID. Create a backup first."
+                                                                     preferredStyle:UIAlertControllerStyleAlert];
+            [noAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+            [self presentViewController:noAlert animated:YES completion:nil];
+            return;
+        }
+
+        UIAlertController *picker = [UIAlertController alertControllerWithTitle:@"Select Backup"
+                                                                        message:nil
+                                                                 preferredStyle:UIAlertControllerStyleActionSheet];
+
+        NSUInteger limit = MIN((NSUInteger)10, backups.count);
+        for (NSUInteger i = 0; i < limit; i++) {
+            NSString *dir = backups[i];
+            NSString *title = dir.lastPathComponent;
+            NSError *mErr = nil;
+            NSDictionary *manifest = [[AppDataBackupManager shared] readManifestAtBackupDirectory:dir error:&mErr];
+            if ([manifest isKindOfClass:[NSDictionary class]]) {
+                NSString *ts = manifest[@"timestamp"]; 
+                if ([ts isKindOfClass:[NSString class]] && ts.length) {
+                    title = ts;
+                }
+            }
+
+            [picker addAction:[UIAlertAction actionWithTitle:title
+                                                      style:UIAlertActionStyleDefault
+                                                    handler:^(UIAlertAction * _Nonnull action) {
+                UIAlertController *processingAlert = [UIAlertController alertControllerWithTitle:@"Restoring"
+                                                                                         message:@"Please wait while we restore your app data..."
+                                                                                  preferredStyle:UIAlertControllerStyleAlert];
+                [self presentViewController:processingAlert animated:YES completion:nil];
+
+                [[AppDataBackupManager shared] restoreBackupAtDirectory:dir
+                                                               bundleID:self.bundleID
+                                                                appName:self.appName
+                                                             completion:^(PXRestoreResult *result, NSError *error) {
+                    [processingAlert dismissViewControllerAnimated:YES completion:^{
+                        if (error) {
+                            UIAlertController *errAlert = [UIAlertController alertControllerWithTitle:@"Restore Failed"
+                                                                                             message:error.localizedDescription ?: @"Unknown error"
+                                                                                      preferredStyle:UIAlertControllerStyleAlert];
+                            [errAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                            [self presentViewController:errAlert animated:YES completion:nil];
+                            return;
+                        }
+
+                        NSMutableString *msg = [NSMutableString stringWithFormat:@"Data for %@ has been restored.", appIdentifier];
+                        if (result.warnings.count) {
+                            [msg appendString:@"\n\nWarnings:\n"]; 
+                            for (NSString *w in result.warnings) {
+                                [msg appendFormat:@"- %@\n", w];
+                            }
+                        }
+
+                        UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Restore Complete"
+                                                                                             message:msg
+                                                                                      preferredStyle:UIAlertControllerStyleAlert];
+                        [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                        [self presentViewController:successAlert animated:YES completion:nil];
+                    }];
+                }];
+            }]];
+        }
+
+        [picker addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+        if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
+            picker.popoverPresentationController.sourceView = self.view;
+            picker.popoverPresentationController.sourceRect = CGRectMake(self.view.bounds.size.width/2.0, self.view.bounds.size.height, 1, 1);
+        }
+        [self presentViewController:picker animated:YES completion:nil];
     }]];
     
     [self presentViewController:confirmAlert animated:YES completion:nil];
