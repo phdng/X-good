@@ -499,13 +499,18 @@ do_backup() {
         app_identifier="$bundle_id"
     fi
     
-    # Detect if this is a system app (in /Applications)
+    # Detect if this is a system/Apple app that needs full entitlements
+    # Check: 1) In /Applications, OR 2) Bundle ID starts with com.apple.
     local is_system_app=0
     local source_ent_for_system=""
     if echo "$app_binary" | grep -q "^/Applications/"; then
         is_system_app=1
         source_ent_for_system="$ent_file"
-        log_info "Detected system app - will use full entitlements"
+        log_info "Detected system app (by path) - will use full entitlements"
+    elif echo "$app_identifier" | grep -q "^com\.apple\."; then
+        is_system_app=1
+        source_ent_for_system="$ent_file"
+        log_info "Detected Apple app (by identifier) - will use full entitlements"
     fi
     
     # Generate helper entitlements
@@ -571,11 +576,13 @@ do_restore() {
     app_identifier=$(parse_app_identifier "$ent_file")
     [ -z "$app_identifier" ] && app_identifier="$bundle_id"
     
-    # Detect system app
+    # Detect system/Apple app
     local source_ent_for_system=""
     if echo "$app_binary" | grep -q "^/Applications/"; then
         source_ent_for_system="$ent_file"
-        log_info "Detected system app - will use full entitlements"
+    elif echo "$app_identifier" | grep -q "^com\.apple\."; then
+        source_ent_for_system="$ent_file"
+        log_info "Detected Apple app - will use full entitlements"
     fi
     
     local helper_ent="$TEMP_DIR/helper_ent.plist"
@@ -636,9 +643,11 @@ do_wipe() {
     app_identifier=$(parse_app_identifier "$ent_file")
     [ -z "$app_identifier" ] && app_identifier="$bundle_id"
     
-    # Detect system app
+    # Detect system/Apple app
     local source_ent_for_system=""
     if echo "$app_binary" | grep -q "^/Applications/"; then
+        source_ent_for_system="$ent_file"
+    elif echo "$app_identifier" | grep -q "^com\.apple\."; then
         source_ent_for_system="$ent_file"
     fi
     
@@ -682,9 +691,11 @@ do_list() {
     app_identifier=$(parse_app_identifier "$ent_file")
     [ -z "$app_identifier" ] && app_identifier="$bundle_id"
     
-    # Detect system app
+    # Detect system/Apple app
     local source_ent_for_system=""
     if echo "$app_binary" | grep -q "^/Applications/"; then
+        source_ent_for_system="$ent_file"
+    elif echo "$app_identifier" | grep -q "^com\.apple\."; then
         source_ent_for_system="$ent_file"
     fi
     
