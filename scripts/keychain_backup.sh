@@ -17,7 +17,7 @@
 #   - plutil installed (comes with iOS)
 #
 
-set -e
+# Removed 'set -e' for better error handling - we handle errors explicitly
 
 # === Configuration ===
 HELPER_TOOL_PATH="/Library/WeaponX/backup_helper"
@@ -44,7 +44,7 @@ log_error() {
 
 log_verbose() {
     if [ "$VERBOSE" -eq 1 ]; then
-        echo -e "[DEBUG] $1"
+        echo -e "[DEBUG] $1" >&2
     fi
 }
 
@@ -267,49 +267,60 @@ generate_helper_entitlements() {
     local app_groups="$2"
     local output_file="$3"
     
-    cat > "$output_file" << 'PLIST_HEADER'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>platform-application</key>
-    <true/>
-    <key>com.apple.private.security.no-sandbox</key>
-    <true/>
-    <key>com.apple.private.security.no-container</key>
-    <true/>
-PLIST_HEADER
-
-    # Add keychain-access-groups
-    if [ -n "$keychain_groups" ]; then
-        echo "    <key>keychain-access-groups</key>" >> "$output_file"
-        echo "    <array>" >> "$output_file"
+    log_verbose "Generating entitlements to: $output_file"
+    log_verbose "Keychain groups: $keychain_groups"
+    
+    # Use printf to avoid heredoc CRLF issues
+    {
+        printf '<?xml version="1.0" encoding="UTF-8"?>\n'
+        printf '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n'
+        printf '<plist version="1.0">\n'
+        printf '<dict>\n'
+        printf '    <key>platform-application</key>\n'
+        printf '    <true/>\n'
+        printf '    <key>com.apple.private.security.no-sandbox</key>\n'
+        printf '    <true/>\n'
+        printf '    <key>com.apple.private.security.no-container</key>\n'
+        printf '    <true/>\n'
         
-        IFS=',' read -ra GROUPS <<< "$keychain_groups"
-        for group in "${GROUPS[@]}"; do
-            echo "        <string>$group</string>" >> "$output_file"
-        done
+        # Add keychain-access-groups
+        if [ -n "$keychain_groups" ]; then
+            printf '    <key>keychain-access-groups</key>\n'
+            printf '    <array>\n'
+            
+            IFS=',' read -ra GROUPS <<< "$keychain_groups"
+            for group in "${GROUPS[@]}"; do
+                printf '        <string>%s</string>\n' "$group"
+            done
+            
+            printf '    </array>\n'
+        fi
         
-        echo "    </array>" >> "$output_file"
+        # Add application-groups if present
+        if [ -n "$app_groups" ]; then
+            printf '    <key>com.apple.security.application-groups</key>\n'
+            printf '    <array>\n'
+            
+            IFS=',' read -ra GROUPS <<< "$app_groups"
+            for group in "${GROUPS[@]}"; do
+                printf '        <string>%s</string>\n' "$group"
+            done
+            
+            printf '    </array>\n'
+        fi
+        
+        printf '</dict>\n'
+        printf '</plist>\n'
+    } > "$output_file"
+    
+    # Verify file was created
+    if [ ! -f "$output_file" ]; then
+        log_error "Failed to create entitlements file: $output_file"
+        return 1
     fi
     
-    # Add application-groups if present
-    if [ -n "$app_groups" ]; then
-        echo "    <key>com.apple.security.application-groups</key>" >> "$output_file"
-        echo "    <array>" >> "$output_file"
-        
-        IFS=',' read -ra GROUPS <<< "$app_groups"
-        for group in "${GROUPS[@]}"; do
-            echo "        <string>$group</string>" >> "$output_file"
-        done
-        
-        echo "    </array>" >> "$output_file"
-    fi
-    
-    cat >> "$output_file" << 'PLIST_FOOTER'
-</dict>
-</plist>
-PLIST_FOOTER
+    log_verbose "Entitlements file created successfully"
+    return 0
 }
 
 # === Parse application groups from entitlements ===
@@ -407,14 +418,17 @@ do_backup() {
     # Generate helper entitlements
     log_info "Generating helper entitlements..."
     local helper_ent="$TEMP_DIR/helper_ent.plist"
-    generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent"
+    if ! generate_helper_entitlements "$keychain_groups" "$app_groups" "$helper_ent"; then
+        log_error "Failed to generate helper entitlements"
+        return 1
+    fi
     
     # Resign helper
     log_info "Resigning KeychainHelper..."
-    resign_helper "$helper_ent" || {
+    if ! resign_helper "$helper_ent"; then
         log_error "Failed to resign helper tool"
         return 1
-    }
+    fi
     
     # Execute backup
     log_info "Executing backup..."
