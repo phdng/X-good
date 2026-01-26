@@ -97,9 +97,49 @@ find_plutil() {
 find_app_executable() {
     local bundle_id="$1"
     
-    # Try using lsapplicationproxy via CLI if available
-    # Otherwise fall back to filesystem search
+    log_verbose "Searching for app with bundle ID: $bundle_id"
     
+    # === 1. Check system apps in /Applications ===
+    local system_app_paths=(
+        "/Applications"
+        "/var/jb/Applications"
+        "/private/preboot/jb/Applications"
+    )
+    
+    for base_path in "${system_app_paths[@]}"; do
+        if [ ! -d "$base_path" ]; then
+            continue
+        fi
+        
+        for app_dir in "$base_path"/*.app; do
+            if [ ! -d "$app_dir" ]; then
+                continue
+            fi
+            
+            local info_plist="$app_dir/Info.plist"
+            if [ ! -f "$info_plist" ]; then
+                continue
+            fi
+            
+            # Extract CFBundleIdentifier
+            local found_bundle_id
+            found_bundle_id=$(plutil -key CFBundleIdentifier "$info_plist" 2>/dev/null || true)
+            
+            if [ "$found_bundle_id" = "$bundle_id" ]; then
+                # Found matching app, get executable name
+                local exe_name
+                exe_name=$(plutil -key CFBundleExecutable "$info_plist" 2>/dev/null || true)
+                
+                if [ -n "$exe_name" ] && [ -f "$app_dir/$exe_name" ]; then
+                    log_verbose "Found system app: $app_dir/$exe_name"
+                    echo "$app_dir/$exe_name"
+                    return 0
+                fi
+            fi
+        done
+    done
+    
+    # === 2. Check App Store apps in /var/containers/Bundle/Application ===
     local bundle_paths=(
         "/var/containers/Bundle/Application"
         "/var/mobile/Containers/Bundle/Application"
@@ -139,6 +179,7 @@ find_app_executable() {
                     exe_name=$(plutil -key CFBundleExecutable "$info_plist" 2>/dev/null || true)
                     
                     if [ -n "$exe_name" ] && [ -f "$app_dir/$exe_name" ]; then
+                        log_verbose "Found App Store app: $app_dir/$exe_name"
                         echo "$app_dir/$exe_name"
                         return 0
                     fi
