@@ -39,6 +39,46 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
     return out.length ? out : @"unknown";
 }
 
+- (CommandResult *)_tarCreate:(NSString *)tarPath fromDir:(NSString *)sourceDir toArchive:(NSString *)archivePath {
+    CommandRunner *runner = [CommandRunner shared];
+
+    // Prefer preserving extended attributes (file protection class), ACLs and numeric owners.
+    NSString *cmd = [NSString stringWithFormat:@"%@ --xattrs --acls --numeric-owner -czf %@ --exclude '.com.apple*' -C %@ .",
+                     PXShellQuote(tarPath),
+                     PXShellQuote(archivePath),
+                     PXShellQuote(sourceDir)];
+    CommandResult *res = [runner runAndCapture:cmd];
+    if (res.exitCode == 0) {
+        return res;
+    }
+
+    // Fallback for tar variants without these flags.
+    NSString *fallback = [NSString stringWithFormat:@"%@ -czf %@ --exclude '.com.apple*' -C %@ .",
+                          PXShellQuote(tarPath),
+                          PXShellQuote(archivePath),
+                          PXShellQuote(sourceDir)];
+    return [runner runAndCapture:fallback];
+}
+
+- (CommandResult *)_tarExtract:(NSString *)tarPath archive:(NSString *)archivePath toDir:(NSString *)destDir {
+    CommandRunner *runner = [CommandRunner shared];
+
+    NSString *cmd = [NSString stringWithFormat:@"%@ --xattrs --acls -xzf %@ -C %@",
+                     PXShellQuote(tarPath),
+                     PXShellQuote(archivePath),
+                     PXShellQuote(destDir)];
+    CommandResult *res = [runner runAndCapture:cmd];
+    if (res.exitCode == 0) {
+        return res;
+    }
+
+    NSString *fallback = [NSString stringWithFormat:@"%@ -xzf %@ -C %@",
+                          PXShellQuote(tarPath),
+                          PXShellQuote(archivePath),
+                          PXShellQuote(destDir)];
+    return [runner runAndCapture:fallback];
+}
+
 - (NSString *)_preferencesDirectory {
     // Support rootful + common jailbreak layouts.
     CommandRunner *runner = [CommandRunner shared];
@@ -70,8 +110,11 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
         return;
     }
     CommandRunner *runner = [CommandRunner shared];
-    // Only wipe contents, keep the directory itself.
-    [runner run:[NSString stringWithFormat:@"rm -rf %@/* 2>/dev/null || true", PXShellQuote(dirPath)]];
+    // Only wipe contents, keep the directory itself (including dotfiles).
+    [runner run:[NSString stringWithFormat:@"rm -rf %@/* %@/.[!.]* %@/..?* 2>/dev/null || true",
+                 PXShellQuote(dirPath),
+                 PXShellQuote(dirPath),
+                 PXShellQuote(dirPath)]];
 }
 
 - (NSString *)_preferencesPlistPathForBundleID:(NSString *)bundleID {
@@ -259,11 +302,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
         [runner run:[NSString stringWithFormat:@"chmod 700 %@ 2>/dev/null || true", PXShellQuote(prefsDir)]];
 
         NSString *dataArchivePath = [backupDir stringByAppendingPathComponent:@"data.tar.gz"];
-        NSString *dataTarCmd = [NSString stringWithFormat:@"%@ -czf %@ --exclude '.com.apple*' -C %@ .",
-                                PXShellQuote(tarPath),
-                                PXShellQuote(dataArchivePath),
-                                PXShellQuote(dataContainerPath)];
-        CommandResult *tarRes = [runner runAndCapture:dataTarCmd];
+        CommandResult *tarRes = [self _tarCreate:tarPath fromDir:dataContainerPath toArchive:dataArchivePath];
         if (tarRes.exitCode != 0 || ![fm fileExistsAtPath:dataArchivePath]) {
             NSString *msg = tarRes.stderrString.length ? tarRes.stderrString : @"tar failed for data container";
             NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
@@ -298,11 +337,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             NSString *archiveName = [NSString stringWithFormat:@"%@.tar.gz", PXSanitizeFilenameComponent(info.groupID)];
             NSString *archivePath = [groupsDir stringByAppendingPathComponent:archiveName];
 
-            NSString *cmd = [NSString stringWithFormat:@"%@ -czf %@ --exclude '.com.apple*' -C %@ .",
-                             PXShellQuote(tarPath),
-                             PXShellQuote(archivePath),
-                             PXShellQuote(info.path)];
-            CommandResult *r = [runner runAndCapture:cmd];
+            CommandResult *r = [self _tarCreate:tarPath fromDir:info.path toArchive:archivePath];
             if (r.exitCode != 0 || ![fm fileExistsAtPath:archivePath]) {
                 [warnings addObject:[NSString stringWithFormat:@"Failed to archive group %@ (%@)", info.groupID, info.uuid]];
                 continue;
@@ -322,11 +357,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             BOOL isDir = NO;
             if ([fm fileExistsAtPath:profileAppDataPath isDirectory:&isDir] && isDir) {
                 profileAppDataArchivePath = [backupDir stringByAppendingPathComponent:@"profile_appdata.tar.gz"];
-                NSString *cmd = [NSString stringWithFormat:@"%@ -czf %@ --exclude '.com.apple*' -C %@ .",
-                                 PXShellQuote(tarPath),
-                                 PXShellQuote(profileAppDataArchivePath),
-                                 PXShellQuote(profileAppDataPath)];
-                CommandResult *r = [runner runAndCapture:cmd];
+                CommandResult *r = [self _tarCreate:tarPath fromDir:profileAppDataPath toArchive:profileAppDataArchivePath];
                 if (r.exitCode != 0 || ![fm fileExistsAtPath:profileAppDataArchivePath]) {
                     [warnings addObject:@"Failed to archive profile appdata; continuing" ];
                     profileAppDataArchivePath = nil;
@@ -512,13 +543,14 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
             return;
         }
-        NSString *dataExtractCmd = [NSString stringWithFormat:@"%@ -xzf %@ -C %@",
-                                    PXShellQuote(tarPath),
-                                    PXShellQuote(dataArchive),
-                                    PXShellQuote(dataContainerPath)];
-        CommandResult *dx = [runner runAndCapture:dataExtractCmd];
+        CommandResult *dx = [self _tarExtract:tarPath archive:dataArchive toDir:dataContainerPath];
         if (dx.exitCode != 0) {
-            [warnings addObject:@"Failed to extract data archive"];
+            NSString *msg = dx.stderrString.length ? dx.stderrString : @"Failed to extract data archive";
+            NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                               code:306
+                                           userInfo:@{NSLocalizedDescriptionKey: msg}];
+            dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+            return;
         }
 
         [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]];
@@ -536,20 +568,29 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
                 BOOL isDir = NO;
                 if ([fm fileExistsAtPath:profileAppDataPath isDirectory:&isDir] && isDir) {
                     [self _wipeDirectoryContents:profileAppDataPath];
-                    NSString *cmd = [NSString stringWithFormat:@"%@ -xzf %@ -C %@",
-                                     PXShellQuote(tarPath),
-                                     PXShellQuote(archivePath),
-                                     PXShellQuote(profileAppDataPath)];
-                    CommandResult *r = [runner runAndCapture:cmd];
+                    CommandResult *r = [self _tarExtract:tarPath archive:archivePath toDir:profileAppDataPath];
                     if (r.exitCode != 0) {
-                        [warnings addObject:@"Failed to restore profile appdata"];
+                        NSString *msg = r.stderrString.length ? r.stderrString : @"Failed to restore profile appdata";
+                        NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                           code:307
+                                                       userInfo:@{NSLocalizedDescriptionKey: msg}];
+                        dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                        return;
                     }
                     [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(profileAppDataPath)]];
                 } else {
-                    [warnings addObject:@"Profile appdata directory missing; skipping"];
+                    NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                       code:308
+                                                   userInfo:@{NSLocalizedDescriptionKey: @"Profile appdata directory missing"}];
+                    dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                    return;
                 }
             } else {
-                [warnings addObject:@"Profile appdata archive missing; skipping"];
+                NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                   code:309
+                                               userInfo:@{NSLocalizedDescriptionKey: @"Profile appdata archive missing"}];
+                dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                return;
             }
         }
 
@@ -564,13 +605,14 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
                 continue;
             }
 
-            NSString *cmd = [NSString stringWithFormat:@"%@ -xzf %@ -C %@",
-                             PXShellQuote(tarPath),
-                             PXShellQuote(archivePath),
-                             PXShellQuote(info.path)];
-            CommandResult *r = [runner runAndCapture:cmd];
+            CommandResult *r = [self _tarExtract:tarPath archive:archivePath toDir:info.path];
             if (r.exitCode != 0) {
-                [warnings addObject:[NSString stringWithFormat:@"Failed to extract group %@", info.groupID]];
+                NSString *msg = r.stderrString.length ? r.stderrString : [NSString stringWithFormat:@"Failed to extract group %@", info.groupID];
+                NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                   code:310
+                                               userInfo:@{NSLocalizedDescriptionKey: msg}];
+                dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                return;
             }
 
             [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(info.path)]];
