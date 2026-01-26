@@ -51,6 +51,29 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
     return dir ?: @"/var/mobile/Library/Preferences";
 }
 
+- (NSString *)_profileAppDataPathForBundleID:(NSString *)bundleID {
+    NSString *profileId = [self _activeProfileId];
+    if (!profileId.length || !bundleID.length) {
+        return nil;
+    }
+
+    CommandRunner *runner = [CommandRunner shared];
+    NSString *path = [runner firstExistingPath:@[
+        [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@/appdata/%@", profileId, bundleID],
+        [NSString stringWithFormat:@"/private/var/mobile/Library/WeaponX/Profiles/%@/appdata/%@", profileId, bundleID]
+    ]];
+    return path;
+}
+
+- (void)_wipeDirectoryContents:(NSString *)dirPath {
+    if (!dirPath.length) {
+        return;
+    }
+    CommandRunner *runner = [CommandRunner shared];
+    // Only wipe contents, keep the directory itself.
+    [runner run:[NSString stringWithFormat:@"rm -rf %@/* 2>/dev/null || true", PXShellQuote(dirPath)]];
+}
+
 - (NSString *)_preferencesPlistPathForBundleID:(NSString *)bundleID {
     NSString *prefsDir = [self _preferencesDirectory];
     return [prefsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", bundleID]];
@@ -292,6 +315,25 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             }];
         }
 
+        // Profile redirected appdata (system apps like Safari may store most data here)
+        NSString *profileAppDataPath = [self _profileAppDataPathForBundleID:bundleID];
+        NSString *profileAppDataArchivePath = nil;
+        if (profileAppDataPath.length) {
+            BOOL isDir = NO;
+            if ([fm fileExistsAtPath:profileAppDataPath isDirectory:&isDir] && isDir) {
+                profileAppDataArchivePath = [backupDir stringByAppendingPathComponent:@"profile_appdata.tar.gz"];
+                NSString *cmd = [NSString stringWithFormat:@"%@ -czf %@ --exclude '.com.apple*' -C %@ .",
+                                 PXShellQuote(tarPath),
+                                 PXShellQuote(profileAppDataArchivePath),
+                                 PXShellQuote(profileAppDataPath)];
+                CommandResult *r = [runner runAndCapture:cmd];
+                if (r.exitCode != 0 || ![fm fileExistsAtPath:profileAppDataArchivePath]) {
+                    [warnings addObject:@"Failed to archive profile appdata; continuing" ];
+                    profileAppDataArchivePath = nil;
+                }
+            }
+        }
+
         BOOL prefsIncluded = (options & PXBackupOptionIncludePreferences) != 0;
         NSString *prefSourcePath = [self _preferencesPlistPathForBundleID:bundleID];
         NSString *prefDestPath = [prefsDir stringByAppendingPathComponent:[NSString stringWithFormat:@"%@.plist", bundleID]];
@@ -326,6 +368,11 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
                 @"included": @(prefsIncluded),
                 @"archive": [NSString stringWithFormat:@"preferences/%@.plist", bundleID]
             },
+            @"profileAppData": @{
+                @"included": @(profileAppDataArchivePath != nil),
+                @"archive": profileAppDataArchivePath ? @"profile_appdata.tar.gz" : @"",
+                @"path": profileAppDataPath ?: @""
+            },
             @"options": @{
                 @"includeAppGroups": @((options & PXBackupOptionIncludeAppGroups) != 0),
                 @"includePreferences": @(prefsIncluded)
@@ -353,9 +400,9 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
 }
 
 - (void)restoreBackupAtDirectory:(NSString *)backupDir
-                         bundleID:(NSString *)bundleID
-                          appName:(NSString *)appName
-                       completion:(void (^)(PXRestoreResult *, NSError *))completion {
+                       bundleID:(NSString *)bundleID
+                        appName:(NSString *)appName
+                     completion:(void (^)(PXRestoreResult *, NSError *))completion {
     if (!backupDir.length || !bundleID.length) {
         if (completion) {
             completion(nil, [NSError errorWithDomain:PXBackupErrorDomain
@@ -396,6 +443,15 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
 
         // Kill app before restore
         [[FreezeManager sharedManager] killApplication:bundleID];
+
+        NSString *manifestProfileId = nil;
+        if ([manifest[@"profileId"] isKindOfClass:[NSString class]]) {
+            manifestProfileId = manifest[@"profileId"];
+        }
+        NSString *activeProfileId = [self _activeProfileId];
+        if (manifestProfileId.length && activeProfileId.length && ![manifestProfileId isEqualToString:activeProfileId]) {
+            [warnings addObject:[NSString stringWithFormat:@"Backup was created under profile %@ but current profile is %@", manifestProfileId, activeProfileId]];
+        }
 
         AppDataCleaner *cleaner = [AppDataCleaner sharedManager];
         NSString *dataUUID = [cleaner findDataContainerUUIDForBundleID:bundleID];
@@ -466,6 +522,36 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
         }
 
         [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]];
+
+        // Restore profile redirected appdata (if present)
+        NSDictionary *profileAppData = manifest[@"profileAppData"];
+        BOOL includeProfileAppData = NO;
+        if ([profileAppData isKindOfClass:[NSDictionary class]] && [profileAppData[@"included"] respondsToSelector:@selector(boolValue)]) {
+            includeProfileAppData = [profileAppData[@"included"] boolValue];
+        }
+        if (includeProfileAppData) {
+            NSString *profileAppDataPath = [self _profileAppDataPathForBundleID:bundleID];
+            NSString *archivePath = [backupDir stringByAppendingPathComponent:@"profile_appdata.tar.gz"];
+            if (profileAppDataPath.length && [fm fileExistsAtPath:archivePath]) {
+                BOOL isDir = NO;
+                if ([fm fileExistsAtPath:profileAppDataPath isDirectory:&isDir] && isDir) {
+                    [self _wipeDirectoryContents:profileAppDataPath];
+                    NSString *cmd = [NSString stringWithFormat:@"%@ -xzf %@ -C %@",
+                                     PXShellQuote(tarPath),
+                                     PXShellQuote(archivePath),
+                                     PXShellQuote(profileAppDataPath)];
+                    CommandResult *r = [runner runAndCapture:cmd];
+                    if (r.exitCode != 0) {
+                        [warnings addObject:@"Failed to restore profile appdata"];
+                    }
+                    [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(profileAppDataPath)]];
+                } else {
+                    [warnings addObject:@"Profile appdata directory missing; skipping"];
+                }
+            } else {
+                [warnings addObject:@"Profile appdata archive missing; skipping"];
+            }
+        }
 
         // Wipe and restore each group
         for (AppGroupContainerInfo *info in groupContainers) {
