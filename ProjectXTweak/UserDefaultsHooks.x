@@ -15,6 +15,9 @@ static id processDictionaryValues(id object);
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSTimeInterval kCacheValidityDuration = 300.0; // 5 minutes 
 
+// Recursion guard to prevent infinite loops when getSpoofedUserDefaultsUUID accesses NSUserDefaults
+static __thread BOOL isInsideHook = NO; 
+
 // Callback function for notifications that clear the cache
 static void clearCacheCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo) {
     // Clear cached decisions
@@ -231,11 +234,18 @@ static BOOL isUUIDKey(NSString *key) {
 
 // Base method for getting objects
 - (id)objectForKey:(NSString *)defaultName {
+    // CRITICAL: Recursion guard - if we're already inside hook, pass through to original
+    if (isInsideHook) {
+        return %orig;
+    }
+    
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         if (shouldSpoofForBundle(bundleID) && isUUIDKey(defaultName)) {
+            isInsideHook = YES;
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            isInsideHook = NO;
             PXLog(@"[WeaponX] 🔍 Spoofing UserDefaults UUID for key '%@' with: %@", defaultName, spoofedUUID);
             return spoofedUUID;
         }
@@ -245,9 +255,13 @@ static BOOL isUUIDKey(NSString *key) {
         if (shouldSpoofForBundle(bundleID) && (
             [originalValue isKindOfClass:[NSDictionary class]] || 
             [originalValue isKindOfClass:[NSArray class]])) {
-            return processDictionaryValues(originalValue);
+            isInsideHook = YES;
+            id result = processDictionaryValues(originalValue);
+            isInsideHook = NO;
+            return result;
         }
     } @catch (NSException *exception) {
+        isInsideHook = NO; // Reset guard on exception
         // Just log and continue with original if there's an exception
         PXLog(@"[WeaponX] ⚠️ Exception in objectForKey hook: %@", exception);
     }
@@ -257,15 +271,20 @@ static BOOL isUUIDKey(NSString *key) {
 
 // String-specific method
 - (NSString *)stringForKey:(NSString *)defaultName {
+    if (isInsideHook) return %orig;
+    
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         if (shouldSpoofForBundle(bundleID) && isUUIDKey(defaultName)) {
+            isInsideHook = YES;
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            isInsideHook = NO;
             PXLog(@"[WeaponX] 🔍 Spoofing UserDefaults string UUID for key '%@' with: %@", defaultName, spoofedUUID);
             return spoofedUUID;
         }
     } @catch (NSException *exception) {
+        isInsideHook = NO;
         PXLog(@"[WeaponX] ⚠️ Exception in stringForKey hook: %@", exception);
     }
     
@@ -274,6 +293,8 @@ static BOOL isUUIDKey(NSString *key) {
 
 // Dictionary method - use our recursive processor for nested values
 - (NSDictionary<NSString *, id> *)dictionaryForKey:(NSString *)defaultName {
+    if (isInsideHook) return %orig;
+    
     NSDictionary *originalDict = %orig;
     
     @try {
@@ -285,8 +306,12 @@ static BOOL isUUIDKey(NSString *key) {
         }
         
         // Use our recursive processor to handle nested dictionaries
-        return processDictionaryValues(originalDict);
+        isInsideHook = YES;
+        NSDictionary *result = processDictionaryValues(originalDict);
+        isInsideHook = NO;
+        return result;
     } @catch (NSException *exception) {
+        isInsideHook = NO;
         PXLog(@"[WeaponX] ⚠️ Exception in dictionaryForKey hook: %@", exception);
         return originalDict;
     }
@@ -295,6 +320,8 @@ static BOOL isUUIDKey(NSString *key) {
 // Add additional accessor methods
 
 - (NSArray *)arrayForKey:(NSString *)defaultName {
+    if (isInsideHook) return %orig;
+    
     NSArray *originalArray = %orig;
     
     @try {
@@ -306,20 +333,28 @@ static BOOL isUUIDKey(NSString *key) {
         }
         
         // Use our recursive processor to handle arrays containing dictionaries with UUIDs
-        return processDictionaryValues(originalArray);
+        isInsideHook = YES;
+        NSArray *result = processDictionaryValues(originalArray);
+        isInsideHook = NO;
+        return result;
     } @catch (NSException *exception) {
+        isInsideHook = NO;
         PXLog(@"[WeaponX] ⚠️ Exception in arrayForKey hook: %@", exception);
         return originalArray;
     }
 }
 
 - (NSData *)dataForKey:(NSString *)defaultName {
+    if (isInsideHook) return %orig;
+    
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         // Only handle data that might represent a UUID
         if (shouldSpoofForBundle(bundleID) && isUUIDKey(defaultName)) {
+            isInsideHook = YES;
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            isInsideHook = NO;
             NSData *spoofedData = [spoofedUUID dataUsingEncoding:NSUTF8StringEncoding];
             PXLog(@"[WeaponX] 🔍 Spoofing UserDefaults data UUID for key '%@'", defaultName);
             return spoofedData;
@@ -329,7 +364,9 @@ static BOOL isUUIDKey(NSString *key) {
         
         // Check if the data might be a UUID (16 bytes)
         if (shouldSpoofForBundle(bundleID) && originalData && originalData.length == 16) {
+            isInsideHook = YES;
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            isInsideHook = NO;
             
             // Convert UUID string to 16-byte binary format
             NSString *hexString = [[spoofedUUID stringByReplacingOccurrencesOfString:@"-" withString:@""] lowercaseString];
@@ -348,6 +385,7 @@ static BOOL isUUIDKey(NSString *key) {
             return binaryData;
         }
     } @catch (NSException *exception) {
+        isInsideHook = NO;
         PXLog(@"[WeaponX] ⚠️ Exception in dataForKey hook: %@", exception);
     }
     
@@ -361,6 +399,8 @@ static BOOL isUUIDKey(NSString *key) {
 
 // KVC accessor - important for accessing dictionaries
 - (id)valueForKey:(NSString *)key {
+    if (isInsideHook) return %orig;
+    
     @try {
         // Only override for specific UUID keys to avoid breaking KVC for other properties
         if (isUUIDKey(key)) {
@@ -378,6 +418,8 @@ static BOOL isUUIDKey(NSString *key) {
 
 // Subscript accessor - important for dictionary-style access
 - (id)objectForKeyedSubscript:(NSString *)key {
+    if (isInsideHook) return %orig;
+    
     @try {
         // This is used when accessing NSUserDefaults with subscript notation: userDefaults[key]
         if (isUUIDKey(key)) {
@@ -394,24 +436,31 @@ static BOOL isUUIDKey(NSString *key) {
 
 // Base setter method
 - (void)setObject:(id)value forKey:(NSString *)defaultName {
+    if (isInsideHook) { %orig; return; }
+    
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         if (shouldSpoofForBundle(bundleID)) {
             // If setting a UUID value, replace with our spoofed UUID
             if (isUUIDKey(defaultName) && [value isKindOfClass:[NSString class]]) {
+                isInsideHook = YES;
                 NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+                isInsideHook = NO;
                 PXLog(@"[WeaponX] 🔍 Intercepting and spoofing UUID being saved to UserDefaults for key '%@'", defaultName);
                 return %orig(spoofedUUID, defaultName);
             }
             
             // If setting a dictionary or array, process it to replace UUIDs
             if ([value isKindOfClass:[NSDictionary class]] || [value isKindOfClass:[NSArray class]]) {
+                isInsideHook = YES;
                 id processedValue = processDictionaryValues(value);
+                isInsideHook = NO;
                 return %orig(processedValue, defaultName);
             }
         }
     } @catch (NSException *exception) {
+        isInsideHook = NO;
         PXLog(@"[WeaponX] ⚠️ Exception in setObject:forKey: hook: %@", exception);
     }
     
@@ -420,15 +469,20 @@ static BOOL isUUIDKey(NSString *key) {
 
 // String-specific setter
 - (void)setString:(NSString *)value forKey:(NSString *)defaultName {
+    if (isInsideHook) { %orig; return; }
+    
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         if (shouldSpoofForBundle(bundleID) && isUUIDKey(defaultName)) {
+            isInsideHook = YES;
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            isInsideHook = NO;
             PXLog(@"[WeaponX] 🔍 Intercepting and spoofing UUID string being saved to UserDefaults for key '%@'", defaultName);
             return %orig(spoofedUUID, defaultName);
         }
     } @catch (NSException *exception) {
+        isInsideHook = NO;
         PXLog(@"[WeaponX] ⚠️ Exception in setString:forKey: hook: %@", exception);
     }
     
@@ -437,15 +491,20 @@ static BOOL isUUIDKey(NSString *key) {
 
 // Dictionary-specific setter
 - (void)setDictionary:(NSDictionary<NSString *,id> *)value forKey:(NSString *)defaultName {
+    if (isInsideHook) { %orig; return; }
+    
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         if (shouldSpoofForBundle(bundleID) && value) {
             // Process the dictionary to replace any UUIDs
+            isInsideHook = YES;
             NSDictionary *processedDict = processDictionaryValues(value);
+            isInsideHook = NO;
             return %orig(processedDict, defaultName);
         }
     } @catch (NSException *exception) {
+        isInsideHook = NO;
         PXLog(@"[WeaponX] ⚠️ Exception in setDictionary:forKey: hook: %@", exception);
     }
     
@@ -454,11 +513,15 @@ static BOOL isUUIDKey(NSString *key) {
 
 // Data-specific setter
 - (void)setData:(NSData *)value forKey:(NSString *)defaultName {
+    if (isInsideHook) { %orig; return; }
+    
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         if (shouldSpoofForBundle(bundleID) && isUUIDKey(defaultName) && value) {
+            isInsideHook = YES;
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            isInsideHook = NO;
             NSData *spoofedData = [spoofedUUID dataUsingEncoding:NSUTF8StringEncoding];
             PXLog(@"[WeaponX] 🔍 Intercepting and spoofing data UUID being saved to UserDefaults for key '%@'", defaultName);
             return %orig(spoofedData, defaultName);
@@ -466,7 +529,9 @@ static BOOL isUUIDKey(NSString *key) {
         
         // If the data looks like a UUID (16 bytes), replace it
         if (shouldSpoofForBundle(bundleID) && value && value.length == 16) {
+            isInsideHook = YES;
             NSString *spoofedUUID = getSpoofedUserDefaultsUUID();
+            isInsideHook = NO;
             
             // Convert UUID string to 16-byte binary format
             NSString *hexString = [[spoofedUUID stringByReplacingOccurrencesOfString:@"-" withString:@""] lowercaseString];
@@ -475,9 +540,9 @@ static BOOL isUUIDKey(NSString *key) {
             for (NSInteger i = 0; i < hexString.length; i += 2) {
                 NSString *hexByte = [hexString substringWithRange:NSMakeRange(i, 2)];
                 NSScanner *scanner = [NSScanner scannerWithString:hexByte];
-                unsigned int value;
-                [scanner scanHexInt:&value];
-                uint8_t byte = value;
+                unsigned int intValue;
+                [scanner scanHexInt:&intValue];
+                uint8_t byte = intValue;
                 [binaryData appendBytes:&byte length:1];
             }
             
@@ -485,6 +550,7 @@ static BOOL isUUIDKey(NSString *key) {
             return %orig(binaryData, defaultName);
         }
     } @catch (NSException *exception) {
+        isInsideHook = NO;
         PXLog(@"[WeaponX] ⚠️ Exception in setData:forKey: hook: %@", exception);
     }
     
@@ -503,8 +569,8 @@ static BOOL isUUIDKey(NSString *key) {
             return;
         }
         
-        // Initialize cache
-        cachedBundleDecisions = [NSMutableDictionary dictionary];
+        // Initialize cache with retained object
+        cachedBundleDecisions = [[NSMutableDictionary alloc] init];
         
         // Register for settings change notifications
         CFNotificationCenterAddObserver(
