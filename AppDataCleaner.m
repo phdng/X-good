@@ -37,18 +37,52 @@
     self = [super init];
     if (self) {
         _fileManager = [NSFileManager defaultManager];
+        // Clear old log file on init
+        NSString *logPath = @"/var/mobile/Documents/AppDataCleaner.log";
+        [@"=== AppDataCleaner Log Started ===\n" writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
     }
     return self;
+}
+
+// Helper to log to both console and file
+- (void)logMessage:(NSString *)format, ... NS_FORMAT_FUNCTION(1,2) {
+    va_list args;
+    va_start(args, format);
+    NSString *message = [[NSString alloc] initWithFormat:format arguments:args];
+    va_end(args);
+    
+    // Log to console
+    NSLog(@"%@", message);
+    
+    // Also append to file for easy reading on device
+    NSString *logPath = @"/var/mobile/Documents/AppDataCleaner.log";
+    NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
+    [formatter setDateFormat:@"HH:mm:ss"];
+    NSString *timestamp = [formatter stringFromDate:[NSDate date]];
+    NSString *logLine = [NSString stringWithFormat:@"[%@] %@\n", timestamp, message];
+    
+    NSFileHandle *fileHandle = [NSFileHandle fileHandleForWritingAtPath:logPath];
+    if (fileHandle) {
+        [fileHandle seekToEndOfFile];
+        [fileHandle writeData:[logLine dataUsingEncoding:NSUTF8StringEncoding]];
+        [fileHandle closeFile];
+    } else {
+        // File doesn't exist, create it
+        [logLine writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    }
 }
 
 #pragma mark - Main Public Methods
 
 - (void)clearDataForBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSError *))completion {
-    NSLog(@"[AppDataCleaner] === STARTING data clearing for %@ ===", bundleID);
+    [self logMessage:@"[AppDataCleaner] === STARTING data clearing for %@ ===", bundleID];
     
     // Use __block to track if completion was called
     __block BOOL completionCalled = NO;
     __block dispatch_semaphore_t completionLock = dispatch_semaphore_create(1);
+    
+    // Capture self for logging in blocks
+    __weak typeof(self) weakSelf = self;
     
     // Helper block to safely call completion only once
     void (^safeCompletion)(BOOL, NSError *) = ^(BOOL success, NSError *error) {
@@ -56,7 +90,7 @@
         if (!completionCalled) {
             completionCalled = YES;
             dispatch_semaphore_signal(completionLock);
-            NSLog(@"[AppDataCleaner] Calling completion handler (success=%d)", success);
+            [weakSelf logMessage:@"[AppDataCleaner] Calling completion handler (success=%d)", success];
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (completion) {
                     completion(success, error);
@@ -68,59 +102,58 @@
     };
     
     // Set up a watchdog timer to force completion after 120 seconds max
-    // completeAppDataWipe can take up to 90 seconds with all its operations
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        NSLog(@"[AppDataCleaner] WATCHDOG: 120 second timeout reached, forcing completion");
+        [weakSelf logMessage:@"[AppDataCleaner] WATCHDOG: 120 second timeout reached, forcing completion"];
         safeCompletion(YES, nil);
     });
     
     // Dispatch the cleaning process to background queue
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
         @autoreleasepool {
-            NSLog(@"[AppDataCleaner] Background cleaning started for %@", bundleID);
+            __strong typeof(weakSelf) strongSelf = weakSelf;
+            [strongSelf logMessage:@"[AppDataCleaner] Background cleaning started for %@", bundleID];
             
             @try {
                 // Step 1: Clear keychain FIRST (most important for login data)
-                NSLog(@"[AppDataCleaner] Step 1: Clearing keychain items...");
-                [self clearKeychainItemsForBundleID:bundleID];
-                [self universalKeychainWipeForBundleID:bundleID];
+                [strongSelf logMessage:@"[AppDataCleaner] Step 1: Clearing keychain items..."];
+                [strongSelf clearKeychainItemsForBundleID:bundleID];
+                [strongSelf universalKeychainWipeForBundleID:bundleID];
                 
                 // Step 2: Clear URL credentials (session tokens)
-                NSLog(@"[AppDataCleaner] Step 2: Clearing URL credentials...");
-                [self clearURLCredentialsForBundleID:bundleID];
+                [strongSelf logMessage:@"[AppDataCleaner] Step 2: Clearing URL credentials..."];
+                [strongSelf clearURLCredentialsForBundleID:bundleID];
                 
                 // Step 3: Clear app state data (login sessions)
-                NSLog(@"[AppDataCleaner] Step 3: Clearing app state data...");
-                [self _internalClearAppStateData:bundleID];
+                [strongSelf logMessage:@"[AppDataCleaner] Step 3: Clearing app state data..."];
+                [strongSelf _internalClearAppStateData:bundleID];
                 
                 // Step 4: Use completeAppDataWipe for comprehensive data wiping
-                // This method has better container discovery and permission fixing
-                NSLog(@"[AppDataCleaner] Step 4: Running completeAppDataWipe...");
-                [self completeAppDataWipe:bundleID];
+                [strongSelf logMessage:@"[AppDataCleaner] Step 4: Running completeAppDataWipe..."];
+                [strongSelf completeAppDataWipe:bundleID];
                 
                 // Step 5: Clear HTTP cookie storage in memory  
-                NSLog(@"[AppDataCleaner] Step 5: Clearing HTTP cookies from memory...");
+                [strongSelf logMessage:@"[AppDataCleaner] Step 5: Clearing HTTP cookies from memory..."];
                 NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
                 NSArray *allCookies = [[cookieStorage cookies] copy];
                 for (NSHTTPCookie *cookie in allCookies) {
                     [cookieStorage deleteCookie:cookie];
                 }
-                NSLog(@"[AppDataCleaner] Cleared %lu cookies from memory", (unsigned long)allCookies.count);
+                [strongSelf logMessage:@"[AppDataCleaner] Cleared %lu cookies from memory", (unsigned long)allCookies.count];
                 
                 // Step 6: Clear keychain AGAIN to catch any recreated items
-                NSLog(@"[AppDataCleaner] Step 6: Final keychain cleanup...");
-                [self clearKeychainItemsForBundleID:bundleID];
-                [self universalKeychainWipeForBundleID:bundleID];
+                [strongSelf logMessage:@"[AppDataCleaner] Step 6: Final keychain cleanup..."];
+                [strongSelf clearKeychainItemsForBundleID:bundleID];
+                [strongSelf universalKeychainWipeForBundleID:bundleID];
                 
                 // Step 7: Sync filesystem
-                NSLog(@"[AppDataCleaner] Step 7: Syncing filesystem...");
+                [strongSelf logMessage:@"[AppDataCleaner] Step 7: Syncing filesystem..."];
                 sync();
                 
-                NSLog(@"[AppDataCleaner] === COMPLETED data clearing for %@ ===", bundleID);
+                [strongSelf logMessage:@"[AppDataCleaner] === COMPLETED data clearing for %@ ===", bundleID];
                 safeCompletion(YES, nil);
                 
             } @catch (NSException *exception) {
-                NSLog(@"[AppDataCleaner] EXCEPTION: %@", exception);
+                [strongSelf logMessage:@"[AppDataCleaner] EXCEPTION: %@", exception];
                 safeCompletion(NO, [NSError errorWithDomain:@"AppDataCleaner" 
                                                       code:-1 
                                                   userInfo:@{NSLocalizedDescriptionKey: exception.reason ?: @"Unknown error"}]);
@@ -128,13 +161,13 @@
         }
     });
     
-    NSLog(@"[AppDataCleaner] clearDataForBundleID returned immediately");
+    [self logMessage:@"[AppDataCleaner] clearDataForBundleID returned immediately"];
 }
 
 #pragma mark - Improved Rootless-Compatible App Data Wiping
 
 - (void)completeAppDataWipe:(NSString *)bundleID {
-    NSLog(@"[AppDataCleaner] Starting complete wipe for %@", bundleID);
+    [self logMessage:@"[AppDataCleaner] Starting complete wipe for %@", bundleID];
     
     // --- Optimized: Cache directory listings for this cleaning pass ---
     NSArray *cachedDataDirs = [self listDirectoriesInPath:@"/var/mobile/Containers/Data/Application"];
@@ -144,6 +177,9 @@
     NSArray *cachedGroupDirs = [self listDirectoriesInPath:@"/var/mobile/Containers/Shared/AppGroup"];
     NSArray *cachedRootlessGroupDirs = [self listDirectoriesInPath:@"/containers/Shared/AppGroup"];
 
+    [self logMessage:@"[AppDataCleaner] Found %lu data containers, %lu rootless containers", 
+          (unsigned long)cachedDataDirs.count, (unsigned long)cachedRootlessDataDirs.count];
+
     // Optimized lookups using cached listings
     NSString *dataUUID = [self optimized_findDataContainerUUID:bundleID inDirectories:cachedDataDirs];
     NSString *rootlessDataUUID = [self optimized_findRootlessDataContainerUUID:bundleID inDirectories:cachedRootlessDataDirs];
@@ -152,16 +188,15 @@
     NSString *bundleUUID = [self optimized_findBundleContainerUUID:bundleID inDirectories:cachedBundleDirs rootlessDirs:cachedRootlessBundleDirs];
 
     // Find extension containers (pass cached dirs for speed)
-    NSLog(@"[AppDataCleaner] Finding extension containers for %@", bundleID);
     NSArray *extensionContainers = [self optimized_findExtensionContainers:bundleID dataDirs:cachedDataDirs rootlessDataDirs:cachedRootlessDataDirs bundleDirs:cachedBundleDirs rootlessBundleDirs:cachedRootlessBundleDirs];
     
-    NSLog(@"[AppDataCleaner] Found UUIDs - Bundle: %@, Data: %@, Groups: %@, Extensions: %@, Rootless Groups: %@", 
-          bundleUUID, dataUUID, groupUUIDs, extensionContainers.count > 0 ? extensionContainers : @"Not found", rootlessGroupUUIDs);
+    [self logMessage:@"[AppDataCleaner] Found UUIDs - Bundle: %@, Data: %@, RootlessData: %@, Groups: %@", 
+          bundleUUID ?: @"nil", dataUUID ?: @"nil", rootlessDataUUID ?: @"nil", groupUUIDs];
     
     // Clear data container
     if (dataUUID) {
         NSString *dataContainerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", dataUUID];
-        NSLog(@"[AppDataCleaner] Fixing permissions for path: %@", dataContainerPath);
+        [self logMessage:@"[AppDataCleaner] Wiping data container: %@", dataContainerPath];
         
         // Fix permissions and attributes
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod -R 0777 '%@' 2>/dev/null || true", dataContainerPath]];
@@ -1298,22 +1333,22 @@
     
     // Backup: Try to delete ALL generic passwords that might match this app
     // This is more aggressive and catches items missed by pattern matching
-    NSArray *components = [bundleID componentsSeparatedByString:@"."];
-    for (NSString *component in components) {
-        if (component.length < 3) continue;
-        if ([component isEqualToString:@"com"] || [component isEqualToString:@"org"]) continue;
+    NSArray *bundleParts = [bundleID componentsSeparatedByString:@"."];
+    for (NSString *part in bundleParts) {
+        if (part.length < 3) continue;
+        if ([part isEqualToString:@"com"] || [part isEqualToString:@"org"]) continue;
         
-        // Delete by service name containing component
+        // Delete by service name containing part
         NSDictionary *deleteByService = @{
             (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-            (__bridge id)kSecAttrService: component
+            (__bridge id)kSecAttrService: part
         };
         SecItemDelete((__bridge CFDictionaryRef)deleteByService);
         
-        // Delete by account containing component
+        // Delete by account containing part
         NSDictionary *deleteByAccount = @{
             (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
-            (__bridge id)kSecAttrAccount: component
+            (__bridge id)kSecAttrAccount: part
         };
         SecItemDelete((__bridge CFDictionaryRef)deleteByAccount);
     }
