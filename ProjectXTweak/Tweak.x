@@ -49,68 +49,75 @@ static NSMutableDictionary *valueCache;
 static int (*sysctlbyname_orig)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 static int (*sysctl_orig)(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 
+// Hook for sysctl array - handles both Kernel and Hardware queries
 static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    if (!sysctl_orig) return -1;
+    
+    // Call original first to handle all logic and size checks
+    int ret = sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
+    if (ret != 0) return ret;
+    
+    // Safety check for pointers
+    if (!name || namelen < 2) return ret;
+    
     @autoreleasepool {
         @try {
-            if (!name || namelen < 2 || !oldlenp) {
-                return sysctl_orig ? sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen) : -1;
-            }
-
-            // Only spoof string sysctls under CTL_KERN
-            BOOL isKern = (name[0] == CTL_KERN);
-            if (isKern && (name[1] == KERN_OSVERSION || name[1] == KERN_OSRELEASE || name[1] == KERN_VERSION)) {
-                if (!%c(IdentifierManager)) {
-                    return sysctl_orig ? sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen) : -1;
-                }
-
-                IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-                NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-                if (!manager || !bundleID || ![manager isApplicationEnabled:bundleID] || ![manager isIdentifierEnabled:@"IOSVersion"]) {
-                    return sysctl_orig ? sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen) : -1;
-                }
-
-                NSString *identityDir = [manager profileIdentityPath];
-                NSDictionary *ver = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"ios_version.plist"]] : nil;
-                NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
-                NSString *value = nil;
-
-                if (name[1] == KERN_OSVERSION) {
-                    value = ver[@"build"] ?: current[@"build"];
-                } else if (name[1] == KERN_OSRELEASE) {
-                    value = ver[@"darwin"] ?: current[@"darwin"];
-                } else if (name[1] == KERN_VERSION) {
-                    value = ver[@"kernel_version"] ?: current[@"kernel_version"];
-                }
-
-                if (value.length > 0) {
-                    const char *s = [value UTF8String];
-                    if (s) {
-                        size_t len = strlen(s) + 1;
-
-                        // Size query
-                        if (!oldp) {
-                            *oldlenp = len;
-                            return 0;
+            if (!%c(IdentifierManager)) return ret;
+            IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
+            NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+            if (!manager || !bundleID || ![manager isApplicationEnabled:bundleID]) return ret;
+            
+            // 1. Hardware Identifiers (CTL_HW)
+            if (name[0] == CTL_HW && [manager isIdentifierEnabled:@"DeviceModel"]) {
+                NSString *modelValue = [manager currentValueForIdentifier:@"DeviceModel"];
+                NSString *spoofed = nil;
+                
+                if (name[1] == HW_MACHINE) { // "iPhone11,2"
+                    spoofed = modelValue;
+                } else if (name[1] == HW_MODEL) { // "D321AP"
+                    if (modelValue.length > 0) {
+                        DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
+                        spoofed = [dm hwModelForModel:modelValue];
+                        if (!spoofed.length || [spoofed isEqualToString:@"Unknown"]) {
+                            spoofed = [dm boardIDForModel:modelValue];
                         }
-
-                        if (*oldlenp >= len) {
-                            memcpy(oldp, s, len);
-                            *oldlenp = len;
-                            return 0;
-                        }
-
-                        *oldlenp = len;
-                        errno = ENOMEM;
-                        return -1;
+                    }
+                }
+                
+                if (spoofed.length > 0 && oldp && oldlenp && *oldlenp > 0) {
+                    const char *s = [spoofed UTF8String];
+                    if (strlen(s) + 1 <= *oldlenp) {
+                        memset(oldp, 0, *oldlenp);
+                        strcpy((char *)oldp, s);
+                        PXLog(@"[WeaponX] 🎯 Spoofed sysctl CTL_HW %d to: %s", name[1], s);
                     }
                 }
             }
+            
+            // 2. Kernel Identifiers (CTL_KERN)
+            else if (name[0] == CTL_KERN && [manager isIdentifierEnabled:@"IOSVersion"]) {
+                NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                NSString *spoofed = nil;
+                
+                if (name[1] == KERN_OSVERSION) spoofed = current[@"build"];
+                else if (name[1] == KERN_OSRELEASE) spoofed = current[@"darwin"];
+                else if (name[1] == KERN_VERSION) spoofed = current[@"kernel_version"];
+                
+                if (spoofed.length > 0 && oldp && oldlenp && *oldlenp > 0) {
+                    const char *s = [spoofed UTF8String];
+                    if (strlen(s) + 1 <= *oldlenp) {
+                        memset(oldp, 0, *oldlenp);
+                        strcpy((char *)oldp, s);
+                    }
+                }
+            }
+            
         } @catch (NSException *e) {
-            // fall through
+            // ignore
         }
     }
-
-    return sysctl_orig ? sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen) : -1;
+    
+    return ret;
 }
 
 // Helper functions from successful bypass code
@@ -372,16 +379,8 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         }
     }
     
-    // Jailbreak detection hook (kern.bootargs)
-    if (strcmp(name, "kern.bootargs") == 0) {
-        NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
-        if ([securitySettings boolForKey:@"jailbreakDetectionEnabled"]) {
-             PXLog(@"[WeaponX] Blocking kern.bootargs for %@", bundleID);
-             if (oldlenp) *oldlenp = 0;
-             px_sysctlbyname_in_hook = NO;
-             return -1;
-        }
-    }
+    // Jailbreak detection hook removed to match working bypass behavior
+    // (Facebook may check for behavior discrepancy here)
 
     px_sysctlbyname_in_hook = NO;
     return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
