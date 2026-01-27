@@ -237,6 +237,7 @@ static CFDictionaryRef CFCopySystemVersionDictionary_hook(void) {
 
 // Implementation for sysctl hook - commonly used to get device identifiers and detect jailbreak
 // Implementation for sysctl hook - commonly used to get device identifiers and detect jailbreak
+// Implementation for sysctl hook - commonly used to get device identifiers and detect jailbreak
 static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     if (!sysctlbyname_orig) return -1;
     if (px_sysctlbyname_in_hook) return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
@@ -280,9 +281,14 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         px_sysctlbyname_in_hook = NO;
         return r;
     }
-    
+
+    // NEW: kern.osproductversion - Critical for Facebook
+    if (strcmp(name, "kern.osproductversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
+         NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+         spoofedValue = current[@"version"]; // e.g. "16.1.1"
+    }
     // Machine/Model spoofing
-    if (strcmp(name, "hw.machine") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
+    else if (strcmp(name, "hw.machine") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
         spoofedValue = [manager currentValueForIdentifier:@"DeviceModel"];
     } 
     else if (strcmp(name, "hw.model") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
@@ -295,12 +301,13 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             }
         }
     }
+    else if (strcmp(name, "hw.product") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
+         spoofedValue = [manager currentValueForIdentifier:@"DeviceModel"];
+    }
     // OS Version spoofing
     else if (strcmp(name, "kern.osversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
-        // Logic to get build version... 
-        // Simplified for brevity, relying on IdentifierManager/IOSVersionInfo if needed or use existing logic
          NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
-         spoofedValue = current[@"build"]; // Should be enhanced with profile lookup if needed
+         spoofedValue = current[@"build"];
     }
     else if (strcmp(name, "kern.osrelease") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
          NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
@@ -338,21 +345,23 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             int64_t cores = 6; // Default to modern iPhone (XS/11/12/13/14+)
             
             if ([model hasPrefix:@"iPhone8"] || [model hasPrefix:@"iPhone9"] || [model hasPrefix:@"iPhone10"]) {
-                // iPhone 6S, 7, SE 1st gen -> 2 cores
-                cores = 2;
+                cores = 2; // 6S, 7, 8
             } else if ([model hasPrefix:@"iPhone10,3"] || [model hasPrefix:@"iPhone10,6"]) {
-                // iPhone X -> 6 cores (A11) but usually reports 2 big cores in older checks? 
-                // A11+ marks transition to 6 cores.
-                cores = 6; 
+                cores = 6; // X
+            } else if ([model hasPrefix:@"iPhone11"]) {
+                cores = 6;
             }
             
-            // Allow override if DeviceModelManager can tell us.
-            // For now, A12 (iPhone XS) is definitely 6 cores.
-            // If the user picked a 6S model, 'model' would start with iPhone8,1 etc.
-            
-            // Check original intent
-            if (oldp || oldlenp) {
-               // If valid pointer, write it
+            if (cores > 0) {
+                // Exact match to bypass code size query behavior
+                if (!oldp && oldlenp) {
+                   size_t tmp = 0;
+                   (void)sysctlbyname_orig(name, NULL, &tmp, NULL, 0);
+                   if (tmp > 0) *oldlenp = tmp;
+                   px_sysctlbyname_in_hook = NO;
+                   return 0;
+                }
+
                int r = PXWriteSysctlInt64(name, cores, oldp, oldlenp);
                if (r == 0) {
                    PXLog(@"[WeaponX] 🎯 Spoofed sysctlbyname CPU count %s to: %lld", name, (long long)cores);
@@ -363,7 +372,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         }
     }
     
-    // Jailbreak detection hook (kern.bootargs) - preserved existing logic
+    // Jailbreak detection hook (kern.bootargs)
     if (strcmp(name, "kern.bootargs") == 0) {
         NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
         if ([securitySettings boolForKey:@"jailbreakDetectionEnabled"]) {
