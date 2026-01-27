@@ -353,9 +353,8 @@
     NSLog(@"[AppDataCleaner] Clearing iCloud-related data for %@", bundleID);
     [self clearICloudData:bundleID];
     
-    // Clear app state data
-    NSLog(@"[AppDataCleaner] Clearing app state data for %@", bundleID);
-    [self _internalClearAppStateData:bundleID];
+    // Clear app state data - SKIP second call to avoid respring
+    // [self _internalClearAppStateData:bundleID];
     
     // Clear keychain items again (in case some were recreated during the process)
     [self clearKeychainItemsForBundleID:bundleID];
@@ -3902,35 +3901,49 @@
 }
 
 - (void)cleanAppGroupContainers:(NSString *)bundleID {
-    NSLog(@"[AppDataCleaner] Cleaning app group containers for %@", bundleID);
+    [self logMessage:@"[AppDataCleaner] Cleaning app group containers for %@", bundleID];
     
     // First, check if the app has its own app groups
     NSArray *groupUUIDs = [self findGroupContainerUUIDsForBundleID:bundleID];
     NSArray *rootlessGroupUUIDs = [self findRootlessAppGroupUUIDs:bundleID];
     
+    [self logMessage:@"[AppDataCleaner] Found %lu group containers", (unsigned long)groupUUIDs.count];
+    
     // Get the app's base identifier components for searching
-    NSString *appName = [bundleID componentsSeparatedByString:@"."].lastObject;
-    NSString *companyName = [bundleID componentsSeparatedByString:@"."].count > 1 ? [bundleID componentsSeparatedByString:@"."][1] : nil;
-    NSString *firstComponent = [bundleID componentsSeparatedByString:@"."].firstObject;
+    NSArray *parts = [bundleID componentsSeparatedByString:@"."];
+    NSString *appName = parts.lastObject;
+    NSString *companyName = parts.count > 1 ? parts[1] : @"";
+    NSString *firstComponent = parts.firstObject;
     
     // Handle standard app group containers
     for (NSString *uuid in groupUUIDs) {
         NSString *containerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Shared/AppGroup/%@", uuid];
-        NSLog(@"[AppDataCleaner] Cleaning app group container: %@", containerPath);
+        [self logMessage:@"[AppDataCleaner] Checking app group container: %@", uuid];
         
         // Get and log the group identifier before wiping
         NSString *metadataPath = [NSString stringWithFormat:@"%@/.com.apple.mobile_container_manager.metadata.plist", containerPath];
         NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
         NSString *groupIdentifier = metadata[@"MCMMetadataIdentifier"];
-        NSLog(@"[AppDataCleaner] Cleaning group with identifier: %@", groupIdentifier);
+        [self logMessage:@"[AppDataCleaner] Group identifier: %@", groupIdentifier];
         
-        if ([groupIdentifier hasPrefix:[NSString stringWithFormat:@"group.%@", firstComponent]] || 
-            [groupIdentifier hasPrefix:[NSString stringWithFormat:@"group.%@", companyName]]) {
+        // Safety check: Don't wipe system groups
+        if ([groupIdentifier hasPrefix:@"group.com.apple"] || [groupIdentifier hasPrefix:@"com.apple"]) {
+             [self logMessage:@"[AppDataCleaner] SKIPPING system group: %@", groupIdentifier];
+             continue;
+        }
+        
+        BOOL isAppGroup = NO;
+        if ([groupIdentifier containsString:bundleID]) isAppGroup = YES;
+        if (companyName.length > 0 && [groupIdentifier containsString:companyName]) isAppGroup = YES;
+        if ([groupIdentifier hasPrefix:[NSString stringWithFormat:@"group.%@", firstComponent]]) isAppGroup = YES;
+        
+        if (isAppGroup) {
             // This is definitely owned by our app - completely wipe it
-            NSLog(@"[AppDataCleaner] This group belongs to the app - wiping completely");
+            [self logMessage:@"[AppDataCleaner] Wiping owned group container: %@", uuid];
             [self completelyWipeContainer:containerPath];
         } else {
-            // This is a system group or shared with other apps - clean selectively
+            // This is shared with other apps - clean selectively
+            [self logMessage:@"[AppDataCleaner] Selective cleaning for shared group: %@", uuid];
             [self cleanAppSpecificFilesInSharedContainer:containerPath bundleID:bundleID appName:appName companyName:companyName];
         }
     }
@@ -3938,26 +3951,38 @@
     // Handle rootless app group containers using the same logic
     for (NSString *uuid in rootlessGroupUUIDs) {
         NSString *containerPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", uuid];
-        NSLog(@"[AppDataCleaner] Cleaning rootless app group container: %@", containerPath);
+        [self logMessage:@"[AppDataCleaner] Checking rootless app group container: %@", uuid];
         
         // Get and log the group identifier
         NSString *metadataPath = [NSString stringWithFormat:@"%@/.com.apple.mobile_container_manager.metadata.plist", containerPath];
         NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
         id groupIdentifier = metadata[@"MCMMetadataIdentifier"];
         
-        // Convert to string if it's a string, or inspect array contents
         NSString *groupIdString = nil;
         if ([groupIdentifier isKindOfClass:[NSString class]]) {
             groupIdString = (NSString *)groupIdentifier;
-        } else if ([groupIdentifier isKindOfClass:[NSArray class]]) {
-            // For array-based identifiers, check if our bundle ID is in there
-            NSArray *idArray = (NSArray *)groupIdentifier;
-            if ([idArray containsObject:bundleID]) {
-                NSLog(@"[AppDataCleaner] This rootless group contains our app ID - wiping completely");
-                [self completelyWipeContainer:containerPath];
-                continue;
-            }
         }
+        
+        [self logMessage:@"[AppDataCleaner] Rootless group identifier: %@", groupIdString];
+        
+        if (groupIdString && ([groupIdString hasPrefix:@"group.com.apple"] || [groupIdString hasPrefix:@"com.apple"])) {
+             [self logMessage:@"[AppDataCleaner] SKIPPING rootless system group: %@", groupIdString];
+             continue;
+        }
+        
+        BOOL isAppGroup = NO;
+        if (groupIdString && [groupIdString containsString:bundleID]) isAppGroup = YES;
+        if (groupIdString && companyName.length > 0 && [groupIdentifier containsString:companyName]) isAppGroup = YES;
+        
+        if (isAppGroup) {
+            [self logMessage:@"[AppDataCleaner] Wiping owned rootless group: %@", uuid];
+            [self completelyWipeContainer:containerPath];
+        } else {
+            [self logMessage:@"[AppDataCleaner] Selective cleaning for shared rootless group: %@", uuid];
+            [self cleanAppSpecificFilesInSharedContainer:containerPath bundleID:bundleID appName:appName companyName:companyName];
+        }
+    }
+}
         
         // Check if we should completely wipe or selectively clean
         if (groupIdString && ([groupIdString hasPrefix:[NSString stringWithFormat:@"group.%@", firstComponent]] || 
