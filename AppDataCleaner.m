@@ -204,23 +204,19 @@
         // FAST wipe using rm -rf for each key directory
         NSArray *subDirs = @[
             @"Documents",
-            @"Library/Caches",
-            @"Library/Preferences",
-            @"Library/Saved Application State",
-            @"Library/WebKit",
-            @"Library/Application Support",
-            @"Library/SplashBoard",
-            @"Library/Cookies",
-            @"Library/UserNotifications",
-            @"Library/HTTPStorages",
-            @"tmp"
+            @"Library",  // Wipe entire Library
+            @"tmp",
+            @"StoreKit",
+            @"SystemData"
         ];
         
         for (NSString *dir in subDirs) {
             NSString *fullPath = [dataContainerPath stringByAppendingPathComponent:dir];
-            // Fast delete - no secure wipe needed
             [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", fullPath]];
         }
+        
+        // Also wipe any hidden directories and files at root level
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -name '.*' ! -name '.com.apple*' -exec rm -rf {} \\; 2>/dev/null || true", dataContainerPath]];
         
         [self logMessage:@"[AppDataCleaner] Data container wiped successfully"];
     }
@@ -1005,6 +1001,22 @@
     [possibleAccessGroups addObject:[NSString stringWithFormat:@"%@.group", bundleID]];
     [possibleAccessGroups addObject:[NSString stringWithFormat:@"*%@*", bundleID]]; // Wildcard match
     
+    // Facebook-specific access groups (Meta apps share keychain)
+    [possibleAccessGroups addObject:@"com.facebook.Facebook"];
+    [possibleAccessGroups addObject:@"com.facebook.Messenger"];
+    [possibleAccessGroups addObject:@"com.facebook.Instagram"];
+    [possibleAccessGroups addObject:@"com.facebook.WhatsApp"];
+    [possibleAccessGroups addObject:@"com.facebook.family"];
+    [possibleAccessGroups addObject:@"group.com.facebook.family"];
+    [possibleAccessGroups addObject:@"group.com.facebook.Facebook"];
+    [possibleAccessGroups addObject:@"com.facebook.token"];
+    [possibleAccessGroups addObject:@"com.facebook.sdk"];
+    [possibleAccessGroups addObject:@"com.facebook.core"];
+    [possibleAccessGroups addObject:@"*facebook*"];
+    [possibleAccessGroups addObject:@"*meta*"];
+    [possibleAccessGroups addObject:@"*fbauth*"];
+    [possibleAccessGroups addObject:@"*FBSDKAccessToken*"];
+    
     // For Uber and similar apps using Firebase, add these specific groups
     [possibleAccessGroups addObject:@"com.google.firebase.auth"];
     [possibleAccessGroups addObject:@"com.google.HTTPClient"];
@@ -1014,19 +1026,19 @@
     // Special groups for delivery/rideshare apps
     [possibleAccessGroups addObject:@"com.uber.keychainaccess"];
     [possibleAccessGroups addObject:@"com.ubercab.keychainaccess"];
-    [possibleAccessGroups addObject:@"com.ubercab.UberClient.keychainaccess"]; // Added specific UberClient keychain
-    [possibleAccessGroups addObject:@"com.helix.keychainaccess"]; // Added Helix (Uber alternative name)
+    [possibleAccessGroups addObject:@"com.ubercab.UberClient.keychainaccess"];
+    [possibleAccessGroups addObject:@"com.helix.keychainaccess"];
     [possibleAccessGroups addObject:@"com.lyft.keychainaccess"];
-    [possibleAccessGroups addObject:@"com.lyft.ios.keychainaccess"]; // Added com.lyft.ios keychain access
-    [possibleAccessGroups addObject:@"com.zimride.instant.keychainaccess"]; // Updated Lyft
-    [possibleAccessGroups addObject:@"com.grubhub.search.keychainaccess"]; // Updated GrubHub
-    [possibleAccessGroups addObject:@"doordash.DoorDashConsumer.keychainaccess"]; // Updated DoorDash
-    [possibleAccessGroups addObject:@"doordash.DoorDashConsumer.5P29S428QN.keychainaccess"]; // DoorDash with profile ID
+    [possibleAccessGroups addObject:@"com.lyft.ios.keychainaccess"];
+    [possibleAccessGroups addObject:@"com.zimride.instant.keychainaccess"];
+    [possibleAccessGroups addObject:@"com.grubhub.search.keychainaccess"];
+    [possibleAccessGroups addObject:@"doordash.DoorDashConsumer.keychainaccess"];
+    [possibleAccessGroups addObject:@"doordash.DoorDashConsumer.5P29S428QN.keychainaccess"];
     [possibleAccessGroups addObject:@"*uber*"];
     [possibleAccessGroups addObject:@"*ubercab*"];
-    [possibleAccessGroups addObject:@"*helix*"]; // Added Helix wildcard
-    [possibleAccessGroups addObject:@"*lyft*"]; // Keep original Lyft wildcard
-    [possibleAccessGroups addObject:@"*zimride*"]; // Added Zimride wildcard
+    [possibleAccessGroups addObject:@"*helix*"];
+    [possibleAccessGroups addObject:@"*lyft*"];
+    [possibleAccessGroups addObject:@"*zimride*"];
     [possibleAccessGroups addObject:@"*grubhub*"];
     [possibleAccessGroups addObject:@"*doordash*"];
     
@@ -1083,45 +1095,49 @@
             for (NSDictionary *item in items) {
                 BOOL shouldDelete = NO;
                 
-                // 4.3 Check access group
+                // 4.3 Check access group (case-insensitive)
                 NSString *accessGroup = item[(__bridge id)kSecAttrAccessGroup];
                 if (accessGroup) {
+                    NSString *accessGroupLower = [accessGroup lowercaseString];
                     for (NSString *groupPattern in possibleAccessGroups) {
-                        if ([accessGroup containsString:groupPattern] || 
-                            ([groupPattern containsString:@"*"] && [accessGroup containsString:[groupPattern stringByReplacingOccurrencesOfString:@"*" withString:@""]])) {
+                        NSString *patternLower = [[groupPattern stringByReplacingOccurrencesOfString:@"*" withString:@""] lowercaseString];
+                        if ([accessGroupLower containsString:patternLower] && patternLower.length > 2) {
                             shouldDelete = YES;
                             break;
                         }
                     }
                 }
                 
-                // 4.4 Check service name
+                // 4.4 Check service name (case-insensitive)
                 NSString *service = item[(__bridge id)kSecAttrService];
                 if (!shouldDelete && service) {
+                    NSString *serviceLower = [service lowercaseString];
                     for (NSString *term in searchTerms) {
-                        if ([service containsString:term]) {
+                        if ([serviceLower containsString:[term lowercaseString]]) {
                             shouldDelete = YES;
                             break;
                         }
                     }
                 }
                 
-                // 4.5 Check account name
+                // 4.5 Check account name (case-insensitive)
                 NSString *account = item[(__bridge id)kSecAttrAccount];
                 if (!shouldDelete && account) {
+                    NSString *accountLower = [account lowercaseString];
                     for (NSString *term in searchTerms) {
-                        if ([account containsString:term]) {
+                        if ([accountLower containsString:[term lowercaseString]]) {
                             shouldDelete = YES;
                             break;
                         }
                     }
                 }
                 
-                // 4.6 Check label
+                // 4.6 Check label (case-insensitive)
                 NSString *label = item[(__bridge id)kSecAttrLabel];
                 if (!shouldDelete && label) {
+                    NSString *labelLower = [label lowercaseString];
                     for (NSString *term in searchTerms) {
-                        if ([label containsString:term]) {
+                        if ([labelLower containsString:[term lowercaseString]]) {
                             shouldDelete = YES;
                             break;
                         }
@@ -1141,7 +1157,9 @@
                     if (label) deleteQuery[(__bridge id)kSecAttrLabel] = label;
                     
                     OSStatus deleteStatus = SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
-                    NSLog(@"[AppDataCleaner] Deleted keychain item: %@ (status: %d)", item, (int)deleteStatus);
+                    if (deleteStatus == errSecSuccess) {
+                        NSLog(@"[AppDataCleaner] DELETED keychain: svc=%@ acct=%@ grp=%@", service, account, accessGroup);
+                    }
                 }
             }
         }
