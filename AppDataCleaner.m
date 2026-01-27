@@ -274,8 +274,20 @@
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/*", rootlessBundlePath]];
     }
     
-    // Process group containers (SAFE: Only app's own groups)
-    [self cleanAppGroupContainers:bundleID];
+    // Process group containers - DIRECT wipe of known UUIDs only (no iteration needed!)
+    [self logMessage:@"[AppDataCleaner] Wiping %lu app group containers directly", (unsigned long)groupUUIDs.count];
+    for (NSString *groupUUID in groupUUIDs) {
+        NSString *groupPath = [NSString stringWithFormat:@"/var/mobile/Containers/Shared/AppGroup/%@", groupUUID];
+        [self logMessage:@"[AppDataCleaner] Wiping group: %@", groupUUID];
+        [self wipeDirectoryContents:groupPath keepDirectoryStructure:YES];
+    }
+    
+    // Process rootless group containers
+    for (NSString *groupUUID in rootlessGroupUUIDs) {
+        NSString *groupPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", groupUUID];
+        [self logMessage:@"[AppDataCleaner] Wiping rootless group: %@", groupUUID];
+        [self wipeDirectoryContents:groupPath keepDirectoryStructure:YES];
+    }
     
     // Process extension containers (SAFE: Only app's own extensions)
     if (extensionContainers.count > 0) {
@@ -2450,7 +2462,7 @@
     [self clearPluginKitData:bundleID];
     [self clearThumbnailCaches:bundleID];
     [self clearSystemLogs:bundleID];
-    [self cleanAppGroupContainers:bundleID];
+    // [self cleanAppGroupContainers:bundleID]; // Disabled - now handled directly in completeAppDataWipe
     [self clearAppReceiptData:bundleID withBundleUUID:bundleUUID];
     [self clearPushNotificationData:bundleID];
     [self clearBluetoothData:bundleID];
