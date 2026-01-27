@@ -122,27 +122,34 @@
                 if (comps.count > 0) {
                     NSString *name = [comps lastObject];
                     if (name.length > 2) {
+                        [strongSelf logMessage:@"[AppDataCleaner] DEBUG: Attempting to kill by name: %@", name];
                         [strongSelf runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", name]];
                     }
                 }
                 
                 // 2. Kill by accurate Executable Name finding
-                NSString *bundleUUID = [strongSelf findBundleContainerUUID:bundleID];
-                if (bundleUUID) {
-                    NSString *bundleRoot = [NSString stringWithFormat:@"/var/mobile/Containers/Bundle/Application/%@", bundleUUID];
+                NSString *bundleUUIDItem = [strongSelf findBundleContainerUUID:bundleID];
+                if (bundleUUIDItem) {
+                    [strongSelf logMessage:@"[AppDataCleaner] DEBUG: Found bundle UUID: %@", bundleUUIDItem];
+                    NSString *bundleRoot = [NSString stringWithFormat:@"/var/mobile/Containers/Bundle/Application/%@", bundleUUIDItem];
                     NSArray *items = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:bundleRoot error:nil];
+                    BOOL exeFound = NO;
                     for (NSString *item in items) {
                         if ([item hasSuffix:@".app"]) {
                             NSString *plistPath = [[bundleRoot stringByAppendingPathComponent:item] stringByAppendingPathComponent:@"Info.plist"];
                             NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:plistPath];
                             NSString *exeName = info[@"CFBundleExecutable"];
                             if (exeName) {
+                                exeFound = YES;
                                 [strongSelf logMessage:@"[AppDataCleaner] Killing process: %@", exeName];
                                 [strongSelf runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", exeName]];
                             }
                             break;
                         }
                     }
+                    if (!exeFound) [strongSelf logMessage:@"[AppDataCleaner] DEBUG: Could not find Executable Name in Info.plist"];
+                } else {
+                    [strongSelf logMessage:@"[AppDataCleaner] DEBUG: Could not find Bundle Container UUID in Step 0"];
                 }
                 
                 [NSThread sleepForTimeInterval:0.5]; // Wait for process to die
@@ -1123,15 +1130,24 @@
     // 4. Very aggressive clearing - iterate through different combinations
     for (id secClass in secClasses) {
         // First try with direct bundle ID match with all items
-        NSDictionary *query = @{
+        NSMutableDictionary *query = [NSMutableDictionary dictionaryWithDictionary:@{
             (__bridge id)kSecClass: secClass,
             (__bridge id)kSecReturnAttributes: @YES,
-            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll
-        };
+            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
+            (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny // IMPORTANT: Find iCloud synced items too
+        }];
         
         // 4.1 Retrieve all items of this class first to inspect them
         CFTypeRef result = NULL;
         OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
+        
+        if (status != errSecSuccess) {
+            if (status != errSecItemNotFound) {
+                NSLog(@"[AppDataCleaner] ERROR reading keychain class %@: %d", secClass, (int)status);
+            } else {
+                // Item not found is normal if keychain is empty for this class
+            }
+        }
         
         if (status == errSecSuccess && result != NULL) {
             NSArray *items = (__bridge_transfer NSArray *)result;
@@ -1203,6 +1219,11 @@
                     if (service) deleteQuery[(__bridge id)kSecAttrService] = service;
                     if (account) deleteQuery[(__bridge id)kSecAttrAccount] = account;
                     if (label) deleteQuery[(__bridge id)kSecAttrLabel] = label;
+                    
+                    // IMPORTANT: If item is synchronizable, we must specify it in delete query
+                    if (item[(__bridge id)kSecAttrSynchronizable]) {
+                        deleteQuery[(__bridge id)kSecAttrSynchronizable] = item[(__bridge id)kSecAttrSynchronizable];
+                    }
                     
                     OSStatus deleteStatus = SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
                     if (deleteStatus == errSecSuccess) {
