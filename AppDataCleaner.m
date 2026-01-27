@@ -198,11 +198,10 @@
         NSString *dataContainerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", dataUUID];
         [self logMessage:@"[AppDataCleaner] Wiping data container: %@", dataContainerPath];
         
-        // Fix permissions and attributes
+        // Fix permissions first
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod -R 0777 '%@' 2>/dev/null || true", dataContainerPath]];
-        [self runCommandWithPrivileges:[NSString stringWithFormat:@"chflags -R nouchg,noschg,nohidden '%@' 2>/dev/null || true", dataContainerPath]];
         
-        // Wipe key directories
+        // FAST wipe using rm -rf for each key directory
         NSArray *subDirs = @[
             @"Documents",
             @"Library/Caches",
@@ -213,47 +212,17 @@
             @"Library/SplashBoard",
             @"Library/Cookies",
             @"Library/UserNotifications",
-            @"Library/BackgroundAssets",
-            @"Library/PrivateDocuments",
             @"Library/HTTPStorages",
-            @"Library/SQLiteDatabases",
-            @"Library/Caches/com.apple.nsurlsessiond",
-            @"Library/Caches/com.apple.networking*",
             @"tmp"
         ];
         
-        // Parallelize directory wipes for speed and safety
-        dispatch_group_t wipeGroup = dispatch_group_create();
         for (NSString *dir in subDirs) {
             NSString *fullPath = [dataContainerPath stringByAppendingPathComponent:dir];
-            dispatch_group_enter(wipeGroup);
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                [self wipeDirectoryContents:fullPath keepDirectoryStructure:YES];
-                // Special handling for WebKit directory
-                if ([dir isEqualToString:@"Library/WebKit"]) {
-                    NSLog(@"[AppDataCleaner] Using specialized WebKit cleaning for: %@", fullPath);
-                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod -R 777 '%@' 2>/dev/null || true", fullPath]];
-                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null", fullPath]];
-                    // Deep clean WebsiteData directory
-                    NSString *websiteDataPath = [fullPath stringByAppendingPathComponent:@"WebsiteData"];
-                    NSLog(@"[AppDataCleaner] Deep cleaning WebsiteData at: %@", websiteDataPath);
-                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -not -name '.com.apple*' -exec rm -rf {} \\; 2>/dev/null", websiteDataPath]];
-                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@/LocalStorage' -type f -exec rm -f {} \\; 2>/dev/null", websiteDataPath]];
-                    // Deep clean IndexedDB
-                    NSString *indexedDBPath = [websiteDataPath stringByAppendingPathComponent:@"IndexedDB"];
-                    NSLog(@"[AppDataCleaner] Deep cleaning IndexedDB at: %@", indexedDBPath);
-                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -type f -exec rm -f {} \\; 2>/dev/null", indexedDBPath]];
-                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -type d -name 'v*' -exec rm -rf {} \\; 2>/dev/null", indexedDBPath]];
-                }
-                dispatch_group_leave(wipeGroup);
-            });
+            // Fast delete - no secure wipe needed
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", fullPath]];
         }
-        // Wait with 30 second timeout to prevent indefinite blocking
-        dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC);
-        if (dispatch_group_wait(wipeGroup, timeout) != 0) {
-            NSLog(@"[AppDataCleaner] Warning: wipeGroup timed out after 30 seconds");
-        }
-        // End parallelization
+        
+        [self logMessage:@"[AppDataCleaner] Data container wiped successfully"];
     }
     
     // Clear rootless data container using the same approach
@@ -274,20 +243,23 @@
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/*", rootlessBundlePath]];
     }
     
-    // Process group containers - DIRECT wipe of known UUIDs only (no iteration needed!)
+    // Process group containers - DIRECT wipe using fast rm -rf
     [self logMessage:@"[AppDataCleaner] Wiping %lu app group containers directly", (unsigned long)groupUUIDs.count];
     for (NSString *groupUUID in groupUUIDs) {
         NSString *groupPath = [NSString stringWithFormat:@"/var/mobile/Containers/Shared/AppGroup/%@", groupUUID];
-        [self logMessage:@"[AppDataCleaner] Wiping group: %@", groupUUID];
-        [self wipeDirectoryContents:groupPath keepDirectoryStructure:YES];
+        [self logMessage:@"[AppDataCleaner] Fast wiping group: %@", groupUUID];
+        // Use fast rm -rf instead of slow secure wipe
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", groupPath]];
     }
     
     // Process rootless group containers
     for (NSString *groupUUID in rootlessGroupUUIDs) {
         NSString *groupPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", groupUUID];
-        [self logMessage:@"[AppDataCleaner] Wiping rootless group: %@", groupUUID];
-        [self wipeDirectoryContents:groupPath keepDirectoryStructure:YES];
+        [self logMessage:@"[AppDataCleaner] Fast wiping rootless group: %@", groupUUID];
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", groupPath]];
     }
+    
+    [self logMessage:@"[AppDataCleaner] Group containers wiped successfully"];
     
     // Process extension containers (SAFE: Only app's own extensions)
     if (extensionContainers.count > 0) {
