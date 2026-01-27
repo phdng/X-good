@@ -3,6 +3,9 @@
 #import <sys/wait.h>
 #import <Security/Security.h>
 #import <UIKit/UIKit.h>
+#import <errno.h>
+#import <unistd.h>
+#import <signal.h>
 
 // Add SearchableIndex framework if available
 #import <CoreSpotlight/CoreSpotlight.h>
@@ -43,65 +46,77 @@
 - (void)clearDataForBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSError *))completion {
     NSLog(@"[AppDataCleaner] Starting data clearing process for %@", bundleID);
     
-    // Get data size before clearing
-    NSDictionary *dataSizes = [self getDataUsage:bundleID];
-    NSNumber *beforeSize = dataSizes[@"totalBytes"];
-    NSString *beforeSizeStr = dataSizes[@"formattedSize"];
-    
-    NSLog(@"[AppDataCleaner] Data size before clearing: %@ (%@ bytes)", beforeSizeStr, beforeSize);
-    
-    // NEW: Always perform full cleanup, regardless of whether we found data in hasDataToClear
-    // This ensures we clean everything, even if initial detection fails
-        [self performFullCleanup:bundleID];
-    
-    // Force sync to ensure filesystem changes are persisted
-    [self runCommandWithPrivileges:@"sync"];
-    
-    // Get data size after clearing
-    dataSizes = [self getDataUsage:bundleID];
-    NSNumber *afterSize = dataSizes[@"totalBytes"];
-    NSString *afterSizeStr = dataSizes[@"formattedSize"];
-    
-    NSLog(@"[AppDataCleaner] Data size after clearing: %@ (%@ bytes)", afterSizeStr, afterSize);
-    
-    // Run verification to check for any missed data
-    BOOL verificationResult = [self verifyDataCleared:bundleID];
-    
-    // If verification failed, log it but still return success if we cleared some data
-    if (!verificationResult) {
-        NSLog(@"[AppDataCleaner] Data cleared verification: Failed");
-        NSLog(@"[AppDataCleaner] ⚠️ Some data traces may still exist. The app was cleared but might retain some state.");
-        // NEW: Attempt one more aggressive cleanup on verification failure
-        [self performAggressiveCleanupFor:bundleID];
-        [self runCommandWithPrivileges:@"sync"];
-        } else {
-        NSLog(@"[AppDataCleaner] Data cleared verification: Success");
-        NSLog(@"[AppDataCleaner] ✅ All known data traces have been removed.");
-    }
-    
-    // Force refresh of system caches
-    [self refreshSystemServices];
-    
-    // Continue executing original completion logic
+    // Dispatch the entire cleaning process to background queue immediately
+    // This ensures the calling thread (UI) is never blocked
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-        NSError *error = nil;
-        BOOL success = YES;
-        
-        // Store the results for the UI to display
-        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-        [defaults setObject:@{
-            @"beforeSize": dataSizes,
-            @"afterSize": dataSizes,
-            @"verified": @(verificationResult),
-            @"timestamp": [NSDate date]
-        } forKey:[NSString stringWithFormat:@"DataCleaningResult_%@", bundleID]];
-        [defaults synchronize];
-        
-        dispatch_async(dispatch_get_main_queue(), ^{
-            if (completion) {
-            completion(success, error);
+        @try {
+            // Get data size before clearing
+            NSDictionary *beforeDataSizes = [self getDataUsage:bundleID];
+            NSNumber *beforeSize = beforeDataSizes[@"totalBytes"];
+            NSString *beforeSizeStr = beforeDataSizes[@"formattedSize"];
+            
+            NSLog(@"[AppDataCleaner] Data size before clearing: %@ (%@ bytes)", beforeSizeStr, beforeSize);
+            
+            // Perform full cleanup - this is the heavy operation
+            [self performFullCleanup:bundleID];
+            
+            // Force sync to ensure filesystem changes are persisted
+            [self runCommandWithPrivileges:@"sync"];
+            
+            // Get data size after clearing
+            NSDictionary *afterDataSizes = [self getDataUsage:bundleID];
+            NSNumber *afterSize = afterDataSizes[@"totalBytes"];
+            NSString *afterSizeStr = afterDataSizes[@"formattedSize"];
+            
+            NSLog(@"[AppDataCleaner] Data size after clearing: %@ (%@ bytes)", afterSizeStr, afterSize);
+            
+            // Run verification to check for any missed data
+            BOOL verificationResult = [self verifyDataCleared:bundleID];
+            
+            // If verification failed, log it but still return success if we cleared some data
+            if (!verificationResult) {
+                NSLog(@"[AppDataCleaner] Data cleared verification: Failed");
+                NSLog(@"[AppDataCleaner] ⚠️ Some data traces may still exist. The app was cleared but might retain some state.");
+                // Attempt one more aggressive cleanup on verification failure
+                [self performAggressiveCleanupFor:bundleID];
+                [self runCommandWithPrivileges:@"sync"];
+            } else {
+                NSLog(@"[AppDataCleaner] Data cleared verification: Success");
+                NSLog(@"[AppDataCleaner] ✅ All known data traces have been removed.");
             }
-        });
+            
+            // Force refresh of system caches
+            [self refreshSystemServices];
+            
+            // Store the results for the UI to display
+            NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+            [defaults setObject:@{
+                @"beforeSize": beforeDataSizes ?: @{},
+                @"afterSize": afterDataSizes ?: @{},
+                @"verified": @(verificationResult),
+                @"timestamp": [NSDate date]
+            } forKey:[NSString stringWithFormat:@"DataCleaningResult_%@", bundleID]];
+            [defaults synchronize];
+            
+            NSLog(@"[AppDataCleaner] Completed data clearing process for %@", bundleID);
+            
+            // Call completion on main queue
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (completion) {
+                    completion(YES, nil);
+                }
+            });
+        } @catch (NSException *exception) {
+            NSLog(@"[AppDataCleaner] Exception during data clearing: %@", exception);
+            NSError *error = [NSError errorWithDomain:@"AppDataCleaner" 
+                                                 code:-1 
+                                             userInfo:@{NSLocalizedDescriptionKey: exception.reason ?: @"Unknown error"}];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                if (completion) {
+                    completion(NO, error);
+                }
+            });
+        }
     });
 }
 
@@ -187,7 +202,11 @@
                 dispatch_group_leave(wipeGroup);
             });
         }
-        dispatch_group_wait(wipeGroup, DISPATCH_TIME_FOREVER);
+        // Wait with 60 second timeout to prevent indefinite blocking
+        dispatch_time_t timeout = dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC);
+        if (dispatch_group_wait(wipeGroup, timeout) != 0) {
+            NSLog(@"[AppDataCleaner] Warning: wipeGroup timed out after 60 seconds");
+        }
         // End parallelization
     }
     
@@ -225,7 +244,11 @@
                 dispatch_group_leave(extGroup);
             });
         }
-        dispatch_group_wait(extGroup, DISPATCH_TIME_FOREVER);
+        // Wait with 60 second timeout to prevent indefinite blocking
+        dispatch_time_t extTimeout = dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC);
+        if (dispatch_group_wait(extGroup, extTimeout) != 0) {
+            NSLog(@"[AppDataCleaner] Warning: extGroup timed out after 60 seconds");
+        }
     } else {
         NSLog(@"[AppDataCleaner] No extension containers found to clear for %@", bundleID);
     }
@@ -259,7 +282,11 @@
             dispatch_group_leave(addPathsGroup);
         });
     }
-    dispatch_group_wait(addPathsGroup, DISPATCH_TIME_FOREVER);
+    // Wait with 60 second timeout to prevent indefinite blocking
+    dispatch_time_t addPathsTimeout = dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC);
+    if (dispatch_group_wait(addPathsGroup, addPathsTimeout) != 0) {
+        NSLog(@"[AppDataCleaner] Warning: addPathsGroup timed out after 60 seconds");
+    }
     
     // Clear keychain data (SAFE: Only for this app's bundleID/app groups)
     NSLog(@"[AppDataCleaner] Clearing keychain items for %@", bundleID);
@@ -1616,8 +1643,42 @@
     
     pid_t pid;
     const char *args[] = {"/bin/sh", "-c", [command UTF8String], NULL};
-    posix_spawn(&pid, args[0], NULL, NULL, (char* const*)args, NULL);
-    waitpid(pid, NULL, 0);
+    int spawnResult = posix_spawn(&pid, args[0], NULL, NULL, (char* const*)args, NULL);
+    
+    if (spawnResult != 0) {
+        NSLog(@"[AppDataCleaner] Failed to spawn command: %d", spawnResult);
+        return;
+    }
+    
+    // Use non-blocking wait with timeout to prevent indefinite blocking
+    // Timeout after 30 seconds
+    const int maxWaitIterations = 300; // 300 * 100ms = 30 seconds
+    int iterations = 0;
+    int status;
+    pid_t result;
+    
+    while (iterations < maxWaitIterations) {
+        result = waitpid(pid, &status, WNOHANG);
+        if (result == pid) {
+            // Process finished
+            if (WIFEXITED(status)) {
+                NSLog(@"[AppDataCleaner] Command finished with exit code: %d", WEXITSTATUS(status));
+            }
+            return;
+        } else if (result == -1) {
+            // Error occurred
+            NSLog(@"[AppDataCleaner] waitpid error: %s", strerror(errno));
+            return;
+        }
+        // Process still running, wait a bit
+        usleep(100000); // 100ms
+        iterations++;
+    }
+    
+    // Timeout reached, kill the process
+    NSLog(@"[AppDataCleaner] Command timed out after 30 seconds, killing process %d", pid);
+    kill(pid, SIGKILL);
+    waitpid(pid, &status, 0); // Clean up zombie process
 }
 
 - (BOOL)verifyDataCleared:(NSString *)bundleID {
