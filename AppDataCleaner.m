@@ -114,6 +114,39 @@
             [strongSelf logMessage:@"[AppDataCleaner] Background cleaning started for %@", bundleID];
             
             @try {
+                // Step 0: Force Kill Application to release file locks
+                [strongSelf logMessage:@"[AppDataCleaner] Step 0: Kill application..."];
+                
+                // 1. Kill by partial bundle ID matches (e.g. "Facebook" from "com.facebook.Facebook")
+                NSArray *comps = [bundleID componentsSeparatedByString:@"."];
+                if (comps.count > 0) {
+                    NSString *name = [comps lastObject];
+                    if (name.length > 2) {
+                        [strongSelf runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", name]];
+                    }
+                }
+                
+                // 2. Kill by accurate Executable Name finding
+                NSString *bundleUUID = [strongSelf findBundleContainerUUID:bundleID];
+                if (bundleUUID) {
+                    NSString *bundleRoot = [NSString stringWithFormat:@"/var/mobile/Containers/Bundle/Application/%@", bundleUUID];
+                    NSArray *items = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:bundleRoot error:nil];
+                    for (NSString *item in items) {
+                        if ([item hasSuffix:@".app"]) {
+                            NSString *plistPath = [[bundleRoot stringByAppendingPathComponent:item] stringByAppendingPathComponent:@"Info.plist"];
+                            NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+                            NSString *exeName = info[@"CFBundleExecutable"];
+                            if (exeName) {
+                                [strongSelf logMessage:@"[AppDataCleaner] Killing process: %@", exeName];
+                                [strongSelf runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", exeName]];
+                            }
+                            break;
+                        }
+                    }
+                }
+                
+                [NSThread sleepForTimeInterval:0.5]; // Wait for process to die
+                
                 // Step 1: Clear keychain FIRST (most important for login data)
                 [strongSelf logMessage:@"[AppDataCleaner] Step 1: Clearing keychain items..."];
                 [strongSelf clearKeychainItemsForBundleID:bundleID];
@@ -198,6 +231,11 @@
         NSString *dataContainerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", dataUUID];
         [self logMessage:@"[AppDataCleaner] Wiping data container: %@", dataContainerPath];
         
+        // DEBUG: Count files before
+        NSError *err = nil;
+        NSArray *beforeContents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[dataContainerPath stringByAppendingPathComponent:@"Library"] error:&err];
+        [self logMessage:@"[AppDataCleaner] DEBUG: Library has %lu items before wipe", (unsigned long)beforeContents.count];
+        
         // Fix permissions first
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod -R 0777 '%@' 2>/dev/null || true", dataContainerPath]];
         
@@ -217,6 +255,15 @@
         
         // Also wipe any hidden directories and files at root level
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -name '.*' ! -name '.com.apple*' -exec rm -rf {} \\; 2>/dev/null || true", dataContainerPath]];
+        
+        // DEBUG: Count files after
+        NSArray *afterContents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[dataContainerPath stringByAppendingPathComponent:@"Library"] error:nil];
+        [self logMessage:@"[AppDataCleaner] DEBUG: Library has %lu items AFTER wipe", (unsigned long)afterContents.count];
+        
+        // DEBUG: List remaining items
+        if (afterContents.count > 0) {
+            [self logMessage:@"[AppDataCleaner] DEBUG: Remaining items: %@", [afterContents componentsJoinedByString:@", "]];
+        }
         
         [self logMessage:@"[AppDataCleaner] Data container wiped successfully"];
     }
@@ -308,40 +355,38 @@
     [self clearURLCredentialsForBundleID:bundleID];
     
     // Clear encrypted data 
-    NSLog(@"[AppDataCleaner] Clearing encrypted data for %@", bundleID);
+    [self logMessage:@"[AppDataCleaner] DEBUG: Clearing encrypted data..."];
     [self _internalClearEncryptedData:bundleID];
     
     // If we have a data container, verify HTTPStorages are wiped
     if (dataUUID) {
         NSString *authPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@/Library/HTTPStorages", dataUUID];
+        [self logMessage:@"[AppDataCleaner] DEBUG: Wiping HTTPStorages at %@", authPath];
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", authPath]];
     }
     
     // Clear Spotlight data
-    NSLog(@"[AppDataCleaner] Clearing Spotlight indexes for %@", bundleID);
+    [self logMessage:@"[AppDataCleaner] DEBUG: Clearing Spotlight indexes..."];
     [self clearSpotlightIndexes:bundleID];
     
-    // Process media data
-    NSLog(@"[AppDataCleaner] Clearing media data for %@", bundleID);
-    [self clearMediaData:bundleID];
-    
-    // Process health data
-    NSLog(@"[AppDataCleaner] Clearing health data for %@", bundleID);
-    [self clearHealthData:bundleID];
-    
-    // Clean Safari data
-    NSLog(@"[AppDataCleaner] Clearing Safari data for %@", bundleID);
-    [self clearSafariData:bundleID];
+    // Skip slow media/health/safari clearing for now
+    [self logMessage:@"[AppDataCleaner] DEBUG: Skipping media/health/safari (optimization)"];
+    // [self clearMediaData:bundleID];
+    // [self clearHealthData:bundleID];
+    // [self clearSafariData:bundleID];
     
     // Clean SiriAnalytics
+    [self logMessage:@"[AppDataCleaner] DEBUG: Cleaning Siri analytics..."];
     [self cleanSiriAnalyticsDatabase:bundleID];
     
     // Skip these - they modify system state and can cause respring:
     // [self cleanIconStatePlist:bundleID];
     // [self cleanLaunchServicesDatabase:bundleID];
-    // [self refreshSystemServices]; // THIS WAS CALLING killall -HUP SpringBoard!
     
-    [self logMessage:@"[AppDataCleaner] Skipped system state modifications to prevent respring"];
+    // SAFE to run now (modified to avoid respring)
+    [self refreshSystemServices];
+    
+    [self logMessage:@"[AppDataCleaner] Skipped unsafe system state modifications"];
     
     // === UNIVERSAL KEYCHAIN WIPE FOR 100% COVERAGE ===
     NSLog(@"[AppDataCleaner] Starting universal keychain wipe for %@", bundleID);
@@ -1090,7 +1135,9 @@
         
         if (status == errSecSuccess && result != NULL) {
             NSArray *items = (__bridge_transfer NSArray *)result;
+            NSLog(@"[AppDataCleaner] DEBUG: Found %lu keychain items of this class", (unsigned long)items.count);
             
+            int matchCount = 0;
             // 4.2 Examine each item to see if it matches our bundle ID or keywords
             for (NSDictionary *item in items) {
                 BOOL shouldDelete = NO;
@@ -1146,6 +1193,7 @@
                 
                 // 4.7 If we should delete this item, create a query that matches it exactly
                 if (shouldDelete) {
+                    matchCount++;
                     NSMutableDictionary *deleteQuery = [NSMutableDictionary dictionaryWithDictionary:@{
                         (__bridge id)kSecClass: secClass
                     }];
@@ -1158,10 +1206,13 @@
                     
                     OSStatus deleteStatus = SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
                     if (deleteStatus == errSecSuccess) {
-                        NSLog(@"[AppDataCleaner] DELETED keychain: svc=%@ acct=%@ grp=%@", service, account, accessGroup);
+                        NSLog(@"[AppDataCleaner] DELETED keychain: svc=%@ grp=%@", service ?: @"nil", accessGroup ?: @"nil");
+                    } else {
+                         NSLog(@"[AppDataCleaner] FAILED to delete keychain: status=%d, svc=%@ grp=%@", (int)deleteStatus, service ?: @"nil", accessGroup ?: @"nil");
                     }
                 }
             }
+            NSLog(@"[AppDataCleaner] DEBUG: Scanned %lu items, Matched %d items for deletion", (unsigned long)items.count, matchCount);
         }
         
         // 5. Original direct matches approach - keep this for backward compatibility
@@ -3692,33 +3743,30 @@
 
 // NEW: Method to refresh system services to apply changes
 - (void)refreshSystemServices {
-    NSLog(@"[AppDataCleaner] Refreshing system services to ensure changes take effect");
+    [self logMessage:@"[AppDataCleaner] Refreshing system services (SAFE MODE)..."];
     
-    // Send HUP signal to SpringBoard to refresh IconState
-    [self runCommandWithPrivileges:@"killall -HUP SpringBoard 2>/dev/null || true"];
+    // REMOVED: Send HUP signal to SpringBoard - CAUSES RESPRING
+    // [self runCommandWithPrivileges:@"killall -HUP SpringBoard 2>/dev/null || true"];
     
     // Enhanced: Force system caches to be cleared
     [self runCommandWithPrivileges:@"sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true"];
     
-    // Enhanced: Clear application launch cache
+    // Enhanced: Clear application launch cache (Safe to restart cfprefsd)
     [self runCommandWithPrivileges:@"killall -TERM cfprefsd 2>/dev/null || true"];
     
     // Enhanced: Clear system connectivity caches
     [self runCommandWithPrivileges:@"killall -TERM nsurlsessiond 2>/dev/null || true"];
     
-    // Enhanced: Force cache regen in filesystem
-    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.LaunchServices-* 2>/dev/null || true"];
-    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.LaunchServices-* 2>/dev/null || true"];
+    // REMOVED: Force cache regen in filesystem - MAY CAUSE RESPRING
+    // [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.LaunchServices-* 2>/dev/null || true"];
     
     // Enhanced: Force database vacuum on key databases to remove deleted data
     NSArray *dbsToVacuum = @[
-        @"/var/mobile/Library/SpringBoard/IconState.plist",
-        @"/var/mobile/Library/SpringBoard/ApplicationState.db",
         @"/var/mobile/Library/SpringBoard/ApplicationState.db"
     ];
     
     for (NSString *dbPath in dbsToVacuum) {
-        if ([dbPath hasSuffix:@".db"]) {
+        if ([[NSFileManager defaultManager] fileExistsAtPath:dbPath]) {
             [self runCommandWithPrivileges:[NSString stringWithFormat:@"sqlite3 '%@' \"VACUUM;\" 2>/dev/null || true", dbPath]];
         }
     }
