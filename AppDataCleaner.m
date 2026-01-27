@@ -1692,6 +1692,35 @@
 - (NSArray *)findPathsMatchingPattern:(NSString *)pattern {
     NSMutableArray *paths = [NSMutableArray array];
     
+    // Optimize search root: Default to /, but if pattern starts with exact path prefix, use that
+    NSString *searchRoot = @"/";
+    
+    // Find the first wildcard char to determine static prefix
+    NSRange rangeStar = [pattern rangeOfString:@"*"];
+    NSRange rangeQ = [pattern rangeOfString:@"?"];
+    NSRange rangeBrack = [pattern rangeOfString:@"["];
+    
+    NSUInteger firstWildcard = NSNotFound;
+    if (rangeStar.location != NSNotFound) firstWildcard = rangeStar.location;
+    if (rangeQ.location != NSNotFound && (firstWildcard == NSNotFound || rangeQ.location < firstWildcard)) firstWildcard = rangeQ.location;
+    if (rangeBrack.location != NSNotFound && (firstWildcard == NSNotFound || rangeBrack.location < firstWildcard)) firstWildcard = rangeBrack.location;
+    
+    if (firstWildcard != NSNotFound && firstWildcard > 1) {
+        // Get the path up to the last slash before the wildcard
+        NSString *prefix = [pattern substringToIndex:firstWildcard];
+        NSString *directory = [prefix stringByDeletingLastPathComponent];
+        
+        // Ensure we have a valid absolute path to start from
+        if (directory.length > 1 && [directory hasPrefix:@"/"]) {
+            // Check if directory exists
+            BOOL isDir = NO;
+            if ([[NSFileManager defaultManager] fileExistsAtPath:directory isDirectory:&isDir] && isDir) {
+                searchRoot = directory;
+                // NSLog(@"[AppDataCleaner] Optimized find search root: %@", searchRoot);
+            }
+        }
+    }
+    
     // Create a pipe to read command output
     int pipefds[2];
     pipe(pipefds);
@@ -1702,7 +1731,7 @@
     const char *args[] = {
         "find",
         "-L",  // Follow symbolic links
-        "/",
+        [searchRoot UTF8String], // Use optimized search root
         "-path",
         [pattern UTF8String],
         NULL
@@ -2719,58 +2748,60 @@
 }
 
 // Add new method to handle app state data cleaning for modern apps
+// Add new method to handle app state data cleaning for modern apps
 - (void)_internalClearAppStateData:(NSString *)bundleID {
-    NSLog(@"[AppDataCleaner] Clearing app state data for %@", bundleID);
+    [self logMessage:@"[AppDataCleaner] Clearing app state data for %@", bundleID];
     
-    // Clear app state data which can contain login sessions
-    NSArray *statePaths = @[
+    // 1. Direct file paths (Fastest)
+    NSArray *directPaths = @[
         [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID]
-    ];
-    
-    for (NSString *path in statePaths) {
-            [self securelyWipeFile:path];
-    }
-    
-    // Modern apps also store state in FrontBoard
-    NSArray *frontBoardPaths = [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/mobile/Library/FrontBoard/*/%@*", bundleID]];
-    for (NSString *path in frontBoardPaths) {
-        [self securelyWipeFile:path];
-    }
-    
-    // Check rootless paths too
-    frontBoardPaths = [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/mobile/Library/FrontBoard/*/%@*", bundleID]];
-    for (NSString *path in frontBoardPaths) {
-        [self securelyWipeFile:path];
-    }
-    
-    // iOS 15+ has additional state storage locations
-    NSArray *modernStatePaths = @[
-        // LiveActivities state
-        [NSString stringWithFormat:@"/var/mobile/Library/LiveActivities/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/LiveActivities/%@*", bundleID],
-        // App state in different format
-        [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/RecentlyTerminatedAppState/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/RecentlyTerminatedAppState/%@*", bundleID],
-        // Backgrounding state
-        [NSString stringWithFormat:@"/var/mobile/Library/BackgroundTasks/*/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/BackgroundTasks/*/%@*", bundleID],
-        // Permission state
-        [NSString stringWithFormat:@"/var/mobile/Library/TCC/*/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/TCC/*/%@*", bundleID],
-        // Additional state locations
-        [NSString stringWithFormat:@"/var/mobile/Library/Containers/*/Data/System/com.apple.nsurlsessiond/SessionData/%@*", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/Containers/*/Data/System/com.apple.nsurlsessiond/SessionData/%@*", bundleID],
-        // iOS 15 specific frontend state
-        [NSString stringWithFormat:@"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.%@.plist", bundleID],
         [NSString stringWithFormat:@"/var/mobile/Library/Preferences/com.apple.UIKit.SplitView.%@.plist", bundleID]
     ];
     
-    for (NSString *pattern in modernStatePaths) {
-        NSArray *matches = [self findPathsMatchingPattern:pattern];
-        for (NSString *path in matches) {
-            NSLog(@"[AppDataCleaner] Wiping modern state file: %@", path);
+    for (NSString *path in directPaths) {
+        [self securelyWipeFile:path];
+    }
+    
+    // 2. Scan specific directories for files containing bundleID (Much faster than find /)
+    
+    // FrontBoard
+    [self scanAndWipeInDirectory:@"/var/mobile/Library/FrontBoard" matching:bundleID];
+    
+    // LiveActivities
+    [self scanAndWipeInDirectory:@"/var/mobile/Library/LiveActivities" matching:bundleID];
+    
+    // SpringBoard RecentlyTerminatedAppState
+    [self scanAndWipeInDirectory:@"/var/mobile/Library/SpringBoard/RecentlyTerminatedAppState" matching:bundleID];
+    
+    // BackgroundTasks - recursive scan needed but limited depth
+    [self scanAndWipeInDirectory:@"/var/mobile/Library/BackgroundTasks" matching:bundleID];
+    
+    // TCC
+    [self scanAndWipeInDirectory:@"/var/mobile/Library/TCC" matching:bundleID];
+    
+    // 3. Special handling for difficult paths (Containers)
+    // Instead of scanning all containers, we use a targeted approach if possible, or skip deeply nested widely scattered scans if not critical.
+    // For com.apple.nsurlsessiond, we can try a more limited scan if essential, but often the main cleanup handles the app's own container.
+    // We will skip scanning /var/mobile/Library/Containers/*/Data/System/... to avoid timeout as it involves iterating thousands of folders.
+}
+
+// Helper to scan a directory and wipe files/folders matching a string
+- (void)scanAndWipeInDirectory:(NSString *)directory matching:(NSString *)matchString {
+    if (![_fileManager fileExistsAtPath:directory]) return;
+    
+    NSDirectoryEnumerator *enumerator = [_fileManager enumeratorAtURL:[NSURL fileURLWithPath:directory]
+                                           includingPropertiesForKeys:@[NSURLNameKey, NSURLIsDirectoryKey]
+                                                              options:NSDirectoryEnumerationSkipsHiddenFiles
+                                                         errorHandler:nil];
+    
+    for (NSURL *fileURL in enumerator) {
+        NSString *filename = [fileURL lastPathComponent];
+        if ([filename containsString:matchString]) {
+            NSString *path = [fileURL path];
+            [self logMessage:@"[AppDataCleaner] Wiping matched state file: %@", path];
             [self securelyWipeFile:path];
+            // If we deleted a directory, stick to standard enumeration or beware of modification during enumeration
+            // securelyWipeFile handles file deletion.
         }
     }
 }
