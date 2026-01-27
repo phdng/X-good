@@ -67,9 +67,10 @@
         }
     };
     
-    // Set up a watchdog timer to force completion after 60 seconds max
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        NSLog(@"[AppDataCleaner] WATCHDOG: 60 second timeout reached, forcing completion");
+    // Set up a watchdog timer to force completion after 120 seconds max
+    // completeAppDataWipe can take up to 90 seconds with all its operations
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        NSLog(@"[AppDataCleaner] WATCHDOG: 120 second timeout reached, forcing completion");
         safeCompletion(YES, nil);
     });
     
@@ -92,94 +93,28 @@
                 NSLog(@"[AppDataCleaner] Step 3: Clearing app state data...");
                 [self _internalClearAppStateData:bundleID];
                 
-                // Step 4: Find and clear data container (standard jailbreak path)
-                NSString *dataUUID = [self findDataContainerUUID:bundleID];
-                NSLog(@"[AppDataCleaner] Step 4: Found data container UUID: %@", dataUUID ?: @"nil");
+                // Step 4: Use completeAppDataWipe for comprehensive data wiping
+                // This method has better container discovery and permission fixing
+                NSLog(@"[AppDataCleaner] Step 4: Running completeAppDataWipe...");
+                [self completeAppDataWipe:bundleID];
                 
-                // Also find rootless container for Dopamine/Trollstore
-                NSString *rootlessDataUUID = [self findRootlessDataContainerUUID:bundleID];
-                NSLog(@"[AppDataCleaner] Found rootless data container UUID: %@", rootlessDataUUID ?: @"nil");
-                
-                // Clear ALL subdirectories aggressively
-                NSArray *subDirs = @[
-                    @"Documents",
-                    @"Library/Caches",
-                    @"Library/Preferences", 
-                    @"Library/Cookies",
-                    @"Library/WebKit",
-                    @"Library/Application Support",
-                    @"Library/SplashBoard",
-                    @"Library/HTTPStorages",
-                    @"Library/Saved Application State",
-                    @"Library/WebKit/WebsiteData",
-                    @"Library/WebKit/WebsiteData/LocalStorage",
-                    @"Library/WebKit/WebsiteData/IndexedDB",
-                    @"tmp"
-                ];
-                
-                // Clear standard container
-                if (dataUUID && dataUUID.length > 0) {
-                    NSString *containerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", dataUUID];
-                    
-                    for (NSString *dir in subDirs) {
-                        NSString *fullPath = [containerPath stringByAppendingPathComponent:dir];
-                        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null", fullPath]];
-                        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/.[!.]* 2>/dev/null", fullPath]];
-                    }
-                    
-                    // Wipe entire Library aggressively
-                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@/Library' -type f -not -name '.com.apple*' -delete 2>/dev/null", containerPath]];
-                    
-                    // Also clear Documents folder contents
-                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/Documents'/* 2>/dev/null", containerPath]];
-                }
-                
-                // Clear rootless container
-                if (rootlessDataUUID && rootlessDataUUID.length > 0) {
-                    NSString *rootlessPath = [NSString stringWithFormat:@"/containers/Data/Application/%@", rootlessDataUUID];
-                    
-                    for (NSString *dir in subDirs) {
-                        NSString *fullPath = [rootlessPath stringByAppendingPathComponent:dir];
-                        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null", fullPath]];
-                        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/.[!.]* 2>/dev/null", fullPath]];
-                    }
-                    
-                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@/Library' -type f -not -name '.com.apple*' -delete 2>/dev/null", rootlessPath]];
-                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/Documents'/* 2>/dev/null", rootlessPath]];
-                }
-                
-                // Step 5: Clear preferences in system location
-                NSLog(@"[AppDataCleaner] Step 5: Clearing system preferences...");
-                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Preferences/%@* 2>/dev/null", bundleID]];
-                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/root/Library/Preferences/%@* 2>/dev/null", bundleID]];
-                
-                // Step 6: Clear app groups
-                NSLog(@"[AppDataCleaner] Step 6: Clearing app groups...");
-                [self cleanAppGroupContainers:bundleID];
-                
-                // Step 7: Clear cookies (both file and memory)
-                NSLog(@"[AppDataCleaner] Step 7: Clearing cookies...");
-                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Cookies/%@* 2>/dev/null", bundleID]];
-                
-                // Clear HTTP cookie storage for this app
+                // Step 5: Clear HTTP cookie storage in memory  
+                NSLog(@"[AppDataCleaner] Step 5: Clearing HTTP cookies from memory...");
                 NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
-                for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
+                NSArray *allCookies = [[cookieStorage cookies] copy];
+                for (NSHTTPCookie *cookie in allCookies) {
                     [cookieStorage deleteCookie:cookie];
                 }
+                NSLog(@"[AppDataCleaner] Cleared %lu cookies from memory", (unsigned long)allCookies.count);
                 
-                // Step 8: Clear keychain AGAIN to catch any recreated items
-                NSLog(@"[AppDataCleaner] Step 8: Final keychain cleanup...");
+                // Step 6: Clear keychain AGAIN to catch any recreated items
+                NSLog(@"[AppDataCleaner] Step 6: Final keychain cleanup...");
                 [self clearKeychainItemsForBundleID:bundleID];
                 [self universalKeychainWipeForBundleID:bundleID];
                 
-                // Step 9: Clear webkit data and caches
-                NSLog(@"[AppDataCleaner] Step 9: Clearing WebKit data and caches...");
-                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Caches/%@* 2>/dev/null", bundleID]];
-                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/WebKit/%@* 2>/dev/null", bundleID]];
-                
-                // Step 10: Sync filesystem
-                NSLog(@"[AppDataCleaner] Step 10: Syncing filesystem...");
-                [self runCommandWithPrivileges:@"sync"];
+                // Step 7: Sync filesystem
+                NSLog(@"[AppDataCleaner] Step 7: Syncing filesystem...");
+                sync();
                 
                 NSLog(@"[AppDataCleaner] === COMPLETED data clearing for %@ ===", bundleID);
                 safeCompletion(YES, nil);
@@ -1352,10 +1287,35 @@
                     if (service) deleteQuery[(__bridge id)kSecAttrService] = service;
                     if (account) deleteQuery[(__bridge id)kSecAttrAccount] = account;
                     
-                    SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
+                    OSStatus status = SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
+                    if (status == errSecSuccess) {
+                        NSLog(@"[AppDataCleaner] Deleted keychain item - service: %@, account: %@", service, account);
+                    }
                 }
             }
         }
+    }
+    
+    // Backup: Try to delete ALL generic passwords that might match this app
+    // This is more aggressive and catches items missed by pattern matching
+    NSArray *components = [bundleID componentsSeparatedByString:@"."];
+    for (NSString *component in components) {
+        if (component.length < 3) continue;
+        if ([component isEqualToString:@"com"] || [component isEqualToString:@"org"]) continue;
+        
+        // Delete by service name containing component
+        NSDictionary *deleteByService = @{
+            (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+            (__bridge id)kSecAttrService: component
+        };
+        SecItemDelete((__bridge CFDictionaryRef)deleteByService);
+        
+        // Delete by account containing component
+        NSDictionary *deleteByAccount = @{
+            (__bridge id)kSecClass: (__bridge id)kSecClassGenericPassword,
+            (__bridge id)kSecAttrAccount: component
+        };
+        SecItemDelete((__bridge CFDictionaryRef)deleteByAccount);
     }
     
     NSLog(@"[AppDataCleaner] Universal keychain wipe completed for %@", bundleID);
