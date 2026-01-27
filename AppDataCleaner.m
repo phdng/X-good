@@ -493,46 +493,6 @@
     }
 }
 
-// UNIVERSAL: Remove all keychain items for this app (forensic wipe)
-- (void)universalKeychainWipeForBundleID:(NSString *)bundleID {
-    // This method requires root/entitlements on jailbroken devices
-
-    // Try to get all keychain items (generic password, internet password, etc.)
-    NSArray *secClasses = @[(__bridge id)kSecClassGenericPassword, (__bridge id)kSecClassInternetPassword, (__bridge id)kSecClassCertificate, (__bridge id)kSecClassKey, (__bridge id)kSecClassIdentity];
-    for (id secClass in secClasses) {
-        NSMutableDictionary *query = [@{(__bridge id)kSecClass: secClass,
-                                        (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
-                                        (__bridge id)kSecReturnAttributes: @YES} mutableCopy];
-        CFTypeRef result = NULL;
-        OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &result);
-        if (status == errSecSuccess && result) {
-            NSArray *items = (__bridge_transfer NSArray *)result;
-            for (NSDictionary *item in items) {
-                NSString *accessGroup = item[(__bridge id)kSecAttrAccessGroup];
-                NSString *service = item[(__bridge id)kSecAttrService];
-                NSString *account = item[(__bridge id)kSecAttrAccount];
-                // Try to match by bundleID (in access group or service/account)
-                BOOL match = NO;
-                if (accessGroup && [accessGroup containsString:bundleID]) match = YES;
-                if (service && [service containsString:bundleID]) match = YES;
-                if (account && [account containsString:bundleID]) match = YES;
-                // Also match by prefix (for apps using obfuscated or group-based access groups)
-                if (accessGroup && [accessGroup containsString:[[bundleID componentsSeparatedByString:@"."] firstObject]]) match = YES;
-                if (match) {
-                    NSMutableDictionary *deleteQuery = [item mutableCopy];
-                    [deleteQuery setObject:secClass forKey:(__bridge id)kSecClass];
-                    OSStatus delStatus = SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
-                    if (delStatus != errSecSuccess && delStatus != errSecItemNotFound) {
-                        NSLog(@"[AppDataCleaner][KeychainWipe] Could not delete keychain item: %@ (status: %d)", item, (int)delStatus);
-                    } else {
-                        NSLog(@"[AppDataCleaner][KeychainWipe] Deleted keychain item: %@", item);
-                    }
-                }
-            }
-        }
-    }
-}
-
 // Remove crash logs and system logs for this bundleID
 - (void)removeCrashLogsForBundleID:(NSString *)bundleID {
     NSArray *crashLogDirs = @[
