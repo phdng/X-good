@@ -3932,19 +3932,40 @@
              continue;
         }
         
+        // STRICT matching: Only wipe groups that DEFINITELY belong to this app
+        // For com.facebook.Facebook, we should only wipe groups containing "facebook"
         BOOL isAppGroup = NO;
-        if ([groupIdentifier containsString:bundleID]) isAppGroup = YES;
-        if (companyName.length > 0 && [groupIdentifier containsString:companyName]) isAppGroup = YES;
-        if ([groupIdentifier hasPrefix:[NSString stringWithFormat:@"group.%@", firstComponent]]) isAppGroup = YES;
+        
+        // Check 1: Group contains full bundleID (e.g., group.com.facebook.Facebook)
+        if ([groupIdentifier containsString:bundleID]) {
+            isAppGroup = YES;
+            [self logMessage:@"[AppDataCleaner] Matched by bundleID"];
+        }
+        
+        // Check 2: Group contains company name (e.g., group.com.facebook.family)
+        // But ONLY if companyName is meaningful (not "com", "org", "net", etc.)
+        if (!isAppGroup && companyName.length > 3 && 
+            ![companyName isEqualToString:@"com"] && 
+            ![companyName isEqualToString:@"org"] && 
+            ![companyName isEqualToString:@"net"] &&
+            ![companyName isEqualToString:@"app"]) {
+            // Case-insensitive check for company name
+            if ([[groupIdentifier lowercaseString] containsString:[companyName lowercaseString]]) {
+                isAppGroup = YES;
+                [self logMessage:@"[AppDataCleaner] Matched by company name: %@", companyName];
+            }
+        }
+        
+        // DO NOT use firstComponent (it's usually "com" which matches everything!)
         
         if (isAppGroup) {
             // This is definitely owned by our app - completely wipe it
             [self logMessage:@"[AppDataCleaner] Wiping owned group container: %@", uuid];
             [self completelyWipeContainer:containerPath];
         } else {
-            // This is shared with other apps - clean selectively
-            [self logMessage:@"[AppDataCleaner] Selective cleaning for shared group: %@", uuid];
-            [self cleanAppSpecificFilesInSharedContainer:containerPath bundleID:bundleID appName:appName companyName:companyName];
+            // This does NOT belong to our app - SKIP it entirely
+            [self logMessage:@"[AppDataCleaner] SKIPPING unrelated group: %@", groupIdentifier];
+            // Don't even do selective cleaning on other apps' groups
         }
     }
     
@@ -3970,16 +3991,29 @@
              continue;
         }
         
+        // STRICT matching: Only wipe groups that DEFINITELY belong to this app
         BOOL isAppGroup = NO;
-        if (groupIdString && [groupIdString containsString:bundleID]) isAppGroup = YES;
-        if (groupIdString && companyName.length > 0 && [groupIdentifier containsString:companyName]) isAppGroup = YES;
+        
+        // Check 1: Group contains full bundleID
+        if (groupIdString && [groupIdString containsString:bundleID]) {
+            isAppGroup = YES;
+        }
+        
+        // Check 2: Group contains company name (e.g., "facebook")
+        if (!isAppGroup && groupIdString && companyName.length > 3 && 
+            ![companyName isEqualToString:@"com"] && 
+            ![companyName isEqualToString:@"org"] && 
+            ![companyName isEqualToString:@"net"]) {
+            if ([[groupIdString lowercaseString] containsString:[companyName lowercaseString]]) {
+                isAppGroup = YES;
+            }
+        }
         
         if (isAppGroup) {
             [self logMessage:@"[AppDataCleaner] Wiping owned rootless group: %@", uuid];
             [self completelyWipeContainer:containerPath];
         } else {
-            [self logMessage:@"[AppDataCleaner] Selective cleaning for shared rootless group: %@", uuid];
-            [self cleanAppSpecificFilesInSharedContainer:containerPath bundleID:bundleID appName:appName companyName:companyName];
+            [self logMessage:@"[AppDataCleaner] SKIPPING unrelated rootless group: %@", groupIdString];
         }
     }
 }
