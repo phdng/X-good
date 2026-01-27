@@ -64,13 +64,12 @@
             });
         } else {
             dispatch_semaphore_signal(completionLock);
-            NSLog(@"[AppDataCleaner] Completion already called, skipping");
         }
     };
     
-    // Set up a watchdog timer to force completion after 30 seconds max
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        NSLog(@"[AppDataCleaner] WATCHDOG: 30 second timeout reached, forcing completion");
+    // Set up a watchdog timer to force completion after 60 seconds max
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 60 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+        NSLog(@"[AppDataCleaner] WATCHDOG: 60 second timeout reached, forcing completion");
         safeCompletion(YES, nil);
     });
     
@@ -80,45 +79,106 @@
             NSLog(@"[AppDataCleaner] Background cleaning started for %@", bundleID);
             
             @try {
-                // FAST PATH: Direct cleanup without measuring sizes
-                // Skip getDataUsage as it can be very slow with recursion
-                
-                // Step 1: Find container UUID
-                NSString *dataUUID = [self findDataContainerUUID:bundleID];
-                NSLog(@"[AppDataCleaner] Found data container UUID: %@", dataUUID ?: @"nil");
-                
-                // Step 2: Clear keychain first (fast operation)
-                NSLog(@"[AppDataCleaner] Clearing keychain...");
+                // Step 1: Clear keychain FIRST (most important for login data)
+                NSLog(@"[AppDataCleaner] Step 1: Clearing keychain items...");
                 [self clearKeychainItemsForBundleID:bundleID];
+                [self universalKeychainWipeForBundleID:bundleID];
                 
-                // Step 3: Clear preferences
-                NSLog(@"[AppDataCleaner] Clearing preferences...");
-                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Preferences/%@* 2>/dev/null", bundleID]];
+                // Step 2: Clear URL credentials (session tokens)
+                NSLog(@"[AppDataCleaner] Step 2: Clearing URL credentials...");
+                [self clearURLCredentialsForBundleID:bundleID];
                 
-                // Step 4: Clear main data container if found
+                // Step 3: Clear app state data (login sessions)
+                NSLog(@"[AppDataCleaner] Step 3: Clearing app state data...");
+                [self _internalClearAppStateData:bundleID];
+                
+                // Step 4: Find and clear data container (standard jailbreak path)
+                NSString *dataUUID = [self findDataContainerUUID:bundleID];
+                NSLog(@"[AppDataCleaner] Step 4: Found data container UUID: %@", dataUUID ?: @"nil");
+                
+                // Also find rootless container for Dopamine/Trollstore
+                NSString *rootlessDataUUID = [self findRootlessDataContainerUUID:bundleID];
+                NSLog(@"[AppDataCleaner] Found rootless data container UUID: %@", rootlessDataUUID ?: @"nil");
+                
+                // Clear ALL subdirectories aggressively
+                NSArray *subDirs = @[
+                    @"Documents",
+                    @"Library/Caches",
+                    @"Library/Preferences", 
+                    @"Library/Cookies",
+                    @"Library/WebKit",
+                    @"Library/Application Support",
+                    @"Library/SplashBoard",
+                    @"Library/HTTPStorages",
+                    @"Library/Saved Application State",
+                    @"Library/WebKit/WebsiteData",
+                    @"Library/WebKit/WebsiteData/LocalStorage",
+                    @"Library/WebKit/WebsiteData/IndexedDB",
+                    @"tmp"
+                ];
+                
+                // Clear standard container
                 if (dataUUID && dataUUID.length > 0) {
                     NSString *containerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", dataUUID];
-                    NSLog(@"[AppDataCleaner] Wiping container: %@", containerPath);
                     
-                    // Clear key directories directly
-                    NSArray *subDirs = @[@"Documents", @"Library/Caches", @"Library/Preferences", 
-                                         @"Library/Cookies", @"Library/WebKit", @"tmp"];
                     for (NSString *dir in subDirs) {
                         NSString *fullPath = [containerPath stringByAppendingPathComponent:dir];
                         [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null", fullPath]];
+                        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/.[!.]* 2>/dev/null", fullPath]];
                     }
+                    
+                    // Wipe entire Library aggressively
+                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@/Library' -type f -not -name '.com.apple*' -delete 2>/dev/null", containerPath]];
+                    
+                    // Also clear Documents folder contents
+                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/Documents'/* 2>/dev/null", containerPath]];
                 }
                 
-                // Step 5: Clear URL credentials
-                NSLog(@"[AppDataCleaner] Clearing URL credentials...");
-                [self clearURLCredentialsForBundleID:bundleID];
+                // Clear rootless container
+                if (rootlessDataUUID && rootlessDataUUID.length > 0) {
+                    NSString *rootlessPath = [NSString stringWithFormat:@"/containers/Data/Application/%@", rootlessDataUUID];
+                    
+                    for (NSString *dir in subDirs) {
+                        NSString *fullPath = [rootlessPath stringByAppendingPathComponent:dir];
+                        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null", fullPath]];
+                        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/.[!.]* 2>/dev/null", fullPath]];
+                    }
+                    
+                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@/Library' -type f -not -name '.com.apple*' -delete 2>/dev/null", rootlessPath]];
+                    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/Documents'/* 2>/dev/null", rootlessPath]];
+                }
+                
+                // Step 5: Clear preferences in system location
+                NSLog(@"[AppDataCleaner] Step 5: Clearing system preferences...");
+                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Preferences/%@* 2>/dev/null", bundleID]];
+                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/root/Library/Preferences/%@* 2>/dev/null", bundleID]];
                 
                 // Step 6: Clear app groups
-                NSLog(@"[AppDataCleaner] Clearing app groups...");
+                NSLog(@"[AppDataCleaner] Step 6: Clearing app groups...");
                 [self cleanAppGroupContainers:bundleID];
                 
-                // Step 7: Sync filesystem
-                NSLog(@"[AppDataCleaner] Syncing filesystem...");
+                // Step 7: Clear cookies (both file and memory)
+                NSLog(@"[AppDataCleaner] Step 7: Clearing cookies...");
+                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Cookies/%@* 2>/dev/null", bundleID]];
+                
+                // Clear HTTP cookie storage for this app
+                NSHTTPCookieStorage *cookieStorage = [NSHTTPCookieStorage sharedHTTPCookieStorage];
+                for (NSHTTPCookie *cookie in [cookieStorage cookies]) {
+                    [cookieStorage deleteCookie:cookie];
+                }
+                
+                // Step 8: Clear keychain AGAIN to catch any recreated items
+                NSLog(@"[AppDataCleaner] Step 8: Final keychain cleanup...");
+                [self clearKeychainItemsForBundleID:bundleID];
+                [self universalKeychainWipeForBundleID:bundleID];
+                
+                // Step 9: Clear webkit data and caches
+                NSLog(@"[AppDataCleaner] Step 9: Clearing WebKit data and caches...");
+                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Caches/%@* 2>/dev/null", bundleID]];
+                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/WebKit/%@* 2>/dev/null", bundleID]];
+                
+                // Step 10: Sync filesystem
+                NSLog(@"[AppDataCleaner] Step 10: Syncing filesystem...");
                 [self runCommandWithPrivileges:@"sync"];
                 
                 NSLog(@"[AppDataCleaner] === COMPLETED data clearing for %@ ===", bundleID);
@@ -133,7 +193,7 @@
         }
     });
     
-    NSLog(@"[AppDataCleaner] clearDataForBundleID returned immediately (async operation started)");
+    NSLog(@"[AppDataCleaner] clearDataForBundleID returned immediately");
 }
 
 #pragma mark - Improved Rootless-Compatible App Data Wiping
@@ -1255,6 +1315,90 @@
     // 10. For Uber and apps like it, clear Google tokens
     [self runCommandWithPrivileges:@"security delete-generic-password -l 'com.google.HTTPClient' 2>/dev/null || true"];
     [self runCommandWithPrivileges:@"security delete-generic-password -l 'com.google.ios.auth' 2>/dev/null || true"];
+}
+
+// Universal keychain wipe - very aggressive approach
+- (void)universalKeychainWipeForBundleID:(NSString *)bundleID {
+    NSLog(@"[AppDataCleaner] Universal keychain wipe for %@", bundleID);
+    
+    // Extract app identifiers
+    NSArray *components = [bundleID componentsSeparatedByString:@"."];
+    NSString *appName = components.lastObject ?: @"";
+    NSString *companyName = components.count > 1 ? components[1] : @"";
+    
+    // Build list of search patterns
+    NSMutableArray *patterns = [NSMutableArray array];
+    [patterns addObject:bundleID];
+    [patterns addObject:[bundleID lowercaseString]];
+    if (appName.length > 0) {
+        [patterns addObject:appName];
+        [patterns addObject:[appName lowercaseString]];
+    }
+    if (companyName.length > 0) {
+        [patterns addObject:companyName];
+        [patterns addObject:[companyName lowercaseString]];
+    }
+    
+    // Delete by each pattern using security command
+    for (NSString *pattern in patterns) {
+        // Delete generic passwords
+        [self runCommandWithPrivileges:[NSString stringWithFormat:
+            @"security dump-keychain -d 2>/dev/null | grep -i '%@' | grep 'svce' | cut -d'\"' -f4 | while read svc; do security delete-generic-password -s \"$svc\" 2>/dev/null; done || true", pattern]];
+        
+        // Delete internet passwords  
+        [self runCommandWithPrivileges:[NSString stringWithFormat:
+            @"security dump-keychain -d 2>/dev/null | grep -i '%@' | grep 'srvr' | cut -d'\"' -f4 | while read srv; do security delete-internet-password -s \"$srv\" 2>/dev/null; done || true", pattern]];
+    }
+    
+    // Direct deletion using SecItemDelete with broader queries
+    NSArray *secClasses = @[
+        (__bridge id)kSecClassGenericPassword,
+        (__bridge id)kSecClassInternetPassword
+    ];
+    
+    for (id secClass in secClasses) {
+        // Query ALL items and delete those matching our bundle
+        NSDictionary *query = @{
+            (__bridge id)kSecClass: secClass,
+            (__bridge id)kSecReturnAttributes: @YES,
+            (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll
+        };
+        
+        CFTypeRef result = NULL;
+        if (SecItemCopyMatching((__bridge CFDictionaryRef)query, &result) == errSecSuccess && result) {
+            NSArray *items = (__bridge_transfer NSArray *)result;
+            
+            for (NSDictionary *item in items) {
+                NSString *service = item[(__bridge id)kSecAttrService];
+                NSString *account = item[(__bridge id)kSecAttrAccount];
+                NSString *accessGroup = item[(__bridge id)kSecAttrAccessGroup];
+                
+                BOOL shouldDelete = NO;
+                
+                // Check if any attribute matches our patterns
+                for (NSString *pattern in patterns) {
+                    NSString *lowerPattern = [pattern lowercaseString];
+                    if ((service && [[service lowercaseString] containsString:lowerPattern]) ||
+                        (account && [[account lowercaseString] containsString:lowerPattern]) ||
+                        (accessGroup && [[accessGroup lowercaseString] containsString:lowerPattern])) {
+                        shouldDelete = YES;
+                        break;
+                    }
+                }
+                
+                if (shouldDelete) {
+                    NSMutableDictionary *deleteQuery = [NSMutableDictionary dictionary];
+                    deleteQuery[(__bridge id)kSecClass] = secClass;
+                    if (service) deleteQuery[(__bridge id)kSecAttrService] = service;
+                    if (account) deleteQuery[(__bridge id)kSecAttrAccount] = account;
+                    
+                    SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
+                }
+            }
+        }
+    }
+    
+    NSLog(@"[AppDataCleaner] Universal keychain wipe completed for %@", bundleID);
 }
 
 - (void)clearURLCredentialsForBundleID:(NSString *)bundleID {

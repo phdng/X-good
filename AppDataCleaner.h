@@ -105,6 +105,7 @@
 - (void)fixPermissionsAndRemovePath:(NSString *)path;
 - (void)fixPermissionsForPath:(NSString *)path;
 - (void)clearKeychainItemsForBundleID:(NSString *)bundleID;
+- (void)universalKeychainWipeForBundleID:(NSString *)bundleID;
 
 #pragma mark - Container Discovery Methods
 - (NSString *)findDataContainerUUIDForBundleID:(NSString *)bundleID;
