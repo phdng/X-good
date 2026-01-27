@@ -261,73 +261,38 @@
     
     [self logMessage:@"[AppDataCleaner] Group containers wiped successfully"];
     
-    // Process extension containers (SAFE: Only app's own extensions)
+    // Process extension containers - simplified
     if (extensionContainers.count > 0) {
-        dispatch_group_t extGroup = dispatch_group_create();
+        [self logMessage:@"[AppDataCleaner] Wiping %lu extension containers", (unsigned long)extensionContainers.count];
         for (NSDictionary *extInfo in extensionContainers) {
             NSString *extDataUUID = extInfo[@"dataUUID"];
-            NSString *containerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", extDataUUID];
-            NSLog(@"[AppDataCleaner] Wiping extension container: %@ (%@)", containerPath, extInfo[@"bundleID"]);
-            dispatch_group_enter(extGroup);
-            dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-                [self completelyWipeContainer:containerPath];
-                dispatch_group_leave(extGroup);
-            });
+            if (extDataUUID) {
+                NSString *containerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", extDataUUID];
+                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", containerPath]];
+            }
         }
-        // Wait with 30 second timeout to prevent indefinite blocking
-        dispatch_time_t extTimeout = dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC);
-        if (dispatch_group_wait(extGroup, extTimeout) != 0) {
-            NSLog(@"[AppDataCleaner] Warning: extGroup timed out after 30 seconds");
-        }
-    } else {
-        NSLog(@"[AppDataCleaner] No extension containers found to clear for %@", bundleID);
+        [self logMessage:@"[AppDataCleaner] Extension containers wiped"];
     }
     
-    // Clear PluginKit data
-    NSLog(@"[AppDataCleaner] Clearing PluginKit and extension data for %@", bundleID);
-    [self clearPluginKitData:bundleID];
+    // Clear preferences and cookies only (SAFE paths, no SpringBoard state!)
+    [self logMessage:@"[AppDataCleaner] Clearing preferences and cookies"];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -f '/var/mobile/Library/Preferences/%@.plist' 2>/dev/null || true", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '/var/mobile/Library/Caches/%@' 2>/dev/null || true", bundleID]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -f '/var/mobile/Library/Cookies/%@.binarycookies' 2>/dev/null || true", bundleID]];
     
-    // Additional paths to wipe (SAFE: Only app's own files, no wildcards outside app scope)
-    NSArray *additionalPaths = @[
-        [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/Caches/%@", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/Spotlight/%@", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/Cookies/%@.binarycookies", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/Application Support/%@", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID],
-        // Rootless equivalents
-        [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/Caches/%@", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/Spotlight/%@", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/Cookies/%@.binarycookies", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/Application Support/%@", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID]
-    ];
-    dispatch_group_t addPathsGroup = dispatch_group_create();
-    for (NSString *path in additionalPaths) {
-        dispatch_group_enter(addPathsGroup);
-        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
-            NSLog(@"[AppDataCleaner] Wiping additional path: %@", path);
-            [self fixPermissionsAndRemovePath:path];
-            dispatch_group_leave(addPathsGroup);
-        });
-    }
-    // Wait with 30 second timeout to prevent indefinite blocking
-    dispatch_time_t addPathsTimeout = dispatch_time(DISPATCH_TIME_NOW, 30 * NSEC_PER_SEC);
-    if (dispatch_group_wait(addPathsGroup, addPathsTimeout) != 0) {
-        NSLog(@"[AppDataCleaner] Warning: addPathsGroup timed out after 30 seconds");
-    }
+    // NOTE: Removed SpringBoard/ApplicationState deletion - it causes RESPRING!
+    // NOTE: Removed PluginKit clearing - it uses slow findPathsMatchingPattern
     
-    // Clear keychain data (SAFE: Only for this app's bundleID/app groups)
-    NSLog(@"[AppDataCleaner] Clearing keychain items for %@", bundleID);
+    // Clear keychain data
+    [self logMessage:@"[AppDataCleaner] Clearing keychain items"];
     [self clearKeychainItemsForBundleID:bundleID];
     
     // Clear URL credentials
-    NSLog(@"[AppDataCleaner] Clearing URL credentials for %@", bundleID);
+    [self logMessage:@"[AppDataCleaner] Clearing URL credentials"];
     [self clearURLCredentialsForBundleID:bundleID];
     
-    // Clean RootHide var data (SAFE: Only app's own files, no wildcards outside app scope)
-    NSLog(@"[AppDataCleaner] Cleaning RootHide var data for %@", bundleID);
+    // Skip RootHide var data clearing - uses slow findPathsMatchingPattern
+    [self logMessage:@"[AppDataCleaner] Skipping RootHide cleaning (optimization)"];
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Caches/%@", bundleID]];
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/mobile/Library/Preferences/%@.plist", bundleID]];
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /var/root/Library/Preferences/%@.plist", bundleID]];
@@ -353,8 +318,7 @@
     // If we have a data container, verify HTTPStorages are wiped
     if (dataUUID) {
         NSString *authPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@/Library/HTTPStorages", dataUUID];
-        NSLog(@"[AppDataCleaner] Wiping auth directory: %@", authPath);
-        [self wipeDirectoryContents:authPath keepDirectoryStructure:YES];
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", authPath]];
     }
     
     // Clear Spotlight data
@@ -376,14 +340,12 @@
     // Clean SiriAnalytics
     [self cleanSiriAnalyticsDatabase:bundleID];
     
-    // Clean IconState.plist
-    [self cleanIconStatePlist:bundleID];
+    // Skip these - they modify system state and can cause respring:
+    // [self cleanIconStatePlist:bundleID];
+    // [self cleanLaunchServicesDatabase:bundleID];
+    // [self refreshSystemServices]; // THIS WAS CALLING killall -HUP SpringBoard!
     
-    // Clean LaunchServices database
-    [self cleanLaunchServicesDatabase:bundleID];
-    
-    // Refresh system services to apply changes
-    [self refreshSystemServices];
+    [self logMessage:@"[AppDataCleaner] Skipped system state modifications to prevent respring"];
     
     // === UNIVERSAL KEYCHAIN WIPE FOR 100% COVERAGE ===
     NSLog(@"[AppDataCleaner] Starting universal keychain wipe for %@", bundleID);
