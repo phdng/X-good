@@ -2404,19 +2404,34 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
                     }
 
                     if (replacementString.length > 0 && ![replacementString isEqualToString:@"Unknown"]) {
-                            replacement = CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)replacementString);
-                        }
-
+                        PXLog(@"[WeaponX] 🎯 Spoofing IOKit property %@ with: %@", keyString, replacementString);
+                        
+                        BOOL returnAsData = NO;
                         if (original) {
-                            CFRelease(original);
+                            if (CFGetTypeID(original) == CFDataGetTypeID()) {
+                                returnAsData = YES;
+                            } 
+                            // Check if known data-type keys
+                            else if ([keyString isEqualToString:@"model"] || [keyString isEqualToString:@"compatible"] || [keyString isEqualToString:@"product-name"]) {
+                                returnAsData = YES; 
+                            }
+                            
+                            CFRelease(original); // Release original as we are replacing it
+                        } else {
+                            // If original is null/failed, assume data for these keys
+                            if ([keyString isEqualToString:@"model"] || [keyString isEqualToString:@"compatible"] || [keyString isEqualToString:@"product-name"]) {
+                                returnAsData = YES;
+                            }
                         }
-
-                        if (replacement) {
-                            return replacement;
+                        
+                        if (returnAsData) {
+                            const char *cStr = [replacementString UTF8String];
+                            return CFDataCreate(kCFAllocatorDefault, (const UInt8 *)cStr, strlen(cStr) + 1);
+                        } else {
+                            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)replacementString);
                         }
                     }
-
-                    // No replacement; return original (may be NULL)
+                    
                     return original;
                 }
             }
