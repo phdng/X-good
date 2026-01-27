@@ -419,6 +419,37 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
 }
 
+// Hook for uname() system call - used by many apps to detect device model
+static int (*uname_orig)(struct utsname *);
+static int uname_hook(struct utsname *buf) {
+    if (!uname_orig) return -1;
+    int ret = uname_orig(buf);
+    if (ret != 0) return ret;
+    
+    @try {
+        if (!%c(IdentifierManager)) return ret;
+        IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        if (!manager || !bundleID || ![manager isApplicationEnabled:bundleID]) return ret;
+        
+        if ([manager isIdentifierEnabled:@"DeviceModel"]) {
+            NSString *model = [manager currentValueForIdentifier:@"DeviceModel"];
+            if (model.length > 0) {
+                const char *modelStr = [model UTF8String];
+                if (modelStr && buf) {
+                    if (strlen(modelStr) < sizeof(buf->machine)) {
+                        strcpy(buf->machine, modelStr);
+                        PXLog(@"[WeaponX] 🎯 Spoofed uname() machine to: %@", model);
+                    }
+                }
+            }
+        }
+    } @catch (NSException *e) {
+        PXLog(@"[WeaponX] Exception in uname hook: %@", e);
+    }
+    return ret;
+}
+
 // Define hook group for main identifier spoofing
 %group Identifiers
 
@@ -2335,41 +2366,44 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
             }
         }
 
-        // Device model / hardware identifiers (AIDA, CPU Dash, etc.)
+        // Device model / hardware identifiers (AIDA, CPU Dash, Facebook, etc.)
         if ([manager isIdentifierEnabled:@"DeviceModel"] && keyString.length > 0) {
             NSString *model = [manager currentValueForIdentifier:@"DeviceModel"];
             if (model.length > 0) {
-                BOOL wantsProductType = [keyString isEqualToString:@"device-model"] || [keyString isEqualToString:@"hw.machine"];
-                BOOL wantsHWModel = [keyString isEqualToString:@"model"] || [keyString isEqualToString:@"hw.model"];
-                BOOL wantsBoardID = [keyString isEqualToString:@"board-id"] || [keyString isEqualToString:@"BoardId"];
+                // Expanded key list for better coverage
+                BOOL wantsProductType = [keyString isEqualToString:@"device-model"] || 
+                                      [keyString isEqualToString:@"hw.machine"] ||
+                                      [keyString isEqualToString:@"product-name"] ||
+                                      [keyString isEqualToString:@"compatible"]; // Often returns compatible list, first item is model
+                                      
+                BOOL wantsHWModel = [keyString isEqualToString:@"model"] ||  // IOPlatformExpertDevice 'model' is HWModel (N71AP etc)
+                                  [keyString isEqualToString:@"hw.model"];
+                                  
+                BOOL wantsBoardID = [keyString isEqualToString:@"board-id"] || 
+                                  [keyString isEqualToString:@"BoardId"];
 
                 if (wantsProductType || wantsHWModel || wantsBoardID) {
+                    // Call original first to check type if needed
                     CFTypeRef original = orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
 
                     DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
                     NSString *replacementString = nil;
+
                     if (wantsProductType) {
+                        // For compatible/product-name, usually "iPhone11,2" format
                         replacementString = model;
-                    } else if (wantsBoardID) {
-                        replacementString = [dm boardIDForModel:model];
-                    } else if (wantsHWModel) {
-                        replacementString = [dm hwModelForModel:model];
+                    } 
+                    else if (wantsHWModel) {
+                        replacementString = [dm hwModelForModel:model]; // e.g. D321AP
                         if (!replacementString.length || [replacementString isEqualToString:@"Unknown"]) {
                             replacementString = [dm boardIDForModel:model];
                         }
+                    } 
+                    else if (wantsBoardID) {
+                        replacementString = [dm boardIDForModel:model]; // e.g. 6
                     }
 
                     if (replacementString.length > 0 && ![replacementString isEqualToString:@"Unknown"]) {
-                        CFTypeRef replacement = NULL;
-                        if (original && CFGetTypeID(original) == CFDataGetTypeID()) {
-                            const char *s = [replacementString UTF8String];
-                            if (s) {
-                                size_t len = strlen(s) + 1; // include null terminator
-                                replacement = CFDataCreate(kCFAllocatorDefault, (const UInt8 *)s, (CFIndex)len);
-                            }
-                        }
-
-                        if (!replacement) {
                             replacement = CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)replacementString);
                         }
 
@@ -2760,6 +2794,15 @@ static char* hook_GSSystemGetSerialNo(void) {
             PXLog(@"[WeaponX] 🔧 Hooking sysctl for iOS version/build spoofing");
             if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
                 MSHookFunction(sysctlPtr, (void *)sysctl_hook, (void **)&sysctl_orig);
+            }
+        }
+        
+        void *unamePtr = dlsym(libcHandle, "uname");
+        if (unamePtr) {
+            PXLog(@"[WeaponX] 🔧 Hooking uname for device model spoofing");
+            if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
+                MSHookFunction(unamePtr, (void *)uname_hook, (void **)&uname_orig);
+                PXLog(@"[WeaponX] ✅ uname hook registered successfully");
             }
         }
         dlclose(libcHandle);
