@@ -20,6 +20,24 @@ static int (*orig_sysctlbyname)(const char *name, void *oldp, size_t *oldlenp, v
 static CFTypeRef (*orig_IORegistryEntryCreateCFProperty)(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options);
 static int (*orig_sysctl)(int *, u_int, void *, size_t *, void *, size_t);
 
+static int PXWriteSysctlCStringLocal(const char *value, void *outBuf, size_t *outLen) {
+    if (!outLen || !value) { errno = EINVAL; return -1; }
+    size_t required = strlen(value) + 1;
+    if (!outBuf) {
+        *outLen = required;
+        return 0;
+    }
+    if (*outLen < required) {
+        *outLen = required;
+        errno = ENOMEM;
+        return -1;
+    }
+    memset(outBuf, 0, *outLen);
+    memcpy(outBuf, value, required);
+    *outLen = required;
+    return 0;
+}
+
 // Forward declare helper functions
 static void logDeviceModelAccess(const char* method, NSString* bundleID);
 
@@ -496,25 +514,6 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
         return ret;
     }
 
-    // Helper for sysctl string outputs
-    auto int PXWriteSysctlCStringLocal(const char *value, void *outBuf, size_t *outLen) {
-        if (!outLen || !value) { errno = EINVAL; return -1; }
-        size_t required = strlen(value) + 1;
-        if (!outBuf) {
-            *outLen = required;
-            return 0;
-        }
-        if (*outLen < required) {
-            *outLen = required;
-            errno = ENOMEM;
-            return -1;
-        }
-        memset(outBuf, 0, *outLen);
-        memcpy(outBuf, value, required);
-        *outLen = required;
-        return 0;
-    }
-
     // Handle kernel build/version with device_ids.plist (prevents build leaks when multiple sysctl hooks exist)
     if (isKernOSVersion || isKernOSRelease || isKernVersion) {
         @try {
@@ -523,7 +522,12 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
                 if (mgr && [mgr isApplicationEnabled:bundleID] && [mgr isIdentifierEnabled:@"IOSVersion"]) {
                     NSString *identityDir = [mgr profileIdentityPath];
                     NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
-                    NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                    NSDictionary *current = nil;
+                    id versionClass = NSClassFromString(@"IOSVersionInfo");
+                    id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
+                    if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
+                        current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
+                    }
                     NSString *val = nil;
                     if (isKernOSVersion) val = deviceIds[@"IOSBuild"] ?: current[@"build"];
                     else if (isKernOSRelease) val = deviceIds[@"Darwin"] ?: current[@"darwin"];
