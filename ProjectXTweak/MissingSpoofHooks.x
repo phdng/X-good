@@ -126,38 +126,18 @@ static BOOL isSpoofingGlobalEnabled() {
 }
 
 - (CGRect)bounds {
-    CGRect original = %orig;
-    NSString *spoofedModel = getSpoofedModel();
-    NSDictionary *specs = getSpecsForModel(spoofedModel);
-    
-    if (specs) {
-        CGFloat w = [specs[@"w"] floatValue];
-        CGFloat h = [specs[@"h"] floatValue];
-        CGFloat s = [specs[@"s"] floatValue];
-        // Bounds is usually in points (pixels / scale)
-        return CGRectMake(0, 0, w/s, h/s);
-    }
-    return original;
+    // Do NOT spoof bounds (layout coordinates). Spoofing this will cause UI scaling issues.
+    return %orig;
 }
 
 - (CGFloat)scale {
-    CGFloat original = %orig;
-    NSString *spoofedModel = getSpoofedModel();
-    NSDictionary *specs = getSpecsForModel(spoofedModel);
-    if (specs) {
-        return [specs[@"s"] floatValue];
-    }
-    return original;
+    // Do NOT spoof scale (layout/rendering). Keep UI stable.
+    return %orig;
 }
 
 - (CGFloat)nativeScale {
-    CGFloat original = %orig;
-    NSString *spoofedModel = getSpoofedModel();
-    NSDictionary *specs = getSpecsForModel(spoofedModel);
-    if (specs) {
-        return [specs[@"s"] floatValue];
-    }
-    return original;
+    // Do NOT spoof nativeScale. Keep UI stable.
+    return %orig;
 }
 
 %end
