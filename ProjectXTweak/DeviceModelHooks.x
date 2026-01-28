@@ -457,8 +457,8 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
         return orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen);
     }
     
-    // Safety: if caller passes NULL out pointers, don't interfere
-    if (!oldp || !oldlenp) {
+    // Safety: allow size query semantics (oldp may be NULL)
+    if (!oldlenp) {
         return orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen);
     }
     
@@ -466,6 +466,11 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
     BOOL isHWMachine = (namelen >= 2 && name[0] == 6 /*CTL_HW*/ && name[1] == 1 /*HW_MACHINE*/);
     BOOL isHWModel = (namelen >= 2 && name[0] == 6 /*CTL_HW*/ && name[1] == 2 /*HW_MODEL*/);
     BOOL isModelQuery = isHWMachine || isHWModel;
+
+    // Kernel build/version queries (CTL_KERN)
+    BOOL isKernOSVersion = (namelen >= 2 && name[0] == CTL_KERN && name[1] == KERN_OSVERSION);
+    BOOL isKernOSRelease = (namelen >= 2 && name[0] == CTL_KERN && name[1] == KERN_OSRELEASE);
+    BOOL isKernVersion = (namelen >= 2 && name[0] == CTL_KERN && name[1] == KERN_VERSION);
     
     // Store original value for logging if needed
     char originalValue[256] = "<not available>";
@@ -486,8 +491,56 @@ static int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
     // Call original function
     int ret = orig_sysctl(name, namelen, oldp, oldlenp, newp, newlen);
     
-    // If it failed or not a query we care about, return
-    if (ret != 0 || !isModelQuery) {
+    // If it failed, return
+    if (ret != 0) {
+        return ret;
+    }
+
+    // Helper for sysctl string outputs
+    auto int PXWriteSysctlCStringLocal(const char *value, void *outBuf, size_t *outLen) {
+        if (!outLen || !value) { errno = EINVAL; return -1; }
+        size_t required = strlen(value) + 1;
+        if (!outBuf) {
+            *outLen = required;
+            return 0;
+        }
+        if (*outLen < required) {
+            *outLen = required;
+            errno = ENOMEM;
+            return -1;
+        }
+        memset(outBuf, 0, *outLen);
+        memcpy(outBuf, value, required);
+        *outLen = required;
+        return 0;
+    }
+
+    // Handle kernel build/version with device_ids.plist (prevents build leaks when multiple sysctl hooks exist)
+    if (isKernOSVersion || isKernOSRelease || isKernVersion) {
+        @try {
+            if (NSClassFromString(@"IdentifierManager")) {
+                IdentifierManager *mgr = [NSClassFromString(@"IdentifierManager") sharedManager];
+                if (mgr && [mgr isApplicationEnabled:bundleID] && [mgr isIdentifierEnabled:@"IOSVersion"]) {
+                    NSString *identityDir = [mgr profileIdentityPath];
+                    NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
+                    NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                    NSString *val = nil;
+                    if (isKernOSVersion) val = deviceIds[@"IOSBuild"] ?: current[@"build"];
+                    else if (isKernOSRelease) val = deviceIds[@"Darwin"] ?: current[@"darwin"];
+                    else val = deviceIds[@"KernelVersion"] ?: current[@"kernel_version"];
+
+                    if (val.length > 0) {
+                        return PXWriteSysctlCStringLocal([val UTF8String], oldp, oldlenp);
+                    }
+                }
+            }
+        } @catch (__unused NSException *e) {
+        }
+        return ret;
+    }
+
+    // If not a model query, return
+    if (!isModelQuery) {
         return ret;
     }
     

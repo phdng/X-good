@@ -52,13 +52,77 @@ static int (*sysctl_orig)(int *name, u_int namelen, void *oldp, size_t *oldlenp,
 // Hook for sysctl array - handles both Kernel and Hardware queries
 static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     if (!sysctl_orig) return -1;
+
+    // Write helper that preserves size-query semantics.
+    auto int PXWriteSysctlCStringLocal(const char *value, void *outBuf, size_t *outLen) {
+        if (!outLen || !value) { errno = EINVAL; return -1; }
+        size_t required = strlen(value) + 1;
+        if (!outBuf) {
+            *outLen = required;
+            return 0;
+        }
+        if (*outLen < required) {
+            *outLen = required;
+            errno = ENOMEM;
+            return -1;
+        }
+        memset(outBuf, 0, *outLen);
+        memcpy(outBuf, value, required);
+        *outLen = required;
+        return 0;
+    }
+
+    // Safety check for pointers
+    if (!name || namelen < 2) {
+        return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
+    }
+
+    @autoreleasepool {
+        @try {
+            if (%c(IdentifierManager)) {
+                IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
+                NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+                if (manager && bundleID && [manager isApplicationEnabled:bundleID]) {
+                    NSString *identityDir = [manager profileIdentityPath];
+                    NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
+                    NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+
+                    // Short-circuit string sysctls we spoof to preserve size semantics.
+                    if (name[0] == CTL_HW && [manager isIdentifierEnabled:@"DeviceModel"]) {
+                        NSString *spoofed = nil;
+                        if (name[1] == HW_MACHINE) {
+                            spoofed = deviceIds[@"DeviceModel"] ?: [manager currentValueForIdentifier:@"DeviceModel"];
+                        } else if (name[1] == HW_MODEL) {
+                            spoofed = deviceIds[@"HwModel"];
+                            if (!spoofed.length) {
+                                spoofed = deviceIds[@"BoardID"];
+                            }
+                        }
+
+                        if (spoofed.length > 0 && oldlenp) {
+                            return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
+                        }
+                    }
+
+                    if (name[0] == CTL_KERN && [manager isIdentifierEnabled:@"IOSVersion"]) {
+                        NSString *spoofed = nil;
+                        if (name[1] == KERN_OSVERSION) spoofed = deviceIds[@"IOSBuild"] ?: current[@"build"];
+                        else if (name[1] == KERN_OSRELEASE) spoofed = deviceIds[@"Darwin"] ?: current[@"darwin"];
+                        else if (name[1] == KERN_VERSION) spoofed = deviceIds[@"KernelVersion"] ?: current[@"kernel_version"];
+
+                        if (spoofed.length > 0 && oldlenp) {
+                            return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
+                        }
+                    }
+                }
+            }
+        } @catch (__unused NSException *e) {
+        }
+    }
     
-    // Call original first to handle all logic and size checks
+    // Default: call original for all other sysctls
     int ret = sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
     if (ret != 0) return ret;
-    
-    // Safety check for pointers
-    if (!name || namelen < 2) return ret;
     
     @autoreleasepool {
         @try {
@@ -94,23 +158,7 @@ static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
                 }
             }
             
-            // 2. Kernel Identifiers (CTL_KERN)
-            else if (name[0] == CTL_KERN && [manager isIdentifierEnabled:@"IOSVersion"]) {
-                NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
-                NSString *spoofed = nil;
-                
-                if (name[1] == KERN_OSVERSION) spoofed = current[@"build"];
-                else if (name[1] == KERN_OSRELEASE) spoofed = current[@"darwin"];
-                else if (name[1] == KERN_VERSION) spoofed = current[@"kernel_version"];
-                
-                if (spoofed.length > 0 && oldp && oldlenp && *oldlenp > 0) {
-                    const char *s = [spoofed UTF8String];
-                    if (strlen(s) + 1 <= *oldlenp) {
-                        memset(oldp, 0, *oldlenp);
-                        strcpy((char *)oldp, s);
-                    }
-                }
-            }
+            // Kernel string sysctls are handled by the short-circuit above.
             
         } @catch (NSException *e) {
             // ignore

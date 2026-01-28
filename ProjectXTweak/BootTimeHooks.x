@@ -356,6 +356,49 @@ int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *new
     }
     
     @try {
+        // Also handle kernel build/version queries here to avoid leaks when multiple sysctl hooks exist.
+        if (namelen >= 2 && name && name[0] == CTL_KERN && oldlenp) {
+            BOOL isOSVersion = (name[1] == KERN_OSVERSION);
+            BOOL isOSRelease = (name[1] == KERN_OSRELEASE);
+            BOOL isKernelVer = (name[1] == KERN_VERSION);
+            if (isOSVersion || isOSRelease || isKernelVer) {
+                @try {
+                    IdentifierManager *mgr = [NSClassFromString(@"IdentifierManager") sharedManager];
+                    NSString *bundleID = getCurrentBundleID();
+                    if (mgr && bundleID && [mgr isApplicationEnabled:bundleID] && [mgr isIdentifierEnabled:@"IOSVersion"]) {
+                        NSString *identityDir = [mgr profileIdentityPath];
+                        NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
+                        NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                        NSString *val = nil;
+                        if (isOSVersion) val = deviceIds[@"IOSBuild"] ?: current[@"build"];
+                        else if (isOSRelease) val = deviceIds[@"Darwin"] ?: current[@"darwin"];
+                        else val = deviceIds[@"KernelVersion"] ?: current[@"kernel_version"];
+
+                        if (val.length > 0) {
+                            const char *s = [val UTF8String];
+                            if (s) {
+                                size_t required = strlen(s) + 1;
+                                if (!oldp) {
+                                    *oldlenp = required;
+                                    return 0;
+                                }
+                                if (*oldlenp < required) {
+                                    *oldlenp = required;
+                                    errno = ENOMEM;
+                                    return -1;
+                                }
+                                memset(oldp, 0, *oldlenp);
+                                memcpy(oldp, s, required);
+                                *oldlenp = required;
+                                return 0;
+                            }
+                        }
+                    }
+                } @catch (__unused NSException *e) {
+                }
+            }
+        }
+
         // Check if this is a KERN_BOOTTIME query
         if (namelen >= 2 && name && name[0] == CTL_KERN && name[1] == KERN_BOOTTIME) {
             if (shouldSpoofBootTimeForApp() && isBootTimeOrUptimeEnabled()) {
