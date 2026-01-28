@@ -3,6 +3,7 @@
 #import "IdentifierManager.h"
 #import "ProfileManager.h"
 #import "ProjectXLogging.h"
+#import "HookOwnership.h"
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <sys/utsname.h>
@@ -929,30 +930,8 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
         
         PXLog(@"[model] Successfully retrieved spoofed model: %@", testModel);
 
-        // Initialize the hooks with error handling
-        @try {
-            MSHookFunction(uname, hook_uname, (void **)&orig_uname);
-            PXLog(@"[model] Hooked uname() successfully");
-        } @catch (NSException *e) {
-            PXLog(@"[model] ERROR hooking uname(): %@", e);
-        }
-        
-        // NOTE: sysctlbyname is hooked in ProjectXTweak/Tweak.x (and DeviceSpecHooks.x).
-        // Hooking it here too makes the final returned value depend on hook ordering.
-        
-        @try {
-            void *sysctlPtr = dlsym(RTLD_DEFAULT, "sysctl");
-            if (sysctlPtr) {
-                MSHookFunction(sysctlPtr, (void *)hook_sysctl, (void **)&orig_sysctl);
-                PXLog(@"[model] Hooked sysctl() successfully");
-            } else {
-                PXLog(@"[model] Could not find sysctl symbol");
-            }
-        } @catch (NSException *e) {
-            PXLog(@"[model] ERROR hooking sysctl(): %@", e);
-        }
-        
-        // NOTE: IORegistryEntryCreateCFProperty is hooked in ProjectXTweak/Tweak.x.
-        // Hooking it here too leads to non-deterministic behavior (double-hook ordering).
+        // Owner (ProjectXTweak/Tweak.x) handles sysctl/uname/IOKit.
+        PXLog(@"[model] Skipping uname/sysctl/IOKit hooks (owner handles these)");
+        return;
     }
 }

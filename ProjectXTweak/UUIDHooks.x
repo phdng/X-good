@@ -2,6 +2,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
+#import "HookOwnership.h"
 #import "IdentifierManager.h"
 #import "SystemUUIDManager.h"
 #import "DyldCacheUUIDManager.h"
@@ -656,6 +657,9 @@ static NSString *getSpoofedDyldCacheUUID() {
 
 // Hook the IOKit function to intercept platform UUID requests
 %hookf(CFTypeRef, IORegistryEntryCreateCFProperty, io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
+    if (gOwnerIOKitInstalled) {
+        return %orig;
+    }
     @try {
         // Check if we're looking for the platform UUID
         if (key && [(__bridge NSString *)key isEqualToString:@"IOPlatformUUID"]) {

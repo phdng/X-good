@@ -2,6 +2,7 @@
 #import "IdentifierManager.h"
 #import "StorageManager.h"
 #import "ProjectXLogging.h"
+#import "HookOwnership.h"
 #import <Foundation/Foundation.h>
 #import <sys/mount.h>
 #import <dlfcn.h>
@@ -702,6 +703,10 @@ static int replaced_getfsstat64(struct statfs64 *buf, int bufsize, int flags) {
 static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t entry, CFStringRef key, CFAllocatorRef allocator, IOOptionBits options) {
     // Call original first
     CFTypeRef result = orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
+
+    if (gOwnerIOKitInstalled) {
+        return result;
+    }
     
     if (!result || !key || !shouldApplyStorageSpoofing()) {
         return result;
@@ -1050,8 +1055,12 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
                 void *ioRegEntryCreateCFPropertyPtr = dlsym(ioKitHandle, "IORegistryEntryCreateCFProperty");
                 
                 if (ioRegEntryCreateCFPropertyPtr) {
-                    MSHookFunction(ioRegEntryCreateCFPropertyPtr, (void *)replaced_IORegistryEntryCreateCFProperty, (void **)&orig_IORegistryEntryCreateCFProperty);
-                    PXLog(@"[StorageHooks] Hooked IORegistryEntryCreateCFProperty successfully");
+                    if (!gOwnerIOKitInstalled) {
+                        MSHookFunction(ioRegEntryCreateCFPropertyPtr, (void *)replaced_IORegistryEntryCreateCFProperty, (void **)&orig_IORegistryEntryCreateCFProperty);
+                        PXLog(@"[StorageHooks] Hooked IORegistryEntryCreateCFProperty successfully");
+                    } else {
+                        PXLog(@"[StorageHooks] Skipping IORegistryEntryCreateCFProperty hook (owner already installed)");
+                    }
                 }
                 
                 dlclose(ioKitHandle);

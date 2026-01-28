@@ -30,6 +30,7 @@
 #import "LocationSpoofingManager.h" // Import location spoofing manager
 #import "MobileGestalt.h"
 #import "IOSVersionInfo.h"
+#import "HookOwnership.h"
 #import <CoreFoundation/CoreFoundation.h>
 // Forward declarations for classes we need to hook
 @interface SBScreenshotManager : NSObject
@@ -44,6 +45,213 @@
 
 // Cache for values
 static NSMutableDictionary *valueCache;
+
+// Owner hook installation flags
+BOOL gOwnerSysctlInstalled = NO;
+BOOL gOwnerSysctlBynameInstalled = NO;
+BOOL gOwnerUnameInstalled = NO;
+BOOL gOwnerIOKitInstalled = NO;
+BOOL gOwnerMGInstalled = NO;
+BOOL gOwnerCFSystemInstalled = NO;
+
+// Missing-key logging
+static NSMutableSet *gMissingLogSeen = nil;
+
+static NSString *PXHookMissingLogPath(void) {
+    NSArray<NSString *> *dirs = @[
+        @"/var/mobile/Library/WeaponX/Logs",
+        @"/private/var/mobile/Library/WeaponX/Logs"
+    ];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *dir in dirs) {
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:dir isDirectory:&isDir] && isDir) {
+            return [dir stringByAppendingPathComponent:@"hook_missing.log"];
+        }
+    }
+    NSString *preferred = dirs.firstObject;
+    if (preferred.length) {
+        [fm createDirectoryAtPath:preferred withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755, NSFileOwnerAccountName: @"mobile"} error:nil];
+        return [preferred stringByAppendingPathComponent:@"hook_missing.log"];
+    }
+    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"hook_missing.log"];
+}
+
+static void PXHookMissingLogLine(NSString *line) {
+    if (!line.length) return;
+    static NSObject *lock = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        lock = [NSObject new];
+        gMissingLogSeen = [NSMutableSet set];
+    });
+    NSString *path = PXHookMissingLogPath();
+    NSString *out = [line stringByAppendingString:@"\n"];
+    @synchronized(lock) {
+        if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+            [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            return;
+        }
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+        if (!fh) {
+            [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            return;
+        }
+        [fh seekToEndOfFile];
+        NSData *data = [out dataUsingEncoding:NSUTF8StringEncoding];
+        if (data) {
+            [fh writeData:data];
+        }
+        [fh closeFile];
+    }
+}
+
+static void PXHookMissingLogOnce(NSString *signature, NSString *line) {
+    if (!signature.length) {
+        PXHookMissingLogLine(line);
+        return;
+    }
+    static NSObject *lock = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        lock = [NSObject new];
+        if (!gMissingLogSeen) gMissingLogSeen = [NSMutableSet set];
+    });
+    @synchronized(lock) {
+        if ([gMissingLogSeen containsObject:signature]) return;
+        [gMissingLogSeen addObject:signature];
+    }
+    PXHookMissingLogLine(line);
+}
+
+static NSString *PXISO8601Now(void) {
+    static NSDateFormatter *df = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        df = [[NSDateFormatter alloc] init];
+        [df setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSSZZZZZ"]; 
+    });
+    return [df stringFromDate:[NSDate date]];
+}
+
+// Snapshot loader/cache
+static NSDictionary *gCachedDeviceIds = nil;
+static NSString *gCachedProfileId = nil;
+static NSNumber *gCachedGen = nil;
+
+static NSString *PXCurrentProfileId(void) {
+    NSArray<NSString *> *bases = @[
+        @"/var/mobile/Library/WeaponX/Profiles",
+        @"/private/var/mobile/Library/WeaponX/Profiles"
+    ];
+    for (NSString *base in bases) {
+        NSString *infoPath = [base stringByAppendingPathComponent:@"current_profile_info.plist"];
+        NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:infoPath];
+        NSString *pid = info[@"ProfileId"];
+        if (pid.length) return pid;
+    }
+    return nil;
+}
+
+static NSDictionary *PXLoadDeviceIdsForProfile(NSString *profileId) {
+    if (!profileId.length) return nil;
+    NSArray<NSString *> *bases = @[
+        @"/var/mobile/Library/WeaponX/Profiles",
+        @"/private/var/mobile/Library/WeaponX/Profiles"
+    ];
+    for (NSString *base in bases) {
+        NSString *identityDir = [[base stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
+        NSString *path = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+        NSDictionary *ids = [NSDictionary dictionaryWithContentsOfFile:path];
+        if (ids.count > 0) return ids;
+    }
+    return nil;
+}
+
+static NSDictionary *PXGetDeviceIdsSnapshot(NSString **outProfileId, NSNumber **outGen) {
+    NSString *profileId = PXCurrentProfileId();
+    NSDictionary *ids = PXLoadDeviceIdsForProfile(profileId);
+    NSNumber *gen = nil;
+    if ([ids[@"GenerationCounter"] respondsToSelector:@selector(integerValue)]) {
+        gen = @([ids[@"GenerationCounter"] integerValue]);
+    }
+    if (!profileId.length || !ids) {
+        if (outProfileId) *outProfileId = profileId;
+        if (outGen) *outGen = gen;
+        return ids;
+    }
+    if ([gCachedProfileId isEqualToString:profileId] && ((gCachedGen && [gCachedGen isEqual:gen]) || (!gCachedGen && !gen)) && gCachedDeviceIds) {
+        if (outProfileId) *outProfileId = gCachedProfileId;
+        if (outGen) *outGen = gCachedGen;
+        return gCachedDeviceIds;
+    }
+    gCachedProfileId = profileId;
+    gCachedGen = gen;
+    gCachedDeviceIds = ids;
+    if (outProfileId) *outProfileId = profileId;
+    if (outGen) *outGen = gen;
+    return ids;
+}
+
+static BOOL PXRequireKeysAll(NSDictionary *ids, NSArray<NSString *> *keys, NSString *api, NSString *req, NSString *bundleID, NSString *profileId, NSNumber *gen) {
+    if (!keys.count) return YES;
+    NSMutableArray *missing = [NSMutableArray array];
+    for (NSString *k in keys) {
+        id v = ids[k];
+        if (![v isKindOfClass:[NSString class]] || ((NSString *)v).length == 0) {
+            [missing addObject:k];
+        }
+    }
+    if (missing.count == 0) return YES;
+    NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
+    NSString *missingStr = [missing componentsJoinedByString:@","];
+    NSString *line = [NSString stringWithFormat:@"ts=%@ api=%@ req=%@ bundle=%@ proc=%@ profile=%@ gen=%@ missing=[%@]",
+                      PXISO8601Now(), api ?: @"", req ?: @"", bundleID ?: @"", proc, profileId ?: @"", gen ?: @"", missingStr];
+    NSString *sig = [NSString stringWithFormat:@"%@|%@|%@|%@|%@|%@|%@", bundleID ?: @"", proc, api ?: @"", req ?: @"", profileId ?: @"", gen ?: @"", missingStr];
+    PXHookMissingLogOnce(sig, line);
+    return NO;
+}
+
+static BOOL PXRequireKeysAny(NSDictionary *ids, NSArray<NSString *> *keys, NSString *api, NSString *req, NSString *bundleID, NSString *profileId, NSNumber *gen) {
+    if (!keys.count) return YES;
+    for (NSString *k in keys) {
+        id v = ids[k];
+        if ([v isKindOfClass:[NSString class]] && ((NSString *)v).length > 0) {
+            return YES;
+        }
+    }
+    NSString *proc = [NSProcessInfo processInfo].processName ?: @"";
+    NSString *missingStr = [keys componentsJoinedByString:@","];
+    NSString *line = [NSString stringWithFormat:@"ts=%@ api=%@ req=%@ bundle=%@ proc=%@ profile=%@ gen=%@ missing_any=[%@]",
+                      PXISO8601Now(), api ?: @"", req ?: @"", bundleID ?: @"", proc, profileId ?: @"", gen ?: @"", missingStr];
+    NSString *sig = [NSString stringWithFormat:@"%@|%@|%@|%@|%@|%@|any:%@", bundleID ?: @"", proc, api ?: @"", req ?: @"", profileId ?: @"", gen ?: @"", missingStr];
+    PXHookMissingLogOnce(sig, line);
+    return NO;
+}
+
+static CFDataRef PXCreateCFDataFromNSString(NSString *s) {
+    if (!s.length) return NULL;
+    const char *cStr = [s UTF8String];
+    if (!cStr) return NULL;
+    return CFDataCreate(kCFAllocatorDefault, (const UInt8 *)cStr, strlen(cStr) + 1);
+}
+
+static CFStringRef PXCreateCFStringFromNSString(NSString *s) {
+    if (!s.length) return NULL;
+    return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)s);
+}
+
+static NSString *PXStringFromCFType(CFTypeRef v) {
+    if (!v) return nil;
+    if (CFGetTypeID(v) == CFStringGetTypeID()) {
+        return (__bridge NSString *)v;
+    }
+    if (CFGetTypeID(v) == CFDataGetTypeID()) {
+        NSData *data = (__bridge NSData *)v;
+        return [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    }
+    return nil;
+}
 
 // Function pointer declarations for additional system functions
 static int (*sysctlbyname_orig)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
@@ -70,8 +278,6 @@ static int PXWriteSysctlCStringLocal(const char *value, void *outBuf, size_t *ou
 // Hook for sysctl array - handles both Kernel and Hardware queries
 static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
     if (!sysctl_orig) return -1;
-
-    // Safety check for pointers
     if (!name || namelen < 2) {
         return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
     }
@@ -82,39 +288,45 @@ static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
                 IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
                 NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
                 if (manager && bundleID && [manager isApplicationEnabled:bundleID]) {
-                    NSString *identityDir = [manager profileIdentityPath];
-                    NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
-                    NSDictionary *current = nil;
-                    id versionClass = NSClassFromString(@"IOSVersionInfo");
-                    id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
-                    if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
-                        current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
-                    }
+                    NSString *profileId = nil;
+                    NSNumber *gen = nil;
+                    NSDictionary *deviceIds = PXGetDeviceIdsSnapshot(&profileId, &gen);
 
-                    // Short-circuit string sysctls we spoof to preserve size semantics.
                     if (name[0] == CTL_HW && [manager isIdentifierEnabled:@"DeviceModel"]) {
-                        NSString *spoofed = nil;
                         if (name[1] == HW_MACHINE) {
-                            spoofed = deviceIds[@"DeviceModel"] ?: [manager currentValueForIdentifier:@"DeviceModel"];
-                        } else if (name[1] == HW_MODEL) {
-                            spoofed = deviceIds[@"HwModel"];
-                            if (!spoofed.length) {
-                                spoofed = deviceIds[@"BoardID"];
+                            if (!PXRequireKeysAll(deviceIds, @[@"DeviceModel"], @"sysctl", @"CTL_HW/HW_MACHINE", bundleID, profileId, gen)) {
+                                return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
                             }
-                        }
-
-                        if (spoofed.length > 0 && oldlenp) {
+                            NSString *spoofed = deviceIds[@"DeviceModel"];
+                            return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
+                        } else if (name[1] == HW_MODEL) {
+                            if (!PXRequireKeysAny(deviceIds, @[@"HwModel", @"BoardID"], @"sysctl", @"CTL_HW/HW_MODEL", bundleID, profileId, gen)) {
+                                return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
+                            }
+                            NSString *spoofed = deviceIds[@"HwModel"];
+                            if (!spoofed.length) spoofed = deviceIds[@"BoardID"];
                             return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
                         }
                     }
 
                     if (name[0] == CTL_KERN && [manager isIdentifierEnabled:@"IOSVersion"]) {
-                        NSString *spoofed = nil;
-                        if (name[1] == KERN_OSVERSION) spoofed = deviceIds[@"IOSBuild"] ?: current[@"build"];
-                        else if (name[1] == KERN_OSRELEASE) spoofed = deviceIds[@"Darwin"] ?: current[@"darwin"];
-                        else if (name[1] == KERN_VERSION) spoofed = deviceIds[@"KernelVersion"] ?: current[@"kernel_version"];
-
-                        if (spoofed.length > 0 && oldlenp) {
+                        if (name[1] == KERN_OSVERSION) {
+                            if (!PXRequireKeysAll(deviceIds, @[@"IOSBuild"], @"sysctl", @"CTL_KERN/KERN_OSVERSION", bundleID, profileId, gen)) {
+                                return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
+                            }
+                            NSString *spoofed = deviceIds[@"IOSBuild"];
+                            return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
+                        } else if (name[1] == KERN_OSRELEASE) {
+                            if (!PXRequireKeysAll(deviceIds, @[@"Darwin"], @"sysctl", @"CTL_KERN/KERN_OSRELEASE", bundleID, profileId, gen)) {
+                                return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
+                            }
+                            NSString *spoofed = deviceIds[@"Darwin"];
+                            return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
+                        } else if (name[1] == KERN_VERSION) {
+                            if (!PXRequireKeysAll(deviceIds, @[@"KernelVersion"], @"sysctl", @"CTL_KERN/KERN_VERSION", bundleID, profileId, gen)) {
+                                return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
+                            }
+                            NSString *spoofed = deviceIds[@"KernelVersion"];
                             return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
                         }
                     }
@@ -123,53 +335,8 @@ static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
         } @catch (__unused NSException *e) {
         }
     }
-    
-    // Default: call original for all other sysctls
-    int ret = sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
-    if (ret != 0) return ret;
-    
-    @autoreleasepool {
-        @try {
-            if (!%c(IdentifierManager)) return ret;
-            IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
-            NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-            if (!manager || !bundleID || ![manager isApplicationEnabled:bundleID]) return ret;
-            
-            // 1. Hardware Identifiers (CTL_HW)
-            if (name[0] == CTL_HW && [manager isIdentifierEnabled:@"DeviceModel"]) {
-                NSString *modelValue = [manager currentValueForIdentifier:@"DeviceModel"];
-                NSString *spoofed = nil;
-                
-                if (name[1] == HW_MACHINE) { // "iPhone11,2"
-                    spoofed = modelValue;
-                } else if (name[1] == HW_MODEL) { // "D321AP"
-                    if (modelValue.length > 0) {
-                        DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
-                        spoofed = [dm hwModelForModel:modelValue];
-                        if (!spoofed.length || [spoofed isEqualToString:@"Unknown"]) {
-                            spoofed = [dm boardIDForModel:modelValue];
-                        }
-                    }
-                }
-                
-                if (spoofed.length > 0 && oldp && oldlenp && *oldlenp > 0) {
-                    const char *s = [spoofed UTF8String];
-                    if (strlen(s) + 1 <= *oldlenp) {
-                        memset(oldp, 0, *oldlenp);
-                        strcpy((char *)oldp, s);
-                        PXLog(@"[WeaponX] 🎯 Spoofed sysctl CTL_HW %d to: %s", name[1], s);
-                    }
-                }
-            }
-            
-            // Kernel string sysctls are handled by the short-circuit above.
-            
-        } @catch (NSException *e) {
-            // ignore
-        }
-    }
-    
-    return ret;
+
+    return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
 }
 
 // Helper functions from successful bypass code
@@ -238,21 +405,16 @@ static CFDictionaryRef CFCopySystemVersionDictionary_hook(void) {
                 return original;
             }
 
-            NSString *identityDir = [manager profileIdentityPath];
-            NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
-            NSDictionary *current = nil;
-            id versionClass = NSClassFromString(@"IOSVersionInfo");
-            id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
-            if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
-                current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
-            }
+            NSString *profileId = nil;
+            NSNumber *gen = nil;
+            NSDictionary *deviceIds = PXGetDeviceIdsSnapshot(&profileId, &gen);
 
-            NSString *spoofedVersion = deviceIds[@"IOSVersion"] ?: current[@"version"];
-            NSString *spoofedBuild = deviceIds[@"IOSBuild"] ?: current[@"build"];
-
-            if (!spoofedVersion.length && !spoofedBuild.length) {
+            if (!PXRequireKeysAll(deviceIds, @[@"IOSVersion", @"IOSBuild"], @"CFSystem", @"CFCopySystemVersionDictionary", bundleID, profileId, gen)) {
                 return original;
             }
+
+            NSString *spoofedVersion = deviceIds[@"IOSVersion"];
+            NSString *spoofedBuild = deviceIds[@"IOSBuild"];
 
             CFMutableDictionaryRef dict = NULL;
             if (original) {
@@ -327,6 +489,10 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
          return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
     }
 
+    NSString *profileId = nil;
+    NSNumber *gen = nil;
+    NSDictionary *deviceIds = PXGetDeviceIdsSnapshot(&profileId, &gen);
+
     // Capture original value for logging (best effort)
     char originalValue[256] = "<not available>";
     size_t originalLen = sizeof(originalValue);
@@ -348,50 +514,56 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
     // NEW: kern.osproductversion - Critical for Facebook
      if (strcmp(name, "kern.osproductversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
-          NSDictionary *current = nil;
-          id versionClass = NSClassFromString(@"IOSVersionInfo");
-          id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
-          if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
-              current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
-          }
-          spoofedValue = current[@"version"]; // e.g. "16.1.1"
+         if (!PXRequireKeysAll(deviceIds, @[@"IOSVersion"], @"sysctlbyname", @"kern.osproductversion", bundleID, profileId, gen)) {
+             px_sysctlbyname_in_hook = NO;
+             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+         }
+         spoofedValue = deviceIds[@"IOSVersion"];
      }
     // Machine/Model spoofing
     else if (strcmp(name, "hw.machine") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
-        spoofedValue = [manager currentValueForIdentifier:@"DeviceModel"];
-    } 
-    else if (strcmp(name, "hw.model") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
-        NSString *model = [manager currentValueForIdentifier:@"DeviceModel"];
-        if (model.length > 0) {
-            DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
-            spoofedValue = [dm hwModelForModel:model];
-            if (!spoofedValue.length || [spoofedValue isEqualToString:@"Unknown"]) {
-                spoofedValue = [dm boardIDForModel:model];
-            }
+        if (!PXRequireKeysAll(deviceIds, @[@"DeviceModel"], @"sysctlbyname", @"hw.machine", bundleID, profileId, gen)) {
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
         }
+        spoofedValue = deviceIds[@"DeviceModel"];
+    }
+    else if (strcmp(name, "hw.model") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
+        if (!PXRequireKeysAny(deviceIds, @[@"HwModel", @"BoardID"], @"sysctlbyname", @"hw.model", bundleID, profileId, gen)) {
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+        }
+        spoofedValue = deviceIds[@"HwModel"];
+        if (!spoofedValue.length) spoofedValue = deviceIds[@"BoardID"];
     }
     else if (strcmp(name, "hw.product") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
-         spoofedValue = [manager currentValueForIdentifier:@"DeviceModel"];
+         if (!PXRequireKeysAll(deviceIds, @[@"DeviceModel"], @"sysctlbyname", @"hw.product", bundleID, profileId, gen)) {
+             px_sysctlbyname_in_hook = NO;
+             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+         }
+         spoofedValue = deviceIds[@"DeviceModel"];
     }
     // OS Version spoofing
     else if ((strcmp(name, "kern.osversion") == 0 || strcmp(name, "kern.osrelease") == 0 || strcmp(name, "kern.version") == 0) &&
              [manager isIdentifierEnabled:@"IOSVersion"]) {
-         NSString *identityDir = [manager profileIdentityPath];
-         NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
-
-         NSDictionary *current = nil;
-         id versionClass = NSClassFromString(@"IOSVersionInfo");
-         id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
-         if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
-             current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
-         }
-
          if (strcmp(name, "kern.osversion") == 0) {
-             spoofedValue = deviceIds[@"IOSBuild"] ?: current[@"build"];
+             if (!PXRequireKeysAll(deviceIds, @[@"IOSBuild"], @"sysctlbyname", @"kern.osversion", bundleID, profileId, gen)) {
+                 px_sysctlbyname_in_hook = NO;
+                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+             }
+             spoofedValue = deviceIds[@"IOSBuild"];
          } else if (strcmp(name, "kern.osrelease") == 0) {
-             spoofedValue = deviceIds[@"Darwin"] ?: current[@"darwin"];
+             if (!PXRequireKeysAll(deviceIds, @[@"Darwin"], @"sysctlbyname", @"kern.osrelease", bundleID, profileId, gen)) {
+                 px_sysctlbyname_in_hook = NO;
+                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+             }
+             spoofedValue = deviceIds[@"Darwin"];
          } else {
-             spoofedValue = deviceIds[@"KernelVersion"] ?: current[@"kernel_version"];
+             if (!PXRequireKeysAll(deviceIds, @[@"KernelVersion"], @"sysctlbyname", @"kern.version", bundleID, profileId, gen)) {
+                 px_sysctlbyname_in_hook = NO;
+                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+             }
+             spoofedValue = deviceIds[@"KernelVersion"];
          }
     }
     else if (strcmp(name, "kern.hostname") == 0 && [manager isIdentifierEnabled:@"DeviceName"]) {
@@ -470,14 +642,18 @@ static int uname_hook(struct utsname *buf) {
         if (!manager || !bundleID || ![manager isApplicationEnabled:bundleID]) return ret;
         
         if ([manager isIdentifierEnabled:@"DeviceModel"]) {
-            NSString *model = [manager currentValueForIdentifier:@"DeviceModel"];
-            if (model.length > 0) {
-                const char *modelStr = [model UTF8String];
-                if (modelStr && buf) {
-                    if (strlen(modelStr) < sizeof(buf->machine)) {
-                        strcpy(buf->machine, modelStr);
-                        PXLog(@"[WeaponX] 🎯 Spoofed uname() machine to: %@", model);
-                    }
+            NSString *profileId = nil;
+            NSNumber *gen = nil;
+            NSDictionary *deviceIds = PXGetDeviceIdsSnapshot(&profileId, &gen);
+            if (!PXRequireKeysAll(deviceIds, @[@"DeviceModel"], @"uname", @"utsname.machine", bundleID, profileId, gen)) {
+                return ret;
+            }
+            NSString *model = deviceIds[@"DeviceModel"];
+            const char *modelStr = [model UTF8String];
+            if (modelStr && buf) {
+                if (strlen(modelStr) < sizeof(buf->machine)) {
+                    strcpy(buf->machine, modelStr);
+                    PXLog(@"[WeaponX] 🎯 Spoofed uname() machine to: %@", model);
                 }
             }
         }
@@ -499,6 +675,9 @@ static int uname_hook(struct utsname *buf) {
     IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
     NSString *propertyString = (__bridge NSString *)property;
     NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
+    NSString *profileId = nil;
+    NSNumber *gen = nil;
+    NSDictionary *deviceIds = PXGetDeviceIdsSnapshot(&profileId, &gen);
     
     PXLog(@"MGCopyAnswer requested for property: %@ by app: %@", propertyString, currentBundleID);
     
@@ -512,35 +691,34 @@ static int uname_hook(struct utsname *buf) {
     if (propertyString) {
         BOOL deviceModelEnabled = [manager isIdentifierEnabled:@"DeviceModel"];
         if (deviceModelEnabled) {
-            NSString *model = [manager currentValueForIdentifier:@"DeviceModel"];
-            if (model.length > 0) {
+            if (propertyString.length > 0) {
                 if ([propertyString isEqualToString:@"ProductType"]) {
-                    return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)model);
+                    if (!PXRequireKeysAll(deviceIds, @[@"DeviceModel"], @"MG", @"ProductType", currentBundleID, profileId, gen)) {
+                        return %orig;
+                    }
+                    return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)deviceIds[@"DeviceModel"]);
                 }
 
                 if ([propertyString isEqualToString:@"HWModelStr"] ||
                     [propertyString isEqualToString:@"HardwareModel"] ||
                     [propertyString isEqualToString:@"HWModel"] ||
                     [propertyString isEqualToString:@"hw-model"]) {
-                    DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
-                    NSString *hwModel = [dm hwModelForModel:model];
-                    if (!hwModel.length || [hwModel isEqualToString:@"Unknown"]) {
-                        hwModel = [dm boardIDForModel:model];
+                    if (!PXRequireKeysAny(deviceIds, @[@"HwModel", @"BoardID"], @"MG", @"HWModel", currentBundleID, profileId, gen)) {
+                        return %orig;
                     }
-                    if (hwModel.length > 0 && ![hwModel isEqualToString:@"Unknown"]) {
-                        return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)hwModel);
-                    }
+                    NSString *hwModel = deviceIds[@"HwModel"];
+                    if (!hwModel.length) hwModel = deviceIds[@"BoardID"];
+                    return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)hwModel);
                 }
 
                 if ([propertyString isEqualToString:@"BoardId"] ||
                     [propertyString isEqualToString:@"board-id"]) {
-                    DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
-                    NSString *boardID = [dm boardIDForModel:model];
-                    if (boardID.length > 0 && ![boardID isEqualToString:@"Unknown"]) {
-                        return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)boardID);
+                    if (!PXRequireKeysAll(deviceIds, @[@"BoardID"], @"MG", @"BoardId", currentBundleID, profileId, gen)) {
+                        return %orig;
                     }
+                    NSString *boardID = deviceIds[@"BoardID"];
+                    return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)boardID);
                 }
-            }
         }
     }
 
@@ -552,42 +730,23 @@ static int uname_hook(struct utsname *buf) {
 
         if ([propertyString isEqualToString:@"ProductBuildVersion"] ||
             [propertyString isEqualToString:@"BuildVersion"]) {
-            NSString *identityDir = [manager profileIdentityPath];
-            NSString *build = nil;
-
-            if (identityDir.length > 0) {
-                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]];
-                build = deviceIds[@"IOSBuild"];
+            if (!PXRequireKeysAll(deviceIds, @[@"IOSBuild"], @"MG", propertyString, currentBundleID, profileId, gen)) {
+                return %orig;
             }
-
-            if (!build.length) {
-                NSDictionary *current = nil;
-                id versionClass = NSClassFromString(@"IOSVersionInfo");
-                id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
-                if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
-                    current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
-                }
-                build = current[@"build"];
-            }
-
-            if (build.length > 0) {
-                PXLog(@"[WeaponX] 🎯 Spoofing MGCopyAnswer %@ with build: %@", propertyString, build);
-                return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)build);
-            }
+            NSString *build = deviceIds[@"IOSBuild"];
+            PXLog(@"[WeaponX] 🎯 Spoofing MGCopyAnswer %@ with build: %@", propertyString, build);
+            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)build);
         }
     }
 
     // Model number (Axxxx) from MobileGestalt
     if (propertyString && [propertyString isEqualToString:@"ModelNumber"]) {
         if ([manager isIdentifierEnabled:@"DeviceModel"]) {
-            NSString *identityDir = [manager profileIdentityPath];
-            if (identityDir.length > 0) {
-                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]];
-                NSString *modelNumber = deviceIds[@"ModelNumber"];
-                if (modelNumber.length > 0) {
-                    return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)modelNumber);
-                }
+            if (!PXRequireKeysAll(deviceIds, @[@"ModelNumber"], @"MG", @"ModelNumber", currentBundleID, profileId, gen)) {
+                return %orig;
             }
+            NSString *modelNumber = deviceIds[@"ModelNumber"];
+            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)modelNumber);
         }
     }
 
@@ -2418,74 +2577,123 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
             }
         }
 
-        // Device model / hardware identifiers (AIDA, CPU Dash, Facebook, etc.)
+        // Device model / hardware identifiers (IOPlatformExpertDevice)
         if ([manager isIdentifierEnabled:@"DeviceModel"] && keyString.length > 0) {
-            NSString *model = [manager currentValueForIdentifier:@"DeviceModel"];
-            if (model.length > 0) {
-                // Expanded key list for better coverage
-                BOOL wantsProductType = [keyString isEqualToString:@"device-model"] || 
-                                      [keyString isEqualToString:@"hw.machine"] ||
-                                      [keyString isEqualToString:@"product-name"] ||
-                                      [keyString isEqualToString:@"compatible"]; // Often returns compatible list, first item is model
-                                      
-                BOOL wantsHWModel = [keyString isEqualToString:@"model"] ||  // IOPlatformExpertDevice 'model' is HWModel (N71AP etc)
-                                  [keyString isEqualToString:@"hw.model"];
-                                  
-                BOOL wantsBoardID = [keyString isEqualToString:@"board-id"] || 
-                                  [keyString isEqualToString:@"BoardId"];
+            NSString *profileId = nil;
+            NSNumber *gen = nil;
+            NSDictionary *deviceIds = PXGetDeviceIdsSnapshot(&profileId, &gen);
 
-                if (wantsProductType || wantsHWModel || wantsBoardID) {
-                    // Call original first to check type if needed
-                    CFTypeRef original = orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
+            BOOL wantsProductType = [keyString isEqualToString:@"device-model"] ||
+                                   [keyString isEqualToString:@"hw.machine"] ||
+                                   [keyString isEqualToString:@"product-name"];
 
-                    DeviceModelManager *dm = [%c(DeviceModelManager) sharedManager];
-                    NSString *replacementString = nil;
+            BOOL wantsHWModel = [keyString isEqualToString:@"model"] ||
+                               [keyString isEqualToString:@"hw.model"];
 
-                    if (wantsProductType) {
-                        // For compatible/product-name, usually "iPhone11,2" format
-                        replacementString = model;
-                    } 
-                    else if (wantsHWModel) {
-                        replacementString = [dm hwModelForModel:model]; // e.g. D321AP
-                        if (!replacementString.length || [replacementString isEqualToString:@"Unknown"]) {
-                            replacementString = [dm boardIDForModel:model];
-                        }
-                    } 
-                    else if (wantsBoardID) {
-                        replacementString = [dm boardIDForModel:model]; // e.g. 6
+            BOOL wantsBoardID = [keyString isEqualToString:@"board-id"] ||
+                               [keyString isEqualToString:@"BoardId"];
+
+            BOOL wantsCompatible = [keyString isEqualToString:@"compatible"];
+
+            if (wantsProductType || wantsHWModel || wantsBoardID || wantsCompatible) {
+                CFTypeRef original = orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
+
+                if (wantsProductType) {
+                    if (!PXRequireKeysAll(deviceIds, @[@"DeviceModel"], @"IOKit", keyString, currentBundleID, profileId, gen)) {
+                        return original;
                     }
-
-                    if (replacementString.length > 0 && ![replacementString isEqualToString:@"Unknown"]) {
-                        PXLog(@"[WeaponX] 🎯 Spoofing IOKit property %@ with: %@", keyString, replacementString);
-                        
-                        BOOL returnAsData = NO;
-                        if (original) {
-                            if (CFGetTypeID(original) == CFDataGetTypeID()) {
-                                returnAsData = YES;
-                            } 
-                            // Check if known data-type keys
-                            else if ([keyString isEqualToString:@"model"] || [keyString isEqualToString:@"compatible"] || [keyString isEqualToString:@"product-name"]) {
-                                returnAsData = YES; 
-                            }
-                            
-                            CFRelease(original); // Release original as we are replacing it
-                        } else {
-                            // If original is null/failed, assume data for these keys
-                            if ([keyString isEqualToString:@"model"] || [keyString isEqualToString:@"compatible"] || [keyString isEqualToString:@"product-name"]) {
-                                returnAsData = YES;
-                            }
-                        }
-                        
-                        if (returnAsData) {
-                            const char *cStr = [replacementString UTF8String];
-                            return CFDataCreate(kCFAllocatorDefault, (const UInt8 *)cStr, strlen(cStr) + 1);
-                        } else {
-                            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)replacementString);
-                        }
+                    NSString *deviceModel = deviceIds[@"DeviceModel"];
+                    if (original && CFGetTypeID(original) == CFDataGetTypeID()) {
+                        CFRelease(original);
+                        return PXCreateCFDataFromNSString(deviceModel);
                     }
-                    
-                    return original;
+                    if (original) CFRelease(original);
+                    return PXCreateCFStringFromNSString(deviceModel);
                 }
+
+                if (wantsBoardID) {
+                    if (!PXRequireKeysAll(deviceIds, @[@"BoardID"], @"IOKit", keyString, currentBundleID, profileId, gen)) {
+                        return original;
+                    }
+                    NSString *boardID = deviceIds[@"BoardID"];
+                    if (original && CFGetTypeID(original) == CFDataGetTypeID()) {
+                        CFRelease(original);
+                        return PXCreateCFDataFromNSString(boardID);
+                    }
+                    if (original) CFRelease(original);
+                    return PXCreateCFStringFromNSString(boardID);
+                }
+
+                if (wantsHWModel) {
+                    if (!PXRequireKeysAny(deviceIds, @[@"HwModel", @"BoardID"], @"IOKit", keyString, currentBundleID, profileId, gen)) {
+                        return original;
+                    }
+                    NSString *hwModel = deviceIds[@"HwModel"];
+                    if (!hwModel.length) hwModel = deviceIds[@"BoardID"];
+                    if (original && CFGetTypeID(original) == CFDataGetTypeID()) {
+                        CFRelease(original);
+                        return PXCreateCFDataFromNSString(hwModel);
+                    }
+                    if (original) CFRelease(original);
+                    return PXCreateCFStringFromNSString(hwModel);
+                }
+
+                if (wantsCompatible) {
+                    if (!PXRequireKeysAny(deviceIds, @[@"HwModel", @"BoardID"], @"IOKit", keyString, currentBundleID, profileId, gen)) {
+                        return original;
+                    }
+                    NSString *hwModel = deviceIds[@"HwModel"];
+                    if (!hwModel.length) hwModel = deviceIds[@"BoardID"];
+                    NSString *deviceModel = deviceIds[@"DeviceModel"];
+
+                    if (original && CFGetTypeID(original) == CFArrayGetTypeID()) {
+                        CFArrayRef origArray = (CFArrayRef)original;
+                        CFMutableArrayRef newArray = CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, origArray);
+                        BOOL prefersData = NO;
+                        BOOL hasHwModel = NO;
+
+                        CFIndex count = CFArrayGetCount(origArray);
+                        for (CFIndex i = 0; i < count; i++) {
+                            CFTypeRef item = CFArrayGetValueAtIndex(origArray, i);
+                            if (item && CFGetTypeID(item) == CFDataGetTypeID()) {
+                                prefersData = YES;
+                            }
+                            NSString *itemStr = PXStringFromCFType(item);
+                            if (itemStr.length > 0) {
+                                if ([itemStr isEqualToString:hwModel]) {
+                                    hasHwModel = YES;
+                                }
+                                if ([itemStr hasPrefix:@"iPhone"] && deviceModel.length) {
+                                    CFTypeRef replacement = prefersData ? (CFTypeRef)PXCreateCFDataFromNSString(deviceModel) : (CFTypeRef)PXCreateCFStringFromNSString(deviceModel);
+                                    if (replacement) {
+                                        CFArraySetValueAtIndex(newArray, i, replacement);
+                                        CFRelease(replacement);
+                                    }
+                                }
+                            }
+                        }
+
+                        if (!hasHwModel && hwModel.length) {
+                            CFTypeRef repl = prefersData ? (CFTypeRef)PXCreateCFDataFromNSString(hwModel) : (CFTypeRef)PXCreateCFStringFromNSString(hwModel);
+                            if (repl) {
+                                CFArrayInsertValueAtIndex(newArray, 0, repl);
+                                CFRelease(repl);
+                            }
+                        }
+
+                        CFRelease(original);
+                        return newArray;
+                    }
+
+                    if (original && CFGetTypeID(original) == CFDataGetTypeID()) {
+                        CFRelease(original);
+                        return PXCreateCFDataFromNSString(hwModel);
+                    }
+                    if (original) CFRelease(original);
+                    return PXCreateCFStringFromNSString(hwModel);
+                }
+
+                if (original) CFRelease(original);
             }
         }
     } @catch (NSException *exception) {
@@ -2644,6 +2852,7 @@ static char* hook_GSSystemGetSerialNo(void) {
     if (sysctlbynameSymbol) {
         PXLog(@"Using ElleKit to hook sysctlbyname for system information protection");
         MSHookFunction(sysctlbynameSymbol, (void *)sysctlbyname_hook, (void **)&sysctlbyname_orig);
+        gOwnerSysctlBynameInstalled = YES;
     }
 
             // Hook sysctl (MIB-based) for build/version keys
@@ -2651,6 +2860,7 @@ static char* hook_GSSystemGetSerialNo(void) {
             if (sysctlSym) {
                 PXLog(@"Hooking sysctl for iOS version/build spoofing");
                 MSHookFunction(sysctlSym, (void *)sysctl_hook, (void **)&sysctl_orig);
+                gOwnerSysctlInstalled = YES;
             }
 
             dlclose(libSystemHandle);
@@ -2673,6 +2883,7 @@ static char* hook_GSSystemGetSerialNo(void) {
     
     // Initialize our hook group
     %init(Identifiers);
+    gOwnerMGInstalled = YES;
     
     // Initialize screenshot modification hooks if we're in SpringBoard
     NSString *processName = [NSProcessInfo processInfo].processName;
@@ -2804,17 +3015,19 @@ static char* hook_GSSystemGetSerialNo(void) {
     void *IOKitHandle = dlopen("/System/Library/Frameworks/IOKit.framework/IOKit", RTLD_NOW);
     if (IOKitHandle) {
         void *IORegEntryCreateCFPropertyPtr = dlsym(IOKitHandle, "IORegistryEntryCreateCFProperty");
-        if (IORegEntryCreateCFPropertyPtr) {
-            PXLog(@"Hooking IORegistryEntryCreateCFProperty for serial number spoofing");
-            // Use EKHook for ElleKit or MSHookFunction for Substrate
-            if (0) {
-                MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
+            if (IORegEntryCreateCFPropertyPtr) {
+                PXLog(@"Hooking IORegistryEntryCreateCFProperty for serial number spoofing");
+                // Use EKHook for ElleKit or MSHookFunction for Substrate
+                if (0) {
+                    MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
                       (void **)&orig_IORegistryEntryCreateCFProperty);
-            } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
-                MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
+                    gOwnerIOKitInstalled = YES;
+                } else if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
+                    MSHookFunction(IORegEntryCreateCFPropertyPtr, (void *)hook_IORegistryEntryCreateCFProperty, 
                               (void **)&orig_IORegistryEntryCreateCFProperty);
+                    gOwnerIOKitInstalled = YES;
+                }
             }
-        }
         dlclose(IOKitHandle);
     }
     
@@ -2849,6 +3062,7 @@ static char* hook_GSSystemGetSerialNo(void) {
                 MSHookFunction(sysctlbynamePtr, (void *)sysctlbyname_hook, 
                               (void **)&sysctlbyname_orig);
                 PXLog(@"[WeaponX] ✅ sysctlbyname hook registered successfully");
+                gOwnerSysctlBynameInstalled = YES;
             } else {
                 PXLog(@"[WeaponX] ❌ MSHookFunction not available, sysctlbyname hook skipped");
             }
@@ -2861,6 +3075,7 @@ static char* hook_GSSystemGetSerialNo(void) {
             PXLog(@"[WeaponX] 🔧 Hooking sysctl for iOS version/build spoofing");
             if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
                 MSHookFunction(sysctlPtr, (void *)sysctl_hook, (void **)&sysctl_orig);
+                gOwnerSysctlInstalled = YES;
             }
         }
         
@@ -2870,6 +3085,7 @@ static char* hook_GSSystemGetSerialNo(void) {
             if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
                 MSHookFunction(unamePtr, (void *)uname_hook, (void **)&uname_orig);
                 PXLog(@"[WeaponX] ✅ uname hook registered successfully");
+                gOwnerUnameInstalled = YES;
             }
         }
         dlclose(libcHandle);
@@ -2885,6 +3101,7 @@ static char* hook_GSSystemGetSerialNo(void) {
             PXLog(@"[WeaponX] 🔧 Hooking CFCopySystemVersionDictionary via CoreFoundation");
             if (dlsym(RTLD_DEFAULT, "MSHookFunction")) {
                 MSHookFunction(cfSym, (void *)CFCopySystemVersionDictionary_hook, (void **)&CFCopySystemVersionDictionary_orig);
+                gOwnerCFSystemInstalled = YES;
             }
         }
         dlclose(cfHandle);

@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #import <objc/message.h>
 #import "ProjectXLogging.h"
+#import "HookOwnership.h"
 #import "IOSVersionInfo.h"
 #import <WebKit/WebKit.h>
 #import <sys/sysctl.h>
@@ -1503,8 +1504,12 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
         if (libSystemHandle) {
             void *sysctlbynamePtr = dlsym(libSystemHandle, "sysctlbyname");
             if (sysctlbynamePtr) {
-                MSHookFunction(sysctlbynamePtr, (void *)hooked_sysctlbyname, (void **)&original_sysctlbyname);
-                IOSVERSION_LOG(@"Hooked sysctlbyname");
+                if (!gOwnerSysctlBynameInstalled) {
+                    MSHookFunction(sysctlbynamePtr, (void *)hooked_sysctlbyname, (void **)&original_sysctlbyname);
+                    IOSVERSION_LOG(@"Hooked sysctlbyname");
+                } else {
+                    IOSVERSION_LOG(@"Skipping sysctlbyname hook (owner already installed)");
+                }
             } else {
                 IOSVERSION_LOG(@"⚠️ Failed to find sysctlbyname symbol");
             }

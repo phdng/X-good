@@ -3,6 +3,7 @@
 #import "IdentifierManager.h"
 #import "ProfileManager.h"
 #import "ProjectXLogging.h"
+#import "HookOwnership.h"
 #import <Foundation/Foundation.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
@@ -1398,8 +1399,12 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
                 // Hook sysctlbyname for memory-related calls
                 orig_sysctlbyname = dlsym(libSystem, "sysctlbyname");
                 if (orig_sysctlbyname) {
-                    MSHookFunction(orig_sysctlbyname, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname);
-                    PXLog(@"[DeviceSpec] Successfully hooked sysctlbyname for memory spoofing");
+                    if (!gOwnerSysctlBynameInstalled) {
+                        MSHookFunction(orig_sysctlbyname, (void *)hook_sysctlbyname, (void **)&orig_sysctlbyname);
+                        PXLog(@"[DeviceSpec] Successfully hooked sysctlbyname for memory spoofing");
+                    } else {
+                        PXLog(@"[DeviceSpec] Skipping sysctlbyname hook (owner already installed)");
+                    }
                 }
                 
                 // Hook host_statistics64 for VM stats spoofing
