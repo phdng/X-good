@@ -75,6 +75,48 @@ static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
     };
 }
 
+static NSUInteger PXRandomIndex3(NSUInteger upperBoundExclusive) {
+    if (upperBoundExclusive == 0) return 0;
+    uint32_t r = 0;
+    if (SecRandomCopyBytes(kSecRandomDefault, sizeof(r), (uint8_t *)&r) == errSecSuccess) {
+        return (NSUInteger)(r % (uint32_t)upperBoundExclusive);
+    }
+    return (NSUInteger)arc4random_uniform((uint32_t)upperBoundExclusive);
+}
+
+static NSDictionary *PXPickHardwareVariantFromModelSpec(NSDictionary *modelSpec) {
+    // Schema: variants: [ { boardID: "N71AP", hwModel: "N71AP" }, ... ]
+    NSArray *variants = [modelSpec[@"variants"] isKindOfClass:[NSArray class]] ? modelSpec[@"variants"] : nil;
+    if (!variants.count) return @{};
+
+    NSMutableArray<NSDictionary *> *candidates = [NSMutableArray array];
+    for (id v in variants) {
+        if (![v isKindOfClass:[NSDictionary class]]) continue;
+        NSString *boardID = [v[@"boardID"] isKindOfClass:[NSString class]] ? v[@"boardID"] : nil;
+        NSString *hwModel = [v[@"hwModel"] isKindOfClass:[NSString class]] ? v[@"hwModel"] : nil;
+        if (!boardID.length && !hwModel.length) continue;
+        [candidates addObject:(NSDictionary *)v];
+    }
+
+    if (!candidates.count) return @{};
+    return candidates[PXRandomIndex3(candidates.count)];
+}
+
+static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
+    // Optional schema: modelNumbers: ["A1633", ...]
+    NSArray *nums = [modelSpec[@"modelNumbers"] isKindOfClass:[NSArray class]] ? modelSpec[@"modelNumbers"] : nil;
+    if (!nums.count) return nil;
+
+    NSMutableArray<NSString *> *candidates = [NSMutableArray array];
+    for (id n in nums) {
+        if ([n isKindOfClass:[NSString class]] && ((NSString *)n).length > 0) {
+            [candidates addObject:(NSString *)n];
+        }
+    }
+    if (!candidates.count) return nil;
+    return candidates[PXRandomIndex3(candidates.count)];
+}
+
 - (NSString *)regenerateDeviceProfileGroup {
     self.error = nil;
 
@@ -143,8 +185,20 @@ static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
     NSString *gpuFamily = [modelSpec[@"gpuFamily"] isKindOfClass:[NSString class]] ? modelSpec[@"gpuFamily"] : @"";
     NSNumber *cpuCores = [modelSpec[@"cpuCores"] isKindOfClass:[NSNumber class]] ? modelSpec[@"cpuCores"] : nil;
     NSString *metalFeatureSet = [modelSpec[@"metalFeatureSet"] isKindOfClass:[NSString class]] ? modelSpec[@"metalFeatureSet"] : @"Unknown";
-    NSString *boardID = [modelSpec[@"boardID"] isKindOfClass:[NSString class]] ? modelSpec[@"boardID"] : @"Unknown";
-    NSString *hwModel = [modelSpec[@"hwModel"] isKindOfClass:[NSString class]] ? modelSpec[@"hwModel"] : boardID;
+
+    // Hardware variant selection (boardID/hwModel)
+    NSDictionary *pickedVariant = PXPickHardwareVariantFromModelSpec(modelSpec);
+    NSString *boardID = [pickedVariant[@"boardID"] isKindOfClass:[NSString class]] ? pickedVariant[@"boardID"] : nil;
+    NSString *hwModel = [pickedVariant[@"hwModel"] isKindOfClass:[NSString class]] ? pickedVariant[@"hwModel"] : nil;
+    if (!boardID.length) {
+        boardID = [modelSpec[@"boardID"] isKindOfClass:[NSString class]] ? modelSpec[@"boardID"] : @"Unknown";
+    }
+    if (!hwModel.length) {
+        hwModel = [modelSpec[@"hwModel"] isKindOfClass:[NSString class]] ? modelSpec[@"hwModel"] : boardID;
+    }
+
+    // Optional model number (Axxxx)
+    NSString *modelNumber = PXPickModelNumberFromModelSpec(modelSpec);
 
     NSDictionary *webGLInfo = PXWebGLInfoFromModelSpec(modelSpec);
 
@@ -171,6 +225,10 @@ static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
     deviceIds[@"WebGLRenderer"] = webGLInfo[@"webglRenderer"] ?: @"Apple GPU";
     deviceIds[@"BoardID"] = boardID ?: @"Unknown";
     deviceIds[@"HwModel"] = hwModel ?: @"Unknown";
+
+    if (modelNumber.length) {
+        deviceIds[@"ModelNumber"] = modelNumber;
+    }
 
     // iOS fields
     deviceIds[@"IOSVersion"] = [NSString stringWithFormat:@"%@ (%@)", iosVersion, iosBuild];
@@ -204,6 +262,7 @@ static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
         @"webGLInfo": webGLInfo ?: @{},
         @"boardID": boardID ?: @"Unknown",
         @"hwModel": hwModel ?: @"Unknown",
+        @"modelNumber": modelNumber ?: @"",
         @"lastUpdated": now
     };
     NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
@@ -234,6 +293,7 @@ static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
     }
 
     PXLog(@"[WeaponX] ✅ DeviceProfileGroup: %@ (%@) iOS %@ (%@)", productType, modelName ?: @"", iosVersion, iosBuild);
+    PXDBLog(@"DeviceProfileGroup: picked device=%@ modelNumber=%@ boardID=%@ hwModel=%@", productType, modelNumber ?: @"<nil>", boardID ?: @"<nil>", hwModel ?: @"<nil>");
     return productType;
 }
 
