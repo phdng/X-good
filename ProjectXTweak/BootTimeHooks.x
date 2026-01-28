@@ -363,12 +363,57 @@ int hook_sysctl(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *new
             BOOL isKernelVer = (name[1] == KERN_VERSION);
             if (isOSVersion || isOSRelease || isKernelVer) {
                 @try {
-                    IdentifierManager *mgr = [NSClassFromString(@"IdentifierManager") sharedManager];
+                    id mgrClass = NSClassFromString(@"IdentifierManager");
+                    id mgr = mgrClass ? [mgrClass performSelector:@selector(sharedManager)] : nil;
                     NSString *bundleID = getCurrentBundleID();
-                    if (mgr && bundleID && [mgr isApplicationEnabled:bundleID] && [mgr isIdentifierEnabled:@"IOSVersion"]) {
-                        NSString *identityDir = [mgr profileIdentityPath];
+
+                    SEL selIsAppEnabled = @selector(isApplicationEnabled:);
+                    SEL selIsIdEnabled = @selector(isIdentifierEnabled:);
+                    SEL selProfilePath = @selector(profileIdentityPath);
+
+                    BOOL appEnabled = NO;
+                    BOOL iosEnabled = NO;
+                    NSString *identityDir = nil;
+
+                    if (mgr && bundleID && [mgr respondsToSelector:selIsAppEnabled]) {
+                        // BOOL return
+                        NSMethodSignature *sig = [mgr methodSignatureForSelector:selIsAppEnabled];
+                        if (sig) {
+                            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                            [inv setTarget:mgr];
+                            [inv setSelector:selIsAppEnabled];
+                            NSString *arg = bundleID;
+                            [inv setArgument:&arg atIndex:2];
+                            [inv invoke];
+                            [inv getReturnValue:&appEnabled];
+                        }
+                    }
+
+                    if (mgr && [mgr respondsToSelector:selIsIdEnabled]) {
+                        NSMethodSignature *sig = [mgr methodSignatureForSelector:selIsIdEnabled];
+                        if (sig) {
+                            NSInvocation *inv = [NSInvocation invocationWithMethodSignature:sig];
+                            [inv setTarget:mgr];
+                            [inv setSelector:selIsIdEnabled];
+                            NSString *arg = @"IOSVersion";
+                            [inv setArgument:&arg atIndex:2];
+                            [inv invoke];
+                            [inv getReturnValue:&iosEnabled];
+                        }
+                    }
+
+                    if (mgr && [mgr respondsToSelector:selProfilePath]) {
+                        identityDir = [mgr performSelector:selProfilePath];
+                    }
+
+                    if (mgr && bundleID && appEnabled && iosEnabled) {
                         NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
-                        NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                        NSDictionary *current = nil;
+                        id versionClass = NSClassFromString(@"IOSVersionInfo");
+                        id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
+                        if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
+                            current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
+                        }
                         NSString *val = nil;
                         if (isOSVersion) val = deviceIds[@"IOSBuild"] ?: current[@"build"];
                         else if (isOSRelease) val = deviceIds[@"Darwin"] ?: current[@"darwin"];
