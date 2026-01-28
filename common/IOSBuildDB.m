@@ -92,6 +92,8 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
     self.db = root;
     self.buildToMeta = btm;
     self.deviceToBuilds = dtb;
+
+    PXDBLog(@"IOSBuildDB: loaded buildToMeta=%lu deviceToBuilds=%lu", (unsigned long)self.buildToMeta.count, (unsigned long)self.deviceToBuilds.count);
     return YES;
 }
 
@@ -120,6 +122,7 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
     NSUInteger outOfRange = 0;
 
     NSMutableArray<NSString *> *missingMetaExamples = [NSMutableArray array];
+    NSMutableArray<NSString *> *missingFieldsExamples = [NSMutableArray array];
     NSMutableArray<NSString *> *kernelMismatchExamples = [NSMutableArray array];
 
     for (id b in builds) {
@@ -141,6 +144,13 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
 
         if (![version isKindOfClass:[NSString class]] || ![darwin isKindOfClass:[NSString class]] || ![xnu isKindOfClass:[NSString class]] || ![kernel isKindOfClass:[NSString class]]) {
             missingFields += 1;
+            if (missingFieldsExamples.count < 2) {
+                NSString *vType = NSStringFromClass([version class]) ?: @"nil";
+                NSString *dType = NSStringFromClass([darwin class]) ?: @"nil";
+                NSString *xType = NSStringFromClass([xnu class]) ?: @"nil";
+                NSString *kType = NSStringFromClass([kernel class]) ?: @"nil";
+                [missingFieldsExamples addObject:[NSString stringWithFormat:@"%@ (types: version=%@ darwin=%@ xnu=%@ kernel_version=%@)", build, vType, dType, xType, kType]];
+            }
             continue;
         }
 
@@ -186,6 +196,9 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
 
         if (missingMetaExamples.count > 0) {
             PXDBLog(@"IOSBuildDB: missingMeta examples for %@: %@", productType, [missingMetaExamples componentsJoinedByString:@", "]);
+        }
+        if (missingFieldsExamples.count > 0) {
+            PXDBLog(@"IOSBuildDB: missingFields examples for %@: %@", productType, [missingFieldsExamples componentsJoinedByString:@" | "]);
         }
         if (kernelMismatchExamples.count > 0) {
             PXDBLog(@"IOSBuildDB: kernelMismatch examples for %@: %@", productType, [kernelMismatchExamples componentsJoinedByString:@" | "]);
