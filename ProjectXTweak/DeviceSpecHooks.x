@@ -286,7 +286,7 @@ static NSString *getSpoofedDeviceModel() {
             }
         }
         
-        // METHOD 1: Try direct access from profile plist
+        // METHOD 1: Try direct access from profile plist (device_ids.plist)
         if (!deviceModel.length) {
             NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
             NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
@@ -297,24 +297,16 @@ static NSString *getSpoofedDeviceModel() {
                 // Build path to identity directory
                 NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
 
-                // First try device_model.plist (detailed specs)
-                NSString *deviceModelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-                NSDictionary *deviceModelDict = [NSDictionary dictionaryWithContentsOfFile:deviceModelPath];
-                deviceModel = deviceModelDict[@"value"];
-
-                if (!deviceModel || deviceModel.length == 0) {
-                    // Fallback to device_ids.plist (combined storage)
-                    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-                    NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-                    deviceModel = deviceIds[@"DeviceModel"];
-                }
+                NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+                deviceModel = deviceIds[@"DeviceModel"];
             }
         }
         
-        // METHOD 2: Use DeviceModelManager as fallback
+        // METHOD 2: Use DeviceModelManager as fallback (do not generate here)
         if (!deviceModel.length && NSClassFromString(@"DeviceModelManager")) {
             DeviceModelManager *deviceManager = [NSClassFromString(@"DeviceModelManager") sharedManager];
-            deviceModel = [deviceManager currentDeviceModel] ?: [deviceManager generateDeviceModel];
+            deviceModel = [deviceManager currentDeviceModel];
         }
         
         // METHOD 3: Emergency fallback / Legacy
@@ -379,7 +371,7 @@ static NSDictionary *getDeviceSpecs() {
     }
     
     @try {
-        // METHOD 1: Try to get specs directly from profile plist files
+        // METHOD 1: Try to get specs directly from device_ids.plist
         NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
         NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
@@ -387,44 +379,6 @@ static NSDictionary *getDeviceSpecs() {
         NSString *profileId = centralInfo[@"ProfileId"];
         if (profileId) {
             NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
-            
-            // First try device_model.plist (has all detailed specs)
-            NSString *deviceModelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-            NSDictionary *deviceModelDict = [NSDictionary dictionaryWithContentsOfFile:deviceModelPath];
-            
-            if (deviceModelDict && deviceModelDict.count > 0) {
-                // We have specs in the plist; ensure board/hw identifiers exist for consistency
-                NSMutableDictionary *specsToUse = [deviceModelDict mutableCopy];
-                NSString *modelValue = specsToUse[@"value"];
-                if (modelValue.length > 0) {
-                    if (!specsToUse[@"boardID"] || ![specsToUse[@"boardID"] isKindOfClass:[NSString class]] || [specsToUse[@"boardID"] length] == 0) {
-                        DeviceModelManager *deviceManager = [NSClassFromString(@"DeviceModelManager") sharedManager];
-                        NSString *boardID = [deviceManager boardIDForModel:modelValue];
-                        if (boardID.length > 0 && ![boardID isEqualToString:@"Unknown"]) {
-                            specsToUse[@"boardID"] = boardID;
-                        }
-                    }
-                    if (!specsToUse[@"hwModel"] || ![specsToUse[@"hwModel"] isKindOfClass:[NSString class]] || [specsToUse[@"hwModel"] length] == 0) {
-                        DeviceModelManager *deviceManager = [NSClassFromString(@"DeviceModelManager") sharedManager];
-                        NSString *hwModel = [deviceManager hwModelForModel:modelValue];
-                        if (hwModel.length > 0 && ![hwModel isEqualToString:@"Unknown"]) {
-                            specsToUse[@"hwModel"] = hwModel;
-                        }
-                    }
-                }
-
-                PXLog(@"[DeviceSpec] Loaded device specs from device_model.plist");
-
-                // Cache the specifications
-                @synchronized(deviceSpecsCache) {
-                    deviceSpecsCache[@"specs"] = specsToUse;
-                    cacheTimestamp = [NSDate date];
-                }
-
-                return specsToUse;
-            }
-            
-            // Fallback to device_ids.plist and reconstruct specs
             NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
             NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
             
@@ -1802,16 +1756,16 @@ static int hook_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void
             NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
             if (manager && bundleID && [manager isApplicationEnabled:bundleID] && [manager isIdentifierEnabled:@"IOSVersion"]) {
                 NSString *identityDir = [manager profileIdentityPath];
-                NSDictionary *ver = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"ios_version.plist"]] : nil;
+                NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
                 NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
                 NSString *value = nil;
 
                 if (strcmp(name, "kern.osversion") == 0) {
-                    value = ver[@"build"] ?: current[@"build"];
+                    value = deviceIds[@"IOSBuild"] ?: current[@"build"];
                 } else if (strcmp(name, "kern.osrelease") == 0) {
-                    value = ver[@"darwin"] ?: current[@"darwin"];
+                    value = deviceIds[@"Darwin"] ?: current[@"darwin"];
                 } else if (strcmp(name, "kern.version") == 0) {
-                    value = ver[@"kernel_version"] ?: current[@"kernel_version"];
+                    value = deviceIds[@"KernelVersion"] ?: current[@"kernel_version"];
                 }
 
                 if (value.length > 0) {

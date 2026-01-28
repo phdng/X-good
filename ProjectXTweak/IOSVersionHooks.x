@@ -270,181 +270,85 @@ static NSDictionary *getIOSVersionInfo() {
         return versionCache;
     }
     
-    // Read version value directly from profile files
+    // Read version info directly from device_ids.plist (source of truth)
     NSString *formattedVersion = nil;
-    
-    // Try to get the current profile directory
+    NSDictionary *deviceIds = nil;
+
     NSArray *possibleProfilePaths = @[
         @"/var/mobile/Library/WeaponX/Profiles",
-        @"/private/var/mobile/Library/WeaponX/Profiles", 
+        @"/private/var/mobile/Library/WeaponX/Profiles",
         @"/var/mobile/Library/WeaponX/Profiles"
     ];
-    
+
     NSFileManager *fileManager = [NSFileManager defaultManager];
     for (NSString *profileBasePath in possibleProfilePaths) {
         if ([fileManager fileExistsAtPath:profileBasePath]) {
-            // Get current profile ID
             NSString *currentProfileInfoPath = [profileBasePath stringByAppendingPathComponent:@"current_profile_info.plist"];
             NSDictionary *currentProfileInfo = [NSDictionary dictionaryWithContentsOfFile:currentProfileInfoPath];
             NSString *profileId = currentProfileInfo[@"ProfileId"];
-            
             if (profileId) {
-                // Try to read iOS version from device_ids.plist
                 NSString *identityDir = [[profileBasePath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
                 NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
-                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
-                formattedVersion = deviceIds[@"IOSVersion"];
-                
-                if (formattedVersion) {
-                    break;
-                }
-                
-                // Try to read from ios_version.plist
-                NSString *iosVersionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
-                NSDictionary *iosVersion = [NSDictionary dictionaryWithContentsOfFile:iosVersionPath];
-                formattedVersion = iosVersion[@"value"];
-                
-                if (formattedVersion) {
+                deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+                if (deviceIds.count > 0) {
+                    formattedVersion = deviceIds[@"IOSVersion"];
                     break;
                 }
             }
         }
     }
-    
-    if (!formattedVersion) {
-        // Fallback: try to use IOSVersionInfo to generate a random version
-        @try {
-            IOSVersionInfo *versionManager = [NSClassFromString(@"IOSVersionInfo") sharedManager];
-            if (versionManager) {
-                NSDictionary *randomVersionInfo = [versionManager generateIOSVersionInfo];
-                if (randomVersionInfo) {
-                    IOSVERSION_LOG(@"Using fallback random iOS version from IOSVersionInfo");
-                    
-                    // Cache the result
-                    versionCache = [randomVersionInfo copy];
-                    lastVersionLoad = now;
-                    
-                    return versionCache;
+
+    if (deviceIds.count > 0) {
+        NSString *version = nil;
+        NSString *build = deviceIds[@"IOSBuild"];
+        if ([formattedVersion isKindOfClass:[NSString class]] && [formattedVersion containsString:@"("]) {
+            NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"([0-9.]+)\\s*\\(([^)]+)\\)" options:0 error:nil];
+            NSTextCheckingResult *match = [regex firstMatchInString:formattedVersion options:0 range:NSMakeRange(0, formattedVersion.length)];
+            if (match && match.numberOfRanges == 3) {
+                version = [formattedVersion substringWithRange:[match rangeAtIndex:1]];
+                if (!build.length) {
+                    build = [formattedVersion substringWithRange:[match rangeAtIndex:2]];
                 }
             }
-        } @catch (NSException *e) {
-            IOSVERSION_LOG(@"❌ Error using IOSVersionInfo fallback: %@", e);
         }
-        
-        return nil;
-    }
-    
-    // Parse the formatted version string to extract version and build
-    // Format is typically "15.5 (19F77)"
-    NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"([0-9.]+)\\s*\\(([^)]+)\\)" options:0 error:nil];
-    NSTextCheckingResult *match = [regex firstMatchInString:formattedVersion options:0 range:NSMakeRange(0, formattedVersion.length)];
-    
-    if (match && match.numberOfRanges == 3) {
-        NSString *version = [formattedVersion substringWithRange:[match rangeAtIndex:1]];
-        NSString *build = [formattedVersion substringWithRange:[match rangeAtIndex:2]];
-        
-        // CRITICAL FIX: Look up the full version info from IOSVersionInfo database
-        NSDictionary *fullVersionInfo = nil;
-        @try {
-            IOSVersionInfo *versionManager = [NSClassFromString(@"IOSVersionInfo") sharedManager];
-            if (versionManager) {
-                // Get all available versions from the database
-                NSArray *availableVersions = [versionManager availableIOSVersions];
-                
-                // Find the matching version/build pair in the database
-                for (NSDictionary *versionData in availableVersions) {
-                    if ([versionData[@"version"] isEqualToString:version] && 
-                        [versionData[@"build"] isEqualToString:build]) {
-                        fullVersionInfo = versionData;
-                        break;
-                    }
-                }
-                
-                // If we didn't find an exact match, try to find the closest version
-                if (!fullVersionInfo) {
-                    for (NSDictionary *versionData in availableVersions) {
-                        if ([versionData[@"version"] isEqualToString:version]) {
-                            fullVersionInfo = versionData;
-                            IOSVERSION_LOG(@"⚠️ Using closest match for version %@ with build %@ instead of %@", 
-                                  version, versionData[@"build"], build);
-                            break;
-                        }
-                    }
-                }
-                
-                // Last resort: use the parsed version/build but create kernel info
-                if (!fullVersionInfo) {
-                    IOSVERSION_LOG(@"⚠️ No exact match found, creating synthetic kernel info for %@ (%@)", version, build);
-                    
-                    // Create synthetic kernel version based on the iOS version
-                    NSString *syntheticKernelVersion;
-                    NSString *syntheticDarwin;
-                    NSString *syntheticXnu;
-                    
-                    // Map iOS versions to approximate kernel versions
-                    if ([version hasPrefix:@"15."]) {
-                        syntheticDarwin = @"21.6.0";
-                        syntheticXnu = @"8020.140.41~4";
-                        syntheticKernelVersion = [NSString stringWithFormat:@"Darwin Kernel Version %@: Mon Jul 18 22:28:05 PDT 2022; root:xnu-%@/RELEASE_ARM64_T8101", syntheticDarwin, syntheticXnu];
-                    } else if ([version hasPrefix:@"16."]) {
-                        syntheticDarwin = @"22.6.0";
-                        syntheticXnu = @"8796.141.3~6";
-                        syntheticKernelVersion = [NSString stringWithFormat:@"Darwin Kernel Version %@: Thu Sep 14 16:33:11 PDT 2023; root:xnu-%@/RELEASE_ARM64_T8101", syntheticDarwin, syntheticXnu];
-                    } else if ([version hasPrefix:@"17."]) {
-                        syntheticDarwin = @"23.6.0";
-                        syntheticXnu = @"10063.141.2~3";
-                        syntheticKernelVersion = [NSString stringWithFormat:@"Darwin Kernel Version %@: Tue Jun 11 18:30:45 PDT 2024; root:xnu-%@/RELEASE_ARM64_T6000", syntheticDarwin, syntheticXnu];
-                    } else if ([version hasPrefix:@"18."]) {
-                        syntheticDarwin = @"24.2.0";
-                        syntheticXnu = @"10461.61.1~4";
-                        syntheticKernelVersion = [NSString stringWithFormat:@"Darwin Kernel Version %@: Mon Oct 14 20:27:31 PDT 2024; root:xnu-%@/RELEASE_ARM64_T6000", syntheticDarwin, syntheticXnu];
-                    } else {
-                        // Default fallback for unknown versions
-                        syntheticDarwin = @"22.6.0";
-                        syntheticXnu = @"8796.141.3~6";
-                        syntheticKernelVersion = [NSString stringWithFormat:@"Darwin Kernel Version %@: Thu Sep 14 16:33:11 PDT 2023; root:xnu-%@/RELEASE_ARM64_T8101", syntheticDarwin, syntheticXnu];
-                    }
-                    
-                    fullVersionInfo = @{
-                        @"version": version,
-                        @"build": build,
-                        @"kernel_version": syntheticKernelVersion,
-                        @"darwin": syntheticDarwin,
-                        @"xnu": syntheticXnu
-                    };
-                }
-            }
-        } @catch (NSException *e) {
-            IOSVERSION_LOG(@"❌ Error looking up version info from IOSVersionInfo: %@", e);
-            
-            // Fallback to basic version info without kernel data
-            fullVersionInfo = @{
+        if (!version.length && [formattedVersion isKindOfClass:[NSString class]] && formattedVersion.length > 0) {
+            version = formattedVersion;
+        }
+
+        NSString *darwin = deviceIds[@"Darwin"];
+        NSString *xnu = deviceIds[@"XNU"];
+        NSString *kernel = deviceIds[@"KernelVersion"];
+
+        if (version.length && build.length && darwin.length && xnu.length && kernel.length) {
+            NSDictionary *versionInfo = @{
                 @"version": version,
-                @"build": build
+                @"build": build,
+                @"darwin": darwin,
+                @"xnu": xnu,
+                @"kernel_version": kernel
             };
+
+            versionCache = [versionInfo copy];
+            lastVersionLoad = now;
+
+            dispatch_once(&onceToken, ^{
+                IOSVERSION_LOG(@"Using iOS version from device_ids: %@ (%@)", version, build);
+            });
+
+            return versionCache;
         }
-        
-        // Use the full version info or fallback to basic info
-        NSDictionary *versionInfo = fullVersionInfo ?: @{
-            @"version": version,
-            @"build": build
-        };
-        
-        // Cache the result
-        versionCache = [versionInfo copy];
-        lastVersionLoad = now;
-        
-        // Only log this message once to reduce logging
-        dispatch_once(&onceToken, ^{
-            IOSVERSION_LOG(@"Using iOS version: %@ with build: %@, kernel: %@", 
-                  versionInfo[@"version"], 
-                  versionInfo[@"build"],
-                  versionInfo[@"kernel_version"] ?: @"Not available");
-        });
-        
-        return versionInfo;
+
+        IOSVERSION_LOG(@"❌ device_ids.plist missing required iOS fields (version/build/darwin/xnu/kernel)");
     }
-    
+
+    // Fallback to IOSVersionInfo current (no synthetic generation)
+    NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+    if (current && current[@"version"] && current[@"build"] && current[@"darwin"] && current[@"xnu"] && current[@"kernel_version"]) {
+        versionCache = [current copy];
+        lastVersionLoad = now;
+        return versionCache;
+    }
+
     return nil;
 }
 

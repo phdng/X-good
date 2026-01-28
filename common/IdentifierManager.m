@@ -246,42 +246,16 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
         return nil;
     }
 
-    // Compat output: device_model.plist
-    NSDictionary *modelDict = @{
-        @"value": productType ?: @"",
-        @"name": modelName ?: @"",
-        @"screenResolution": screenResolution ?: @"",
-        @"viewportResolution": viewportResolution ?: @"",
-        @"devicePixelRatio": scale ?: @(0),
-        @"screenDensity": ppi ?: @(0),
-        @"cpuArchitecture": cpuArchitecture ?: @"",
-        @"deviceMemory": deviceMemoryGB ?: @(0),
-        @"gpuFamily": gpuFamily ?: @"",
-        @"cpuCoreCount": cpuCores ?: @(0),
-        @"metalFeatureSet": metalFeatureSet ?: @"Unknown",
-        @"webGLInfo": webGLInfo ?: @{},
-        @"boardID": boardID ?: @"Unknown",
-        @"hwModel": hwModel ?: @"Unknown",
-        @"modelNumber": modelNumber ?: @"",
-        @"lastUpdated": now
-    };
-    NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-    [modelDict writeToFile:modelPath atomically:YES];
-
-    // Compat output: ios_version.plist
-    NSDictionary *versionDict = @{
-        @"version": iosVersion,
-        @"build": iosBuild,
-        @"darwin": darwin,
-        @"xnu": xnu,
-        @"kernel_version": kernel,
-        @"lastUpdated": now
-    };
-    NSString *versionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
-    [versionDict writeToFile:versionPath atomically:YES];
-
     // Keep IOSVersionInfo in sync for processes that fall back to it.
     @try {
+        NSDictionary *versionDict = @{
+            @"version": iosVersion,
+            @"build": iosBuild,
+            @"darwin": darwin,
+            @"xnu": xnu,
+            @"kernel_version": kernel,
+            @"lastUpdated": now
+        };
         [[IOSVersionInfo sharedManager] setCurrentIOSVersionInfo:versionDict];
     } @catch (__unused NSException *e) {
     }
@@ -324,31 +298,9 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
     NSString *boardID = [deviceManager boardIDForModel:deviceModel];
     NSString *hwModel = [deviceManager hwModelForModel:deviceModel];
     
-    // Save to profile-specific path
+    // Save to profile-specific path (device_ids.plist only)
     NSString *identityDir = [self profileIdentityPath];
     if (identityDir) {
-        // Create a full dictionary with all device specs
-        NSDictionary *modelDict = @{
-            @"value": deviceModel ?: @"",
-            @"name": deviceModelName ?: @"",
-            @"screenResolution": screenResolution ?: @"",
-            @"viewportResolution": viewportResolution ?: @"",
-            @"devicePixelRatio": @(devicePixelRatio),
-            @"screenDensity": @(screenDensity),
-            @"cpuArchitecture": cpuArchitecture ?: @"",
-            @"deviceMemory": @(deviceMemory),
-            @"gpuFamily": gpuFamily ?: @"",
-            @"cpuCoreCount": @(cpuCoreCount),
-            @"metalFeatureSet": metalFeatureSet ?: @"Unknown",
-            @"webGLInfo": webGLInfo ?: @{},
-            @"boardID": boardID ?: @"Unknown",
-            @"hwModel": hwModel ?: @"Unknown",
-            @"lastUpdated": [NSDate date]
-        };
-        
-        NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-        [modelDict writeToFile:modelPath atomically:YES];
-        
         // Also update the combined device_ids.plist
         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
         NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
@@ -410,29 +362,7 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
     NSString *hwModel = [deviceManager hwModelForModel:value];
     
     if (identityDir) {
-        // Create a comprehensive dictionary with all device specifications
-        NSDictionary *modelDict = @{
-            @"value": value ?: @"",
-            @"name": deviceModelName ?: @"",
-            @"screenResolution": screenResolution ?: @"",
-            @"viewportResolution": viewportResolution ?: @"",
-            @"devicePixelRatio": @(devicePixelRatio),
-            @"screenDensity": @(screenDensity),
-            @"cpuArchitecture": cpuArchitecture ?: @"",
-            @"deviceMemory": @(deviceMemory),
-            @"gpuFamily": gpuFamily ?: @"",
-            @"cpuCoreCount": @(cpuCoreCount),
-            @"metalFeatureSet": metalFeatureSet ?: @"Unknown",
-            @"webGLInfo": webGLInfo ?: @{},
-            @"boardID": boardID ?: @"Unknown",
-            @"hwModel": hwModel ?: @"Unknown",
-            @"lastUpdated": [NSDate date]
-        };
-        
-        NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-        success = [modelDict writeToFile:modelPath atomically:YES];
-        
-        // Also update the combined device_ids.plist
+        // Update the combined device_ids.plist
         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
         NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
         
@@ -699,9 +629,6 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
                             @"lastUpdated": [NSDate date]
                         } mutableCopy];
 
-                        NSString *versionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
-                        [versionDict writeToFile:versionPath atomically:YES];
-
                         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
                         NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
                         deviceIds[@"IOSVersion"] = [NSString stringWithFormat:@"%@ (%@)", iosVersion, iosBuild];
@@ -727,15 +654,9 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
         return nil;
     }
     
-    // Save to profile-specific path
+    // Save to profile-specific path (device_ids.plist only)
     NSString *identityDir = [self profileIdentityPath];
     if (identityDir) {
-        NSMutableDictionary *versionDict = [NSMutableDictionary dictionaryWithDictionary:versionInfo];
-        [versionDict setObject:[NSDate date] forKey:@"lastUpdated"];
-        
-        NSString *versionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
-        [versionDict writeToFile:versionPath atomically:YES];
-        
         // Also update the combined device_ids.plist
         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
         NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
@@ -744,6 +665,9 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
         // Store both version and build in device_ids.plist
         deviceIds[@"IOSVersion"] = [NSString stringWithFormat:@"%@ (%@)", versionInfo[@"version"], versionInfo[@"build"]];
         deviceIds[@"IOSBuild"] = versionInfo[@"build"];  // Keep this for compatibility
+        if (versionInfo[@"darwin"]) deviceIds[@"Darwin"] = versionInfo[@"darwin"];
+        if (versionInfo[@"xnu"]) deviceIds[@"XNU"] = versionInfo[@"xnu"];
+        if (versionInfo[@"kernel_version"]) deviceIds[@"KernelVersion"] = versionInfo[@"kernel_version"];
         [deviceIds writeToFile:deviceIdsPath atomically:YES];
         
         PXLog(@"[WeaponX] Stored iOS version: %@ with build: %@", versionInfo[@"version"], versionInfo[@"build"]);
@@ -1565,14 +1489,6 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
                 return meidDict[@"value"];
             }
         }
-        else if ([type isEqualToString:@"DeviceModel"]) {
-            NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-            NSDictionary *modelDict = [NSDictionary dictionaryWithContentsOfFile:modelPath];
-            if (modelDict && modelDict[@"value"]) {
-                PXLog(@"Found DeviceModel in device_model.plist: %@", modelDict[@"value"]);
-                return modelDict[@"value"];
-            }
-        }
         else if ([type isEqualToString:@"DeviceName"]) {
             NSString *deviceNamePath = [identityDir stringByAppendingPathComponent:@"device_name.plist"];
             NSDictionary *deviceNameDict = [NSDictionary dictionaryWithContentsOfFile:deviceNamePath];
@@ -1676,15 +1592,6 @@ return @"Not Set";
             if (version && build) {
                 NSString *formattedVersion = [NSString stringWithFormat:@"%@ (%@)", version, build];
                 PXLog(@"[WeaponX] Formatted iOS version from components: %@", formattedVersion);
-                return formattedVersion;
-            }
-            
-            // If not found in combined file, try ios_version.plist
-            NSString *versionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
-            NSDictionary *versionDict = [NSDictionary dictionaryWithContentsOfFile:versionPath];
-            if (versionDict && versionDict[@"version"] && versionDict[@"build"]) {
-                NSString *formattedVersion = [NSString stringWithFormat:@"%@ (%@)", versionDict[@"version"], versionDict[@"build"]];
-                PXLog(@"[WeaponX] Formatted iOS version from ios_version.plist: %@", formattedVersion);
                 return formattedVersion;
             }
         }
@@ -2892,16 +2799,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 - (NSDictionary *)getDeviceModelSpecifications {
     NSString *identityDir = [self profileIdentityPath];
     if (!identityDir) return nil;
-    
-    // First, check the device_model.plist file for detailed specifications
-    NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
-    NSDictionary *modelDict = [NSDictionary dictionaryWithContentsOfFile:modelPath];
-    
-    if (modelDict && modelDict.count > 0) {
-        return modelDict;
-    }
-    
-    // If not found in dedicated file, check the combined device_ids.plist
+
+    // Read from the combined device_ids.plist only (source of truth)
     NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
     NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
     
@@ -2931,6 +2830,10 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         webGLInfo[@"maxRenderBufferSize"] = @(16384);
         
         specs[@"webGLInfo"] = webGLInfo;
+
+        if (deviceIds[@"ModelNumber"]) {
+            specs[@"modelNumber"] = deviceIds[@"ModelNumber"];
+        }
         
         return specs;
     }
