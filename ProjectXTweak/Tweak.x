@@ -49,28 +49,27 @@ static NSMutableDictionary *valueCache;
 static int (*sysctlbyname_orig)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 static int (*sysctl_orig)(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 
-// Hook for sysctl array - handles both Kernel and Hardware queries
-static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
-    if (!sysctl_orig) return -1;
-
-    // Write helper that preserves size-query semantics.
-    auto int PXWriteSysctlCStringLocal(const char *value, void *outBuf, size_t *outLen) {
-        if (!outLen || !value) { errno = EINVAL; return -1; }
-        size_t required = strlen(value) + 1;
-        if (!outBuf) {
-            *outLen = required;
-            return 0;
-        }
-        if (*outLen < required) {
-            *outLen = required;
-            errno = ENOMEM;
-            return -1;
-        }
-        memset(outBuf, 0, *outLen);
-        memcpy(outBuf, value, required);
+static int PXWriteSysctlCStringLocal(const char *value, void *outBuf, size_t *outLen) {
+    if (!outLen || !value) { errno = EINVAL; return -1; }
+    size_t required = strlen(value) + 1;
+    if (!outBuf) {
         *outLen = required;
         return 0;
     }
+    if (*outLen < required) {
+        *outLen = required;
+        errno = ENOMEM;
+        return -1;
+    }
+    memset(outBuf, 0, *outLen);
+    memcpy(outBuf, value, required);
+    *outLen = required;
+    return 0;
+}
+
+// Hook for sysctl array - handles both Kernel and Hardware queries
+static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    if (!sysctl_orig) return -1;
 
     // Safety check for pointers
     if (!name || namelen < 2) {
@@ -85,7 +84,12 @@ static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
                 if (manager && bundleID && [manager isApplicationEnabled:bundleID]) {
                     NSString *identityDir = [manager profileIdentityPath];
                     NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
-                    NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                    NSDictionary *current = nil;
+                    id versionClass = NSClassFromString(@"IOSVersionInfo");
+                    id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
+                    if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
+                        current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
+                    }
 
                     // Short-circuit string sysctls we spoof to preserve size semantics.
                     if (name[0] == CTL_HW && [manager isIdentifierEnabled:@"DeviceModel"]) {
@@ -236,7 +240,12 @@ static CFDictionaryRef CFCopySystemVersionDictionary_hook(void) {
 
             NSString *identityDir = [manager profileIdentityPath];
             NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
-            NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+            NSDictionary *current = nil;
+            id versionClass = NSClassFromString(@"IOSVersionInfo");
+            id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
+            if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
+                current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
+            }
 
             NSString *spoofedVersion = deviceIds[@"IOSVersion"] ?: current[@"version"];
             NSString *spoofedBuild = deviceIds[@"IOSBuild"] ?: current[@"build"];
@@ -338,10 +347,15 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     }
 
     // NEW: kern.osproductversion - Critical for Facebook
-    if (strcmp(name, "kern.osproductversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
-         NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
-         spoofedValue = current[@"version"]; // e.g. "16.1.1"
-    }
+     if (strcmp(name, "kern.osproductversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
+          NSDictionary *current = nil;
+          id versionClass = NSClassFromString(@"IOSVersionInfo");
+          id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
+          if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
+              current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
+          }
+          spoofedValue = current[@"version"]; // e.g. "16.1.1"
+     }
     // Machine/Model spoofing
     else if (strcmp(name, "hw.machine") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
         spoofedValue = [manager currentValueForIdentifier:@"DeviceModel"];
@@ -360,17 +374,25 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
          spoofedValue = [manager currentValueForIdentifier:@"DeviceModel"];
     }
     // OS Version spoofing
-    else if (strcmp(name, "kern.osversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
-         NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
-         spoofedValue = current[@"build"];
-    }
-    else if (strcmp(name, "kern.osrelease") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
-         NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
-         spoofedValue = current[@"darwin"];
-    }
-    else if (strcmp(name, "kern.version") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
-         NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
-         spoofedValue = current[@"kernel_version"];
+    else if ((strcmp(name, "kern.osversion") == 0 || strcmp(name, "kern.osrelease") == 0 || strcmp(name, "kern.version") == 0) &&
+             [manager isIdentifierEnabled:@"IOSVersion"]) {
+         NSString *identityDir = [manager profileIdentityPath];
+         NSDictionary *deviceIds = identityDir.length > 0 ? [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]] : nil;
+
+         NSDictionary *current = nil;
+         id versionClass = NSClassFromString(@"IOSVersionInfo");
+         id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
+         if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
+             current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
+         }
+
+         if (strcmp(name, "kern.osversion") == 0) {
+             spoofedValue = deviceIds[@"IOSBuild"] ?: current[@"build"];
+         } else if (strcmp(name, "kern.osrelease") == 0) {
+             spoofedValue = deviceIds[@"Darwin"] ?: current[@"darwin"];
+         } else {
+             spoofedValue = deviceIds[@"KernelVersion"] ?: current[@"kernel_version"];
+         }
     }
     else if (strcmp(name, "kern.hostname") == 0 && [manager isIdentifierEnabled:@"DeviceName"]) {
         spoofedValue = [manager currentValueForIdentifier:@"DeviceName"];
@@ -539,7 +561,12 @@ static int uname_hook(struct utsname *buf) {
             }
 
             if (!build.length) {
-                NSDictionary *current = [[IOSVersionInfo sharedManager] currentIOSVersionInfo];
+                NSDictionary *current = nil;
+                id versionClass = NSClassFromString(@"IOSVersionInfo");
+                id versionMgr = versionClass ? [versionClass performSelector:@selector(sharedManager)] : nil;
+                if (versionMgr && [versionMgr respondsToSelector:@selector(currentIOSVersionInfo)]) {
+                    current = [versionMgr performSelector:@selector(currentIOSVersionInfo)];
+                }
                 build = current[@"build"];
             }
 
