@@ -119,12 +119,18 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
     NSUInteger kernelMismatch = 0;
     NSUInteger outOfRange = 0;
 
+    NSMutableArray<NSString *> *missingMetaExamples = [NSMutableArray array];
+    NSMutableArray<NSString *> *kernelMismatchExamples = [NSMutableArray array];
+
     for (id b in builds) {
         if (![b isKindOfClass:[NSString class]]) continue;
         NSString *build = (NSString *)b;
         NSDictionary *meta = self.buildToMeta[build];
         if (![meta isKindOfClass:[NSDictionary class]]) {
             missingMeta += 1;
+            if (missingMetaExamples.count < 2) {
+                [missingMetaExamples addObject:build];
+            }
             continue;
         }
 
@@ -148,6 +154,22 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
         NSString *xnuNeedle = [NSString stringWithFormat:@"xnu-%@", xnu];
         if ([kernel rangeOfString:darwinNeedle].location == NSNotFound || [kernel rangeOfString:xnuNeedle].location == NSNotFound) {
             kernelMismatch += 1;
+            if (kernelMismatchExamples.count < 2) {
+                NSString *reason = nil;
+                if ([kernel rangeOfString:darwinNeedle].location == NSNotFound && [kernel rangeOfString:xnuNeedle].location == NSNotFound) {
+                    reason = @"missing darwin and xnu";
+                } else if ([kernel rangeOfString:darwinNeedle].location == NSNotFound) {
+                    reason = @"missing darwin";
+                } else {
+                    reason = @"missing xnu";
+                }
+                [kernelMismatchExamples addObject:[NSString stringWithFormat:@"%@ v=%@ darwin=%@ xnu=%@ (%@)",
+                                                 build,
+                                                 version,
+                                                 darwin,
+                                                 xnu,
+                                                 reason ?: @"mismatch"]];
+            }
             continue;
         }
 
@@ -161,6 +183,13 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
             *error = [NSError errorWithDomain:kIOSBuildDBErrorDomain code:7 userInfo:@{NSLocalizedDescriptionKey: @"No compatible iOS builds in range for this device"}];
         }
         PXDBLog(@"IOSBuildDB: no candidates for device=%@ range=[%@..%@] totalBuilds=%lu missingMeta=%lu missingFields=%lu outOfRange=%lu kernelMismatch=%lu", productType, minVersion, maxVersion, (unsigned long)builds.count, (unsigned long)missingMeta, (unsigned long)missingFields, (unsigned long)outOfRange, (unsigned long)kernelMismatch);
+
+        if (missingMetaExamples.count > 0) {
+            PXDBLog(@"IOSBuildDB: missingMeta examples for %@: %@", productType, [missingMetaExamples componentsJoinedByString:@", "]);
+        }
+        if (kernelMismatchExamples.count > 0) {
+            PXDBLog(@"IOSBuildDB: kernelMismatch examples for %@: %@", productType, [kernelMismatchExamples componentsJoinedByString:@" | "]);
+        }
         return nil;
     }
 

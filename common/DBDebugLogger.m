@@ -48,7 +48,13 @@ void PXDBLog(NSString *format, ...) {
         NSString *line = [NSString stringWithFormat:@"[DB %@] %@\n", ts, msg ?: @""];
         NSString *path = PXDBDebugLogFilePath();
 
-        @synchronized([DBDebugLogger class]) {
+        static NSObject *lock = nil;
+        static dispatch_once_t lockOnce;
+        dispatch_once(&lockOnce, ^{
+            lock = [NSObject new];
+        });
+
+        @synchronized(lock) {
             if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
                 [line writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
                 return;
