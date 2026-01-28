@@ -1,7 +1,5 @@
 // Owner hook installation flags (set in ProjectXTweak/Tweak.x)
-#ifndef BOOL
-typedef signed char BOOL;
-#endif
+#include <objc/objc.h>
 extern BOOL gOwnerSysctlInstalled;
 extern BOOL gOwnerSysctlBynameInstalled;
 extern BOOL gOwnerUnameInstalled;
