@@ -1,5 +1,6 @@
 #import "IOSBuildDB.h"
 #import "VersionCompare.h"
+#import "DBDebugLogger.h"
 #import <Security/Security.h>
 
 static NSString *const kIOSBuildDBErrorDomain = @"com.hydra.projectx.ios_build_db";
@@ -65,6 +66,7 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
         if (error) {
             *error = lastErr ?: [NSError errorWithDomain:kIOSBuildDBErrorDomain code:1 userInfo:@{NSLocalizedDescriptionKey: @"ios_build_db.json not found"}];
         }
+        PXDBLog(@"IOSBuildDB: failed to load JSON (paths=%@) err=%@", paths, lastErr.localizedDescription ?: @"nil");
         return NO;
     }
 
@@ -73,6 +75,7 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
         if (error) {
             *error = [NSError errorWithDomain:kIOSBuildDBErrorDomain code:3 userInfo:@{NSLocalizedDescriptionKey: @"Unsupported schemaVersion"}];
         }
+        PXDBLog(@"IOSBuildDB: unsupported schemaVersion=%@", schema);
         return NO;
     }
 
@@ -82,6 +85,7 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
         if (error) {
             *error = [NSError errorWithDomain:kIOSBuildDBErrorDomain code:4 userInfo:@{NSLocalizedDescriptionKey: @"Missing buildToMeta/deviceToBuilds"}];
         }
+        PXDBLog(@"IOSBuildDB: missing buildToMeta/deviceToBuilds (btm=%@ dtb=%@)", NSStringFromClass([btm class]), NSStringFromClass([dtb class]));
         return NO;
     }
 
@@ -104,16 +108,25 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
     id buildsObj = self.deviceToBuilds[productType];
     if (![buildsObj isKindOfClass:[NSArray class]]) {
         if (error) *error = [NSError errorWithDomain:kIOSBuildDBErrorDomain code:6 userInfo:@{NSLocalizedDescriptionKey: @"No builds for device"}];
+        PXDBLog(@"IOSBuildDB: no deviceToBuilds entry for device=%@", productType);
         return nil;
     }
 
     NSArray *builds = (NSArray *)buildsObj;
     NSMutableArray<NSDictionary *> *candidates = [NSMutableArray array];
+    NSUInteger missingMeta = 0;
+    NSUInteger missingFields = 0;
+    NSUInteger kernelMismatch = 0;
+    NSUInteger outOfRange = 0;
+
     for (id b in builds) {
         if (![b isKindOfClass:[NSString class]]) continue;
         NSString *build = (NSString *)b;
         NSDictionary *meta = self.buildToMeta[build];
-        if (![meta isKindOfClass:[NSDictionary class]]) continue;
+        if (![meta isKindOfClass:[NSDictionary class]]) {
+            missingMeta += 1;
+            continue;
+        }
 
         NSString *version = meta[@"version"];
         NSString *darwin = meta[@"darwin"];
@@ -121,18 +134,22 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
         NSString *kernel = meta[@"kernel_version"];
 
         if (![version isKindOfClass:[NSString class]] || ![darwin isKindOfClass:[NSString class]] || ![xnu isKindOfClass:[NSString class]] || ![kernel isKindOfClass:[NSString class]]) {
+            missingFields += 1;
             continue;
         }
 
         if (!PXVersionInRange(version, minVersion, maxVersion)) {
+            outOfRange += 1;
             continue;
         }
 
         // Guardrails: kernel string must match darwin/xnu
         NSString *darwinNeedle = [NSString stringWithFormat:@"Darwin Kernel Version %@", darwin];
         NSString *xnuNeedle = [NSString stringWithFormat:@"xnu-%@", xnu];
-        if ([kernel rangeOfString:darwinNeedle].location == NSNotFound) continue;
-        if ([kernel rangeOfString:xnuNeedle].location == NSNotFound) continue;
+        if ([kernel rangeOfString:darwinNeedle].location == NSNotFound || [kernel rangeOfString:xnuNeedle].location == NSNotFound) {
+            kernelMismatch += 1;
+            continue;
+        }
 
         NSMutableDictionary *full = [meta mutableCopy];
         full[@"build"] = build;
@@ -143,6 +160,7 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath(NSString *path, NSErr
         if (error) {
             *error = [NSError errorWithDomain:kIOSBuildDBErrorDomain code:7 userInfo:@{NSLocalizedDescriptionKey: @"No compatible iOS builds in range for this device"}];
         }
+        PXDBLog(@"IOSBuildDB: no candidates for device=%@ range=[%@..%@] totalBuilds=%lu missingMeta=%lu missingFields=%lu outOfRange=%lu kernelMismatch=%lu", productType, minVersion, maxVersion, (unsigned long)builds.count, (unsigned long)missingMeta, (unsigned long)missingFields, (unsigned long)outOfRange, (unsigned long)kernelMismatch);
         return nil;
     }
 

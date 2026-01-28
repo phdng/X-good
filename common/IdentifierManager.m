@@ -7,6 +7,7 @@
 #import "IOSVersionInfo.h"
 #import "IOSBuildDB.h"
 #import "IPhoneModelDB.h"
+#import "DBDebugLogger.h"
 #import "ProjectXLogging.h"
 #import "WiFiManager.h"
 #import "StorageManager.h"
@@ -89,6 +90,7 @@ static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
     if (![modelDB loadIfNeeded:&dbErr] || ![buildDB loadIfNeeded:&dbErr]) {
         self.error = dbErr;
         PXLog(@"[WeaponX] ⚠️ DeviceProfileGroup: DB not available (%@)", dbErr.localizedDescription ?: @"unknown");
+        PXDBLog(@"DeviceProfileGroup: DB not available err=%@", dbErr.localizedDescription ?: @"nil");
         return nil;
     }
 
@@ -97,6 +99,7 @@ static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
     if (!modelSpec) {
         self.error = dbErr;
         PXLog(@"[WeaponX] ❌ DeviceProfileGroup: failed to pick model (%@)", dbErr.localizedDescription ?: @"unknown");
+        PXDBLog(@"DeviceProfileGroup: failed to pick model err=%@", dbErr.localizedDescription ?: @"nil");
         return nil;
     }
 
@@ -105,6 +108,7 @@ static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
     NSString *maxIOS = [modelSpec[@"maxIOS"] isKindOfClass:[NSString class]] ? modelSpec[@"maxIOS"] : nil;
     if (!productType.length || !maxIOS.length) {
         self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:6002 userInfo:@{NSLocalizedDescriptionKey: @"Invalid model spec (missing productType/maxIOS)"}];
+        PXDBLog(@"DeviceProfileGroup: invalid modelSpec missing productType/maxIOS spec=%@", modelSpec);
         return nil;
     }
 
@@ -113,6 +117,7 @@ static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
     if (!iosMeta) {
         self.error = dbErr;
         PXLog(@"[WeaponX] ❌ DeviceProfileGroup: no compatible build for %@ (%@)", productType, dbErr.localizedDescription ?: @"unknown");
+        PXDBLog(@"DeviceProfileGroup: no compatible build device=%@ maxIOS=%@ err=%@", productType, maxIOS, dbErr.localizedDescription ?: @"nil");
         return nil;
     }
 
@@ -123,6 +128,7 @@ static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
     NSString *kernel = [iosMeta[@"kernel_version"] isKindOfClass:[NSString class]] ? iosMeta[@"kernel_version"] : nil;
     if (!iosVersion.length || !iosBuild.length || !darwin.length || !xnu.length || !kernel.length) {
         self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:6003 userInfo:@{NSLocalizedDescriptionKey: @"Invalid iOS meta (missing required fields)"}];
+        PXDBLog(@"DeviceProfileGroup: invalid iosMeta device=%@ meta=%@", productType, iosMeta);
         return nil;
     }
 

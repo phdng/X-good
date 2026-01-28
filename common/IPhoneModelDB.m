@@ -1,5 +1,6 @@
 #import "IPhoneModelDB.h"
 #import "VersionCompare.h"
+#import "DBDebugLogger.h"
 #import <Security/Security.h>
 
 static NSString *const kIPhoneModelDBErrorDomain = @"com.hydra.projectx.iphone_model_db";
@@ -64,6 +65,7 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath2(NSString *path, NSEr
         if (error) {
             *error = lastErr ?: [NSError errorWithDomain:kIPhoneModelDBErrorDomain code:1 userInfo:@{NSLocalizedDescriptionKey: @"iphone_model_db.json not found"}];
         }
+        PXDBLog(@"IPhoneModelDB: failed to load JSON (paths=%@) err=%@", paths, lastErr.localizedDescription ?: @"nil");
         return NO;
     }
 
@@ -72,6 +74,7 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath2(NSString *path, NSEr
         if (error) {
             *error = [NSError errorWithDomain:kIPhoneModelDBErrorDomain code:3 userInfo:@{NSLocalizedDescriptionKey: @"Unsupported schemaVersion"}];
         }
+        PXDBLog(@"IPhoneModelDB: unsupported schemaVersion=%@", schema);
         return NO;
     }
 
@@ -80,18 +83,22 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath2(NSString *path, NSEr
         if (error) {
             *error = [NSError errorWithDomain:kIPhoneModelDBErrorDomain code:4 userInfo:@{NSLocalizedDescriptionKey: @"Missing models array"}];
         }
+        PXDBLog(@"IPhoneModelDB: missing models array (type=%@)", NSStringFromClass([modelsObj class]));
         return NO;
     }
 
     NSMutableArray<NSDictionary *> *models = [NSMutableArray array];
     NSMutableDictionary<NSString *, NSDictionary *> *byType = [NSMutableDictionary dictionary];
+    NSUInteger total = 0;
+    NSUInteger invalid = 0;
     for (id item in (NSArray *)modelsObj) {
+        total += 1;
         if (![item isKindOfClass:[NSDictionary class]]) continue;
         NSDictionary *m = (NSDictionary *)item;
         NSString *pt = m[@"productType"];
         NSString *maxIOS = m[@"maxIOS"];
-        if (![pt isKindOfClass:[NSString class]] || ![pt hasPrefix:@"iPhone"]) continue;
-        if (![maxIOS isKindOfClass:[NSString class]] || maxIOS.length == 0) continue;
+        if (![pt isKindOfClass:[NSString class]] || ![pt hasPrefix:@"iPhone"]) { invalid += 1; continue; }
+        if (![maxIOS isKindOfClass:[NSString class]] || maxIOS.length == 0) { invalid += 1; continue; }
         [models addObject:m];
         if (!byType[pt]) {
             byType[pt] = m;
@@ -102,7 +109,12 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath2(NSString *path, NSEr
         if (error) {
             *error = [NSError errorWithDomain:kIPhoneModelDBErrorDomain code:5 userInfo:@{NSLocalizedDescriptionKey: @"No valid iPhone models in DB"}];
         }
+        PXDBLog(@"IPhoneModelDB: no valid models (total=%lu invalid=%lu)", (unsigned long)total, (unsigned long)invalid);
         return NO;
+    }
+
+    if (invalid > 0) {
+        PXDBLog(@"IPhoneModelDB: loaded models=%lu (skipped invalid=%lu)", (unsigned long)models.count, (unsigned long)invalid);
     }
 
     self.db = root;
@@ -127,6 +139,7 @@ static NSDictionary * _Nullable PXLoadJSONDictionaryAtPath2(NSString *path, NSEr
         if (error) {
             *error = [NSError errorWithDomain:kIPhoneModelDBErrorDomain code:6 userInfo:@{NSLocalizedDescriptionKey: @"No models satisfy minIOS constraint"}];
         }
+        PXDBLog(@"IPhoneModelDB: no candidates for minIOS=%@ (models=%lu)", minIOS, (unsigned long)self.models.count);
         return nil;
     }
 
