@@ -89,9 +89,14 @@
 
                 // Generate Device Model if missing for the new profile
                 if (![manager currentValueForIdentifier:@"DeviceModel"]) {
-                    NSString *deviceModel = [manager generateDeviceModel];
+                    NSString *deviceModel = [manager regenerateDeviceProfileGroup];
+                    if (!deviceModel) {
+                        deviceModel = [manager generateDeviceModel];
+                        if (deviceModel) {
+                            [manager setCustomDeviceModel:deviceModel];
+                        }
+                    }
                     if (deviceModel) {
-                        [manager setCustomDeviceModel:deviceModel];
                         NSLog(@"[DeviceSpecificSpoofingVC] Generated device model for new profile: %@", deviceModel);
                     }
                 }
@@ -1006,10 +1011,15 @@
             [[IdentifierManager sharedManager] setCustomMEID:newValue];
         }
     } else if ([key isEqualToString:@"DeviceModel"]) {
-        newValue = [[IdentifierManager sharedManager] generateDeviceModel];
+        // Device model regeneration should also refresh the dependent device profile group.
+        newValue = [[IdentifierManager sharedManager] regenerateDeviceProfileGroup];
+        if (!newValue) {
+            newValue = [[IdentifierManager sharedManager] generateDeviceModel];
+            if (newValue) {
+                [[IdentifierManager sharedManager] setCustomDeviceModel:newValue];
+            }
+        }
         if (newValue) {
-            [[IdentifierManager sharedManager] setCustomDeviceModel:newValue];
-            
             // Get detailed device specifications
             [self showDeviceSpecificationsForModel:newValue];
         }

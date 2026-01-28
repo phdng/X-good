@@ -5,6 +5,8 @@
 #import "DeviceNameManager.h"
 #import "SerialNumberManager.h"
 #import "IOSVersionInfo.h"
+#import "IOSBuildDB.h"
+#import "IPhoneModelDB.h"
 #import "ProjectXLogging.h"
 #import "WiFiManager.h"
 #import "StorageManager.h"
@@ -50,6 +52,184 @@
 @implementation IdentifierManager
 
 #pragma mark - Device Model
+
+static NSDictionary *PXScreenDictFromModelSpec(NSDictionary *modelSpec) {
+    NSDictionary *screen = [modelSpec[@"screen"] isKindOfClass:[NSDictionary class]] ? modelSpec[@"screen"] : nil;
+    return screen ?: @{};
+}
+
+static NSDictionary *PXWebGLInfoFromModelSpec(NSDictionary *modelSpec) {
+    NSDictionary *webgl = [modelSpec[@"webgl"] isKindOfClass:[NSDictionary class]] ? modelSpec[@"webgl"] : nil;
+    NSString *vendor = [webgl[@"vendor"] isKindOfClass:[NSString class]] ? webgl[@"vendor"] : @"Apple";
+    NSString *renderer = [webgl[@"renderer"] isKindOfClass:[NSString class]] ? webgl[@"renderer"] : nil;
+    if (!renderer.length) {
+        renderer = [modelSpec[@"gpuFamily"] isKindOfClass:[NSString class]] ? modelSpec[@"gpuFamily"] : @"Apple GPU";
+    }
+    return @{
+        @"webglVendor": vendor ?: @"Apple",
+        @"webglRenderer": renderer ?: @"Apple GPU",
+        @"unmaskedVendor": @"Apple Inc.",
+        @"unmaskedRenderer": renderer ?: @"Apple GPU",
+        @"webglVersion": @"WebGL 2.0"
+    };
+}
+
+- (NSString *)regenerateDeviceProfileGroup {
+    self.error = nil;
+
+    NSString *identityDir = [self profileIdentityPath];
+    if (!identityDir.length) {
+        self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:6001 userInfo:@{NSLocalizedDescriptionKey: @"Could not resolve profile identity path"}];
+        return nil;
+    }
+
+    NSError *dbErr = nil;
+    IPhoneModelDB *modelDB = [IPhoneModelDB sharedManager];
+    IOSBuildDB *buildDB = [IOSBuildDB sharedManager];
+    if (![modelDB loadIfNeeded:&dbErr] || ![buildDB loadIfNeeded:&dbErr]) {
+        self.error = dbErr;
+        PXLog(@"[WeaponX] ⚠️ DeviceProfileGroup: DB not available (%@)", dbErr.localizedDescription ?: @"unknown");
+        return nil;
+    }
+
+    // Pick a random iPhone model that supports min iOS 13.0
+    NSDictionary *modelSpec = [modelDB randomModelMinIOS:@"13.0" error:&dbErr];
+    if (!modelSpec) {
+        self.error = dbErr;
+        PXLog(@"[WeaponX] ❌ DeviceProfileGroup: failed to pick model (%@)", dbErr.localizedDescription ?: @"unknown");
+        return nil;
+    }
+
+    NSString *productType = [modelSpec[@"productType"] isKindOfClass:[NSString class]] ? modelSpec[@"productType"] : nil;
+    NSString *modelName = [modelSpec[@"name"] isKindOfClass:[NSString class]] ? modelSpec[@"name"] : @"";
+    NSString *maxIOS = [modelSpec[@"maxIOS"] isKindOfClass:[NSString class]] ? modelSpec[@"maxIOS"] : nil;
+    if (!productType.length || !maxIOS.length) {
+        self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:6002 userInfo:@{NSLocalizedDescriptionKey: @"Invalid model spec (missing productType/maxIOS)"}];
+        return nil;
+    }
+
+    // Pick an iOS build compatible with this device model and version range.
+    NSDictionary *iosMeta = [buildDB randomMetaForDevice:productType min:@"13.0" max:maxIOS error:&dbErr];
+    if (!iosMeta) {
+        self.error = dbErr;
+        PXLog(@"[WeaponX] ❌ DeviceProfileGroup: no compatible build for %@ (%@)", productType, dbErr.localizedDescription ?: @"unknown");
+        return nil;
+    }
+
+    NSString *iosVersion = [iosMeta[@"version"] isKindOfClass:[NSString class]] ? iosMeta[@"version"] : nil;
+    NSString *iosBuild = [iosMeta[@"build"] isKindOfClass:[NSString class]] ? iosMeta[@"build"] : nil;
+    NSString *darwin = [iosMeta[@"darwin"] isKindOfClass:[NSString class]] ? iosMeta[@"darwin"] : nil;
+    NSString *xnu = [iosMeta[@"xnu"] isKindOfClass:[NSString class]] ? iosMeta[@"xnu"] : nil;
+    NSString *kernel = [iosMeta[@"kernel_version"] isKindOfClass:[NSString class]] ? iosMeta[@"kernel_version"] : nil;
+    if (!iosVersion.length || !iosBuild.length || !darwin.length || !xnu.length || !kernel.length) {
+        self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:6003 userInfo:@{NSLocalizedDescriptionKey: @"Invalid iOS meta (missing required fields)"}];
+        return nil;
+    }
+
+    NSDictionary *screen = PXScreenDictFromModelSpec(modelSpec);
+    NSString *screenResolution = [screen[@"resolution"] isKindOfClass:[NSString class]] ? screen[@"resolution"] : @"";
+    NSString *viewportResolution = [screen[@"viewport"] isKindOfClass:[NSString class]] ? screen[@"viewport"] : screenResolution;
+    NSNumber *scale = [screen[@"scale"] isKindOfClass:[NSNumber class]] ? screen[@"scale"] : nil;
+    NSNumber *ppi = [screen[@"ppi"] isKindOfClass:[NSNumber class]] ? screen[@"ppi"] : nil;
+
+    NSString *cpuArchitecture = [modelSpec[@"cpuArchitecture"] isKindOfClass:[NSString class]] ? modelSpec[@"cpuArchitecture"] : @"";
+    NSNumber *deviceMemoryGB = [modelSpec[@"deviceMemoryGB"] isKindOfClass:[NSNumber class]] ? modelSpec[@"deviceMemoryGB"] : nil;
+    NSString *gpuFamily = [modelSpec[@"gpuFamily"] isKindOfClass:[NSString class]] ? modelSpec[@"gpuFamily"] : @"";
+    NSNumber *cpuCores = [modelSpec[@"cpuCores"] isKindOfClass:[NSNumber class]] ? modelSpec[@"cpuCores"] : nil;
+    NSString *metalFeatureSet = [modelSpec[@"metalFeatureSet"] isKindOfClass:[NSString class]] ? modelSpec[@"metalFeatureSet"] : @"Unknown";
+    NSString *boardID = [modelSpec[@"boardID"] isKindOfClass:[NSString class]] ? modelSpec[@"boardID"] : @"Unknown";
+    NSString *hwModel = [modelSpec[@"hwModel"] isKindOfClass:[NSString class]] ? modelSpec[@"hwModel"] : boardID;
+
+    NSDictionary *webGLInfo = PXWebGLInfoFromModelSpec(modelSpec);
+
+    NSDate *now = [NSDate date];
+
+    // Update device_ids.plist (source of truth)
+    NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+    NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
+    NSInteger gen = [deviceIds[@"GenerationCounter"] respondsToSelector:@selector(integerValue)] ? [deviceIds[@"GenerationCounter"] integerValue] : 0;
+    gen += 1;
+
+    deviceIds[@"DeviceModel"] = productType;
+    deviceIds[@"DeviceModelName"] = modelName ?: @"";
+    deviceIds[@"ScreenResolution"] = screenResolution ?: @"";
+    deviceIds[@"ViewportResolution"] = viewportResolution ?: @"";
+    if (scale) deviceIds[@"DevicePixelRatio"] = scale;
+    if (ppi) deviceIds[@"ScreenDensityPPI"] = ppi;
+    deviceIds[@"CPUArchitecture"] = cpuArchitecture ?: @"";
+    if (deviceMemoryGB) deviceIds[@"DeviceMemory"] = deviceMemoryGB;
+    if (cpuCores) deviceIds[@"CPUCoreCount"] = cpuCores;
+    deviceIds[@"MetalFeatureSet"] = metalFeatureSet ?: @"Unknown";
+    deviceIds[@"GPUFamily"] = gpuFamily ?: @"";
+    deviceIds[@"WebGLVendor"] = webGLInfo[@"webglVendor"] ?: @"Apple";
+    deviceIds[@"WebGLRenderer"] = webGLInfo[@"webglRenderer"] ?: @"Apple GPU";
+    deviceIds[@"BoardID"] = boardID ?: @"Unknown";
+    deviceIds[@"HwModel"] = hwModel ?: @"Unknown";
+
+    // iOS fields
+    deviceIds[@"IOSVersion"] = [NSString stringWithFormat:@"%@ (%@)", iosVersion, iosBuild];
+    deviceIds[@"IOSBuild"] = iosBuild;
+    deviceIds[@"Darwin"] = darwin;
+    deviceIds[@"XNU"] = xnu;
+    deviceIds[@"KernelVersion"] = kernel;
+
+    deviceIds[@"GenerationCounter"] = @(gen);
+    deviceIds[@"CommittedAt"] = now;
+
+    BOOL wrote = [deviceIds writeToFile:deviceIdsPath atomically:YES];
+    if (!wrote) {
+        self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:6004 userInfo:@{NSLocalizedDescriptionKey: @"Failed to write device_ids.plist"}];
+        return nil;
+    }
+
+    // Compat output: device_model.plist
+    NSDictionary *modelDict = @{
+        @"value": productType ?: @"",
+        @"name": modelName ?: @"",
+        @"screenResolution": screenResolution ?: @"",
+        @"viewportResolution": viewportResolution ?: @"",
+        @"devicePixelRatio": scale ?: @(0),
+        @"screenDensity": ppi ?: @(0),
+        @"cpuArchitecture": cpuArchitecture ?: @"",
+        @"deviceMemory": deviceMemoryGB ?: @(0),
+        @"gpuFamily": gpuFamily ?: @"",
+        @"cpuCoreCount": cpuCores ?: @(0),
+        @"metalFeatureSet": metalFeatureSet ?: @"Unknown",
+        @"webGLInfo": webGLInfo ?: @{},
+        @"boardID": boardID ?: @"Unknown",
+        @"hwModel": hwModel ?: @"Unknown",
+        @"lastUpdated": now
+    };
+    NSString *modelPath = [identityDir stringByAppendingPathComponent:@"device_model.plist"];
+    [modelDict writeToFile:modelPath atomically:YES];
+
+    // Compat output: ios_version.plist
+    NSDictionary *versionDict = @{
+        @"version": iosVersion,
+        @"build": iosBuild,
+        @"darwin": darwin,
+        @"xnu": xnu,
+        @"kernel_version": kernel,
+        @"lastUpdated": now
+    };
+    NSString *versionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
+    [versionDict writeToFile:versionPath atomically:YES];
+
+    // Keep IOSVersionInfo in sync for processes that fall back to it.
+    @try {
+        [[IOSVersionInfo sharedManager] setCurrentIOSVersionInfo:versionDict];
+    } @catch (__unused NSException *e) {
+    }
+
+    // Keep DeviceModelManager in sync if present.
+    @try {
+        [[DeviceModelManager sharedManager] setCurrentDeviceModel:productType];
+    } @catch (__unused NSException *e) {
+    }
+
+    PXLog(@"[WeaponX] ✅ DeviceProfileGroup: %@ (%@) iOS %@ (%@)", productType, modelName ?: @"", iosVersion, iosBuild);
+    return productType;
+}
 
 - (NSString *)generateDeviceModel {
     NSString *deviceModel = [[DeviceModelManager sharedManager] generateDeviceModel];
@@ -131,7 +311,12 @@
 }
 
 - (BOOL)setCustomDeviceModel:(NSString *)value {
-    if (![[DeviceModelManager sharedManager] isValidDeviceModel:value]) {
+    BOOL valid = [[DeviceModelManager sharedManager] isValidDeviceModel:value];
+    if (!valid) {
+        // Allow models present in external DB (device profile group)
+        valid = [[IPhoneModelDB sharedManager] containsProductType:value];
+    }
+    if (!valid) {
         self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:2003 userInfo:@{NSLocalizedDescriptionKey: @"Invalid Device Model"}];
         return NO;
     }
@@ -418,6 +603,57 @@
 
 - (NSDictionary *)generateIOSVersion {
     self.error = nil;
+
+    // Prefer external DB if available and current device model is known.
+    @try {
+        NSString *identityDir = [self profileIdentityPath];
+        NSString *deviceModel = [self currentValueForIdentifier:@"DeviceModel"];
+        if (identityDir.length && deviceModel.length) {
+            NSError *dbErr = nil;
+            IPhoneModelDB *modelDB = [IPhoneModelDB sharedManager];
+            IOSBuildDB *buildDB = [IOSBuildDB sharedManager];
+            if ([modelDB loadIfNeeded:&dbErr] && [buildDB loadIfNeeded:&dbErr]) {
+                NSDictionary *spec = [modelDB specForProductType:deviceModel];
+                NSString *maxIOS = [spec[@"maxIOS"] isKindOfClass:[NSString class]] ? spec[@"maxIOS"] : nil;
+                if (maxIOS.length) {
+                    NSDictionary *meta = [buildDB randomMetaForDevice:deviceModel min:@"13.0" max:maxIOS error:&dbErr];
+                    if (meta) {
+                        NSString *iosVersion = meta[@"version"];
+                        NSString *iosBuild = meta[@"build"];
+                        NSString *darwin = meta[@"darwin"];
+                        NSString *xnu = meta[@"xnu"];
+                        NSString *kernel = meta[@"kernel_version"];
+
+                        NSMutableDictionary *versionDict = [@{
+                            @"version": iosVersion ?: @"",
+                            @"build": iosBuild ?: @"",
+                            @"darwin": darwin ?: @"",
+                            @"xnu": xnu ?: @"",
+                            @"kernel_version": kernel ?: @"",
+                            @"lastUpdated": [NSDate date]
+                        } mutableCopy];
+
+                        NSString *versionPath = [identityDir stringByAppendingPathComponent:@"ios_version.plist"];
+                        [versionDict writeToFile:versionPath atomically:YES];
+
+                        NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+                        NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
+                        deviceIds[@"IOSVersion"] = [NSString stringWithFormat:@"%@ (%@)", iosVersion, iosBuild];
+                        deviceIds[@"IOSBuild"] = iosBuild;
+                        deviceIds[@"Darwin"] = darwin;
+                        deviceIds[@"XNU"] = xnu;
+                        deviceIds[@"KernelVersion"] = kernel;
+                        [deviceIds writeToFile:deviceIdsPath atomically:YES];
+
+                        [[IOSVersionInfo sharedManager] setCurrentIOSVersionInfo:versionDict];
+                        PXLog(@"[WeaponX] ✅ Generated iOS version from DB: %@ (%@)", iosVersion, iosBuild);
+                        return versionDict;
+                    }
+                }
+            }
+        }
+    } @catch (__unused NSException *e) {
+    }
     
     NSDictionary *versionInfo = [[IOSVersionInfo sharedManager] generateIOSVersionInfo];
     if (!versionInfo) {
@@ -797,9 +1033,31 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         if (meid) [self setCustomMEID:meid];
     }
     
-    // Always generate device model regardless of whether it exists or not
-    NSString *deviceModel = [self generateDeviceModel];
-    if (deviceModel) [self setCustomDeviceModel:deviceModel];
+    // Device profile group: DeviceModel + dependent specs + iOS version/build.
+    // Only regenerate when at least one of the dependent identifiers is enabled.
+    BOOL wantsDeviceProfileGroup = [self isIdentifierEnabled:@"DeviceModel"] || [self isIdentifierEnabled:@"IOSVersion"];
+    if (wantsDeviceProfileGroup) {
+        NSString *newModel = [self regenerateDeviceProfileGroup];
+        if (!newModel) {
+            // Fallback to legacy generation paths if DB-based generation is unavailable.
+            NSString *deviceModel = [self generateDeviceModel];
+            if (deviceModel) {
+                // Use legacy setter for existing model DB.
+                [self setCustomDeviceModel:deviceModel];
+            }
+            if ([self isIdentifierEnabled:@"IOSVersion"]) {
+                [self generateIOSVersion];
+            }
+        }
+    } else {
+        // Ensure we still have a model stored for spec-dependent UI.
+        if (![self currentValueForIdentifier:@"DeviceModel"]) {
+            NSString *deviceModel = [self generateDeviceModel];
+            if (deviceModel) {
+                [self setCustomDeviceModel:deviceModel];
+            }
+        }
+    }
     
     // Always generate device theme if it doesn't exist
     if (![self currentValueForIdentifier:@"DeviceTheme"]) {
@@ -810,9 +1068,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
     }
     
-    if ([self isIdentifierEnabled:@"IOSVersion"]) {
-        [self generateIOSVersion];
-    }
+    // IOSVersion is handled by regenerateDeviceProfileGroup when enabled.
     if ([self isIdentifierEnabled:@"SystemBootUUID"]) {
         [self generateSystemBootUUID];
     }
@@ -1039,10 +1295,15 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
     }
     
-    // Always ensure device model exists
+    // Always ensure device model exists (prefer DB-based device profile if available)
     if (![self currentValueForIdentifier:@"DeviceModel"]) {
-        NSString *deviceModel = [self generateDeviceModel];
-        if (deviceModel) [self setCustomDeviceModel:deviceModel];
+        NSString *m = [self regenerateDeviceProfileGroup];
+        if (!m) {
+            NSString *deviceModel = [self generateDeviceModel];
+            if (deviceModel) {
+                [self setCustomDeviceModel:deviceModel];
+            }
+        }
     }
     
     // For WiFi specifically, also update the SystemConfiguration plist

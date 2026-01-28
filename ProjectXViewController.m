@@ -3360,8 +3360,13 @@
                         
                         // Explicitly generate device model if it's not already set
                         if (![self.manager currentValueForIdentifier:@"DeviceModel"]) {
-                            NSString *deviceModel = [self.manager generateDeviceModel];
-                            if (deviceModel) [self.manager setCustomDeviceModel:deviceModel];
+                            NSString *deviceModel = [self.manager regenerateDeviceProfileGroup];
+                            if (!deviceModel) {
+                                deviceModel = [self.manager generateDeviceModel];
+                                if (deviceModel) {
+                                    [self.manager setCustomDeviceModel:deviceModel];
+                                }
+                            }
                         }
                         
                         // Explicitly generate device theme if it's not already set

@@ -49,6 +49,10 @@
 - (BOOL)setCustomDeviceModel:(NSString *)value;
 - (NSString *)generateDeviceModel;
 
+// Device Profile Group (DeviceModel + dependent specs + iOS build info)
+// Uses external JSON databases when present.
+- (NSString *)regenerateDeviceProfileGroup;
+
 // Device Theme
 - (BOOL)setCustomDeviceTheme:(NSString *)value;
 - (NSString *)generateDeviceTheme;
