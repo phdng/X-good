@@ -86,9 +86,9 @@ static NSString* getSpoofedModel() {
         NSString *profileId = centralInfo[@"ProfileId"];
         
         if (profileId) {
-            NSString *settingsPath = [profilesPath stringByAppendingPathComponent:[profileId stringByAppendingPathComponent:@"settings.plist"]];
-            NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:settingsPath];
-            return settings[@"deviceModel"];
+            NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
+            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]];
+            return deviceIds[@"DeviceModel"];
         }
     } @catch (NSException *e) {}
     return nil;

@@ -210,6 +210,19 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
     NSInteger gen = [deviceIds[@"GenerationCounter"] respondsToSelector:@selector(integerValue)] ? [deviceIds[@"GenerationCounter"] integerValue] : 0;
     gen += 1;
 
+    // Clear fields managed by the Device Profile group to avoid stale values.
+    NSArray<NSString *> *managedKeys = @[
+        @"DeviceModel", @"DeviceModelName",
+        @"ScreenResolution", @"ViewportResolution", @"DevicePixelRatio", @"ScreenDensityPPI",
+        @"CPUArchitecture", @"DeviceMemory", @"CPUCoreCount", @"MetalFeatureSet", @"GPUFamily",
+        @"WebGLVendor", @"WebGLRenderer",
+        @"BoardID", @"HwModel", @"ModelNumber",
+        @"IOSVersion", @"IOSBuild", @"Darwin", @"XNU", @"KernelVersion"
+    ];
+    for (NSString *k in managedKeys) {
+        [deviceIds removeObjectForKey:k];
+    }
+
     deviceIds[@"DeviceModel"] = productType;
     deviceIds[@"DeviceModelName"] = modelName ?: @"";
     deviceIds[@"ScreenResolution"] = screenResolution ?: @"";
@@ -226,12 +239,10 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
     deviceIds[@"BoardID"] = boardID ?: @"Unknown";
     deviceIds[@"HwModel"] = hwModel ?: @"Unknown";
 
-    if (modelNumber.length) {
-        deviceIds[@"ModelNumber"] = modelNumber;
-    }
+    if (modelNumber.length) deviceIds[@"ModelNumber"] = modelNumber;
 
-    // iOS fields
-    deviceIds[@"IOSVersion"] = [NSString stringWithFormat:@"%@ (%@)", iosVersion, iosBuild];
+    // iOS fields (store normalized components)
+    deviceIds[@"IOSVersion"] = iosVersion;
     deviceIds[@"IOSBuild"] = iosBuild;
     deviceIds[@"Darwin"] = darwin;
     deviceIds[@"XNU"] = xnu;
@@ -631,7 +642,7 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
 
                         NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
                         NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: [NSMutableDictionary dictionary];
-                        deviceIds[@"IOSVersion"] = [NSString stringWithFormat:@"%@ (%@)", iosVersion, iosBuild];
+                        deviceIds[@"IOSVersion"] = iosVersion;
                         deviceIds[@"IOSBuild"] = iosBuild;
                         deviceIds[@"Darwin"] = darwin;
                         deviceIds[@"XNU"] = xnu;
@@ -662,8 +673,8 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
         NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
                                          [NSMutableDictionary dictionary];
         
-        // Store both version and build in device_ids.plist
-        deviceIds[@"IOSVersion"] = [NSString stringWithFormat:@"%@ (%@)", versionInfo[@"version"], versionInfo[@"build"]];
+        // Store normalized components in device_ids.plist
+        deviceIds[@"IOSVersion"] = versionInfo[@"version"];
         deviceIds[@"IOSBuild"] = versionInfo[@"build"];  // Keep this for compatibility
         if (versionInfo[@"darwin"]) deviceIds[@"Darwin"] = versionInfo[@"darwin"];
         if (versionInfo[@"xnu"]) deviceIds[@"XNU"] = versionInfo[@"xnu"];

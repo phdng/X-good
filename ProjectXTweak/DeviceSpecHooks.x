@@ -309,48 +309,10 @@ static NSString *getSpoofedDeviceModel() {
             deviceModel = [deviceManager currentDeviceModel];
         }
         
-        // METHOD 3: Emergency fallback / Legacy
-        if (!deviceModel.length) {
-            // Legacy Fallback (CFPreferences - Old Method)
-            CFStringRef appID = CFSTR("com.projectx.phoneinfo");
-            CFStringRef key = CFSTR("PhoneInfo");
-            
-            // Try AnyUser/AnyHost first
-            CFPropertyListRef value = CFPreferencesCopyValue(key, appID, kCFPreferencesAnyUser, kCFPreferencesAnyHost);
-            
-            if (value && CFGetTypeID(value) == CFDictionaryGetTypeID()) {
-                NSDictionary *dict = (__bridge NSDictionary *)value;
-                NSDictionary *legacyModelDict = dict[@"deviceModel"];
-                if (legacyModelDict && legacyModelDict[@"modelName"]) {
-                    deviceModel = legacyModelDict[@"modelName"];
-                    PXLog(@"[DeviceSpec] Found device model %@ via Legacy CFPreferences (AnyUser/AnyHost)", deviceModel);
-                }
-                CFRelease(value);
-            }
-            
-            // Try CurrentUser next
-            if (!deviceModel.length) {
-                value = CFPreferencesCopyValue(key, appID, kCFPreferencesCurrentUser, kCFPreferencesAnyHost);
-                if (value && CFGetTypeID(value) == CFDictionaryGetTypeID()) {
-                    NSDictionary *dict = (__bridge NSDictionary *)value;
-                    NSDictionary *legacyModelDict = dict[@"deviceModel"];
-                    if (legacyModelDict && legacyModelDict[@"modelName"]) {
-                        deviceModel = legacyModelDict[@"modelName"];
-                        PXLog(@"[DeviceSpec] Found device model %@ via Legacy CFPreferences (CurrentUser/AnyHost)", deviceModel);
-                    }
-                    CFRelease(value);
-                }
-            }
-        }
-        
-        // METHOD 4: Hardcoded fallback (Last resort)
-        if (!deviceModel.length) {
-            deviceModel = @"iPhone14,6"; // iPhone SE (3rd Gen) as fallback
-        }
-        
         return deviceModel;
     } @catch (NSException *exception) {
-        return @"iPhone14,6"; // Fallback on exception
+        PXLog(@"[DeviceSpec] Exception getting spoofed device model: %@", exception);
+        return nil;
     }
 }
 

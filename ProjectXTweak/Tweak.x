@@ -193,19 +193,6 @@ static CFDictionaryRef CFCopySystemVersionDictionary_hook(void) {
             NSString *spoofedVersion = deviceIds[@"IOSVersion"] ?: current[@"version"];
             NSString *spoofedBuild = deviceIds[@"IOSBuild"] ?: current[@"build"];
 
-            // If IOSVersion is stored as "version (build)", extract just the version.
-            if ([spoofedVersion isKindOfClass:[NSString class]] && [spoofedVersion containsString:@"("]) {
-                NSString *originalVersion = spoofedVersion;
-                NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:@"([0-9.]+)\\s*\\(([^)]+)\\)" options:0 error:nil];
-                NSTextCheckingResult *match = [regex firstMatchInString:originalVersion options:0 range:NSMakeRange(0, originalVersion.length)];
-                if (match && match.numberOfRanges >= 2) {
-                    spoofedVersion = [originalVersion substringWithRange:[match rangeAtIndex:1]];
-                    if (!spoofedBuild.length && match.numberOfRanges >= 3) {
-                        spoofedBuild = [originalVersion substringWithRange:[match rangeAtIndex:2]];
-                    }
-                }
-            }
-
             if (!spoofedVersion.length && !spoofedBuild.length) {
                 return original;
             }
@@ -511,6 +498,20 @@ static int uname_hook(struct utsname *buf) {
             if (build.length > 0) {
                 PXLog(@"[WeaponX] 🎯 Spoofing MGCopyAnswer %@ with build: %@", propertyString, build);
                 return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)build);
+            }
+        }
+    }
+
+    // Model number (Axxxx) from MobileGestalt
+    if (propertyString && [propertyString isEqualToString:@"ModelNumber"]) {
+        if ([manager isIdentifierEnabled:@"DeviceModel"]) {
+            NSString *identityDir = [manager profileIdentityPath];
+            if (identityDir.length > 0) {
+                NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]];
+                NSString *modelNumber = deviceIds[@"ModelNumber"];
+                if (modelNumber.length > 0) {
+                    return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)modelNumber);
+                }
             }
         }
     }
