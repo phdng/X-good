@@ -16,6 +16,10 @@
 #import "SystemUUIDManager.h"
 
 #import <sys/sysctl.h>
+
+// Forward declarations (used before definitions at bottom of file)
+static NSString *PXGetActualHWMachine(void);
+static NSString *PXGetRuntimeIOSVersionString(void);
 #import "DyldCacheUUIDManager.h"
 #import "PasteboardUUIDManager.h"
 #import "KeychainUUIDManager.h"
