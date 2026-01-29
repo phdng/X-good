@@ -869,6 +869,12 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
 
     // NEW: kern.osproductversion - Critical for Facebook
     if (strcmp(name, "kern.osproductversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
+        if (PXDebugFlag(@"debugDisableIOSVersionSysctlBynameOSProductVersion")) {
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osproductversion.disable|%@|%@", bundleID, gen ?: @0],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osproductversion disabled bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+        }
         if (PXDebugFlag(@"debugDisableIOSVersionSysctlByname")) {
             px_sysctlbyname_in_hook = NO;
             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
@@ -909,6 +915,15 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                     return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
                 }
             }
+        }
+
+        if (!oldlenp) {
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osproductversion.nolen|%@|%@", bundleID, gen ?: @0],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osproductversion nolen bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
+        } else if (!oldp) {
+            size_t required = strlen([candidate UTF8String]) + 1;
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osproductversion.size|%@|%@", bundleID, gen ?: @0],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osproductversion size=%zu value=%@ bundle=%@ gen=%@", PXISO8601Now(), required, candidate ?: @"", bundleID ?: @"", gen ?: @""]);
         }
         spoofedValue = candidate;
     }
@@ -1108,7 +1123,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         const char *v = [spoofedValue UTF8String];
         int r = 0;
         // Avoid crashing apps that use fixed buffers and ignore ENOMEM for kernel strings.
-        if (strcmp(name, "kern.version") == 0 || strcmp(name, "kern.osversion") == 0 || strcmp(name, "kern.osrelease") == 0) {
+        if (strcmp(name, "kern.version") == 0 || strcmp(name, "kern.osversion") == 0 || strcmp(name, "kern.osrelease") == 0 || strcmp(name, "kern.osproductversion") == 0) {
             if (oldp && oldlenp) {
                 size_t required = strlen(v) + 1;
                 if (*oldlenp > 0 && *oldlenp < required) {
