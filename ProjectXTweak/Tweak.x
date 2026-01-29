@@ -215,8 +215,25 @@ static void PXHookTraceLogOnce(NSString *signature, NSString *line) {
     PXHookTraceLogLine(line);
 }
 
+static BOOL PXReadBoolFromSettingsPlist(NSString *key) {
+    if (!key.length) return NO;
+    NSArray<NSString *> *paths = @[
+        @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
+        @"/private/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist"
+    ];
+    for (NSString *path in paths) {
+        NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+        if (dict && dict[key] != nil) {
+            return [dict[key] boolValue];
+        }
+    }
+    return NO;
+}
+
 static BOOL PXDebugFlag(NSString *key) {
     if (!key.length) return NO;
+    // Prefer explicit plist value when present
+    if (PXReadBoolFromSettingsPlist(key)) return YES;
     NSUserDefaults *settings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
     return [settings boolForKey:key];
 }
@@ -435,7 +452,7 @@ static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
                             NSString *spoofed = deviceIds[@"IOSBuild"];
                             PXHookTraceLogOnce([NSString stringWithFormat:@"sysctl|KERN_OSVERSION|%@|%@", bundleID, gen ?: @0],
                                                [NSString stringWithFormat:@"ts=%@ api=sysctl req=KERN_OSVERSION bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
-                            return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
+                            return PXWriteSysctlCStringLocalTruncating([spoofed UTF8String], oldp, oldlenp);
                         } else if (name[1] == KERN_OSRELEASE) {
                             if (!PXRequireKeysAll(deviceIds, @[@"Darwin"], @"sysctl", @"CTL_KERN/KERN_OSRELEASE", bundleID, profileId, gen)) {
                                 return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
@@ -443,7 +460,7 @@ static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
                             NSString *spoofed = deviceIds[@"Darwin"];
                             PXHookTraceLogOnce([NSString stringWithFormat:@"sysctl|KERN_OSRELEASE|%@|%@", bundleID, gen ?: @0],
                                                [NSString stringWithFormat:@"ts=%@ api=sysctl req=KERN_OSRELEASE bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
-                            return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
+                            return PXWriteSysctlCStringLocalTruncating([spoofed UTF8String], oldp, oldlenp);
                         } else if (name[1] == KERN_VERSION) {
                             if (!PXRequireKeysAll(deviceIds, @[@"KernelVersion"], @"sysctl", @"CTL_KERN/KERN_VERSION", bundleID, profileId, gen)) {
                                 return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
@@ -761,8 +778,8 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     if (spoofedValue.length > 0) {
         const char *v = [spoofedValue UTF8String];
         int r = 0;
-        // Avoid crashing apps that use fixed buffers and ignore ENOMEM for kern.version.
-        if (strcmp(name, "kern.version") == 0) {
+        // Avoid crashing apps that use fixed buffers and ignore ENOMEM for kernel strings.
+        if (strcmp(name, "kern.version") == 0 || strcmp(name, "kern.osversion") == 0 || strcmp(name, "kern.osrelease") == 0) {
             r = PXWriteSysctlCStringTruncating(name, v, oldp, oldlenp);
         } else {
             r = PXWriteSysctlCString(name, v, oldp, oldlenp);
