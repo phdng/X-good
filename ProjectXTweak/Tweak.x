@@ -259,6 +259,52 @@ static NSNumber *PXConsumeSysctlSizeQuery(NSString *name) {
     return entry[@"required"];
 }
 
+static BOOL PXIsASCIIAlnum(unichar c) {
+    if (c >= '0' && c <= '9') return YES;
+    if (c >= 'A' && c <= 'Z') return YES;
+    if (c >= 'a' && c <= 'z') return YES;
+    return NO;
+}
+
+static BOOL PXIsValidKernOSVersionString(NSString *s) {
+    // Typical: "21C62", sometimes has suffix like "21C5045g".
+    if (![s isKindOfClass:[NSString class]] || s.length < 5 || s.length > 12) return NO;
+    unichar c0 = [s characterAtIndex:0];
+    unichar c1 = [s characterAtIndex:1];
+    unichar c2 = [s characterAtIndex:2];
+    if (!(c0 >= '0' && c0 <= '9')) return NO;
+    if (!(c1 >= '0' && c1 <= '9')) return NO;
+    if (!(c2 >= 'A' && c2 <= 'Z')) return NO;
+    for (NSUInteger i = 3; i < s.length; i++) {
+        if (!PXIsASCIIAlnum([s characterAtIndex:i])) return NO;
+    }
+    return YES;
+}
+
+static BOOL PXIsValidDotVersionString(NSString *s, NSUInteger minParts, NSUInteger maxParts) {
+    if (![s isKindOfClass:[NSString class]] || s.length < 3 || s.length > 16) return NO;
+    NSArray<NSString *> *parts = [s componentsSeparatedByString:@"."];
+    if (parts.count < minParts || parts.count > maxParts) return NO;
+    for (NSString *p in parts) {
+        if (p.length < 1 || p.length > 3) return NO;
+        for (NSUInteger i = 0; i < p.length; i++) {
+            unichar c = [p characterAtIndex:i];
+            if (!(c >= '0' && c <= '9')) return NO;
+        }
+    }
+    return YES;
+}
+
+static BOOL PXIsValidKernOSReleaseString(NSString *s) {
+    // Typical: "23.2.0".
+    return PXIsValidDotVersionString(s, 3, 3);
+}
+
+static BOOL PXIsValidOSProductVersionString(NSString *s) {
+    // Typical: "17.2" or "17.2.1".
+    return PXIsValidDotVersionString(s, 2, 3);
+}
+
 static BOOL PXReadBoolFromSettingsPlist(NSString *key) {
     if (!key.length) return NO;
     NSArray<NSString *> *paths = @[
@@ -534,6 +580,9 @@ static int PXWriteSysctlCStringLocalTruncating(const char *value, void *outBuf, 
         return 0;
     }
     if (*outLen == 0) {
+        // Best-effort: ensure the destination is a valid empty C string.
+        ((char *)outBuf)[0] = '\0';
+        *outLen = 1;
         return 0;
     }
     size_t maxCopy = (*outLen > 0) ? (*outLen - 1) : 0;
@@ -577,6 +626,9 @@ static int PXWriteSysctlCStringTruncating(const char *name, const char *value, v
         return 0;
     }
     if (*oldlenp == 0) {
+        // Best-effort: ensure the destination is a valid empty C string.
+        ((char *)oldp)[0] = '\0';
+        *oldlenp = 1;
         return 0;
     }
     size_t maxCopy = (*oldlenp > 0) ? (*oldlenp - 1) : 0;
@@ -757,7 +809,14 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             px_sysctlbyname_in_hook = NO;
             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
         }
-        spoofedValue = deviceIds[@"IOSVersion"];
+        NSString *candidate = deviceIds[@"IOSVersion"];
+        if (!PXIsValidOSProductVersionString(candidate)) {
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osproductversion.invalid|%@|%@", bundleID, gen ?: @0],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osproductversion invalid value=%@ bundle=%@ gen=%@", PXISO8601Now(), candidate ?: @"", bundleID ?: @"", gen ?: @""]);
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+        }
+        spoofedValue = candidate;
     }
     // Machine/Model spoofing
     else if (strcmp(name, "hw.machine") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
@@ -809,12 +868,24 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                     return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
                 }
                 spoofed = deviceIds[@"IOSBuild"];
+                if (!PXIsValidKernOSVersionString(spoofed)) {
+                    PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osversion.invalid|%@|%@", bundleID, gen ?: @0],
+                                       [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osversion invalid value=%@ bundle=%@ gen=%@", PXISO8601Now(), spoofed ?: @"", bundleID ?: @"", gen ?: @""]);
+                    px_sysctlbyname_in_hook = NO;
+                    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+                }
             } else if (strcmp(name, "kern.osrelease") == 0) {
                 if (!PXRequireKeysAll(deviceIds, @[@"Darwin"], @"sysctlbyname", @"kern.osrelease", bundleID, profileId, gen)) {
                     px_sysctlbyname_in_hook = NO;
                     return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
                 }
                 spoofed = deviceIds[@"Darwin"];
+                if (!PXIsValidKernOSReleaseString(spoofed)) {
+                    PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osrelease.invalid|%@|%@", bundleID, gen ?: @0],
+                                       [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osrelease invalid value=%@ bundle=%@ gen=%@", PXISO8601Now(), spoofed ?: @"", bundleID ?: @"", gen ?: @""]);
+                    px_sysctlbyname_in_hook = NO;
+                    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+                }
             } else {
                 // Keep kern.version spoofing disabled via sysctlbyname (too long/fragile)
                 px_sysctlbyname_in_hook = NO;
@@ -824,7 +895,7 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             *oldlenp = required;
             PXRecordSysctlSizeQuery(reqName, required);
             PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.size|%@|%@|%@", bundleID, gen ?: @0, reqName ?: @""],
-                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ size=%zu bundle=%@ gen=%@", PXISO8601Now(), reqName ?: @"", required, bundleID ?: @"", gen ?: @""]);
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ size=%zu value=%@ bundle=%@ gen=%@", PXISO8601Now(), reqName ?: @"", required, spoofed ?: @"", bundleID ?: @"", gen ?: @""]);
             px_sysctlbyname_in_hook = NO;
             return 0;
         }
@@ -844,16 +915,28 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                 px_sysctlbyname_in_hook = NO;
                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
             }
+            if (!PXIsValidKernOSVersionString(deviceIds[@"IOSBuild"])) {
+                PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osversion.invalid|%@|%@", bundleID, gen ?: @0],
+                                   [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osversion invalid value=%@ bundle=%@ gen=%@", PXISO8601Now(), deviceIds[@"IOSBuild"] ?: @"", bundleID ?: @"", gen ?: @""]);
+                px_sysctlbyname_in_hook = NO;
+                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+            }
             PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osversion|%@|%@", bundleID, gen ?: @0],
-                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osversion bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osversion expected=%@ oldlen=%zu bundle=%@ gen=%@", PXISO8601Now(), expected ?: @0, (size_t)(oldlenp ? *oldlenp : 0), bundleID ?: @"", gen ?: @""]);
             spoofedValue = deviceIds[@"IOSBuild"];
         } else if (strcmp(name, "kern.osrelease") == 0) {
             if (!PXRequireKeysAll(deviceIds, @[@"Darwin"], @"sysctlbyname", @"kern.osrelease", bundleID, profileId, gen)) {
                 px_sysctlbyname_in_hook = NO;
                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
             }
+            if (!PXIsValidKernOSReleaseString(deviceIds[@"Darwin"])) {
+                PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osrelease.invalid|%@|%@", bundleID, gen ?: @0],
+                                   [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osrelease invalid value=%@ bundle=%@ gen=%@", PXISO8601Now(), deviceIds[@"Darwin"] ?: @"", bundleID ?: @"", gen ?: @""]);
+                px_sysctlbyname_in_hook = NO;
+                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+            }
             PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osrelease|%@|%@", bundleID, gen ?: @0],
-                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osrelease bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osrelease expected=%@ oldlen=%zu bundle=%@ gen=%@", PXISO8601Now(), expected ?: @0, (size_t)(oldlenp ? *oldlenp : 0), bundleID ?: @"", gen ?: @""]);
             spoofedValue = deviceIds[@"Darwin"];
         } else {
             // kern.version stays original via sysctlbyname
@@ -879,7 +962,13 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                                        [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ trunc=%zu/%zu bundle=%@ gen=%@", PXISO8601Now(), reqName ?: @"", (size_t)(*oldlenp), required, bundleID ?: @"", gen ?: @""]);
                 }
             }
+            errno = 0;
             r = PXWriteSysctlCStringTruncating(name, v, oldp, oldlenp);
+            {
+                NSString *reqName = [NSString stringWithUTF8String:name];
+                PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.write|%@|%@|%@", bundleID, gen ?: @0, reqName ?: @""],
+                                   [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ write_r=%d errno=%d outlen=%zu value=%@ bundle=%@ gen=%@", PXISO8601Now(), reqName ?: @"", r, errno, (size_t)(oldlenp ? *oldlenp : 0), spoofedValue ?: @"", bundleID ?: @"", gen ?: @""]);
+            }
         } else {
             r = PXWriteSysctlCString(name, v, oldp, oldlenp);
         }
