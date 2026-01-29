@@ -366,7 +366,7 @@ static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
                                 return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
                             }
                             NSString *spoofed = deviceIds[@"KernelVersion"];
-                            return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
+                            return PXWriteSysctlCStringLocalTruncating([spoofed UTF8String], oldp, oldlenp);
                         }
                     }
                 }
@@ -376,6 +376,30 @@ static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
     }
 
     return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
+}
+
+// Some apps use fixed buffers and may ignore ENOMEM returns.
+// This variant never fails when outBuf is non-NULL: it truncates and NUL-terminates.
+static int PXWriteSysctlCStringLocalTruncating(const char *value, void *outBuf, size_t *outLen) {
+    if (!outLen || !value) { errno = EINVAL; return -1; }
+    size_t required = strlen(value) + 1;
+    if (!outBuf) {
+        *outLen = required;
+        return 0;
+    }
+    if (*outLen == 0) {
+        return 0;
+    }
+    size_t maxCopy = (*outLen > 0) ? (*outLen - 1) : 0;
+    size_t toCopy = strlen(value);
+    if (toCopy > maxCopy) toCopy = maxCopy;
+    memset(outBuf, 0, *outLen);
+    if (toCopy > 0) {
+        memcpy(outBuf, value, toCopy);
+    }
+    // Keep the reported required size so callers doing a size-query can reallocate.
+    *outLen = required;
+    return 0;
 }
 
 // Helper functions from successful bypass code
@@ -395,6 +419,27 @@ static int PXWriteSysctlCString(const char *name, const char *value, void *oldp,
     }
     memset(oldp, 0, *oldlenp);
     memcpy(oldp, value, required);
+    *oldlenp = required;
+    return 0;
+}
+
+static int PXWriteSysctlCStringTruncating(const char *name, const char *value, void *oldp, size_t *oldlenp) {
+    if (!oldlenp || !value) { errno = EINVAL; return -1; }
+    size_t required = strlen(value) + 1;
+    if (!oldp) {
+        *oldlenp = required;
+        return 0;
+    }
+    if (*oldlenp == 0) {
+        return 0;
+    }
+    size_t maxCopy = (*oldlenp > 0) ? (*oldlenp - 1) : 0;
+    size_t toCopy = strlen(value);
+    if (toCopy > maxCopy) toCopy = maxCopy;
+    memset(oldp, 0, *oldlenp);
+    if (toCopy > 0) {
+        memcpy(oldp, value, toCopy);
+    }
     *oldlenp = required;
     return 0;
 }
@@ -612,7 +657,13 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     // WRITE STRING VALUE if found
     if (spoofedValue.length > 0) {
         const char *v = [spoofedValue UTF8String];
-        int r = PXWriteSysctlCString(name, v, oldp, oldlenp);
+        int r = 0;
+        // Avoid crashing apps that use fixed buffers and ignore ENOMEM for kern.version.
+        if (strcmp(name, "kern.version") == 0) {
+            r = PXWriteSysctlCStringTruncating(name, v, oldp, oldlenp);
+        } else {
+            r = PXWriteSysctlCString(name, v, oldp, oldlenp);
+        }
         if (r == 0) {
             PXLog(@"[WeaponX] 🎯 Spoofed sysctlbyname %s from: %s to: %s", name, originalValue, v);
         }
