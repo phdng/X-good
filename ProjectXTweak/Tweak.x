@@ -2752,31 +2752,30 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
                             }
                         }
 
-                        // Second pass: detect existing hwModel and replace any ProductType-like slot if present.
-                        BOOL hasHwModel = NO;
+                        // Second pass: only replace existing slots; do not insert new elements.
+                        // This avoids changing array size/type mix that can crash some apps.
                         for (CFIndex i = 0; i < count; i++) {
                             CFTypeRef item = CFArrayGetValueAtIndex(origArray, i);
                             NSString *itemStr = PXStringFromCFType(item);
-                            if (itemStr.length > 0) {
-                                if ([itemStr isEqualToString:hwModel]) {
-                                    hasHwModel = YES;
-                                }
-                                if ([itemStr hasPrefix:@"iPhone"] && deviceModel.length) {
-                                    CFTypeRef replacement = prefersData ? (CFTypeRef)PXCreateCFDataFromNSString(deviceModel) : (CFTypeRef)PXCreateCFStringFromNSString(deviceModel);
-                                    if (replacement) {
-                                        CFArraySetValueAtIndex(newArray, i, replacement);
-                                        CFRelease(replacement);
-                                    }
-                                }
-                            }
-                        }
+                            if (!itemStr.length) continue;
 
-                        // Ensure hwModel exists at index 0.
-                        if (!hasHwModel && hwModel.length) {
-                            CFTypeRef repl = prefersData ? (CFTypeRef)PXCreateCFDataFromNSString(hwModel) : (CFTypeRef)PXCreateCFStringFromNSString(hwModel);
-                            if (repl) {
-                                CFArrayInsertValueAtIndex(newArray, 0, repl);
-                                CFRelease(repl);
+                            // Replace existing hwModel slot.
+                            if ([itemStr isEqualToString:hwModel]) {
+                                CFTypeRef replacement = prefersData ? (CFTypeRef)PXCreateCFDataFromNSString(hwModel) : (CFTypeRef)PXCreateCFStringFromNSString(hwModel);
+                                if (replacement) {
+                                    CFArraySetValueAtIndex(newArray, i, replacement);
+                                    CFRelease(replacement);
+                                }
+                                continue;
+                            }
+
+                            // Replace existing productType slot only when array is string-based.
+                            if (!prefersData && [itemStr hasPrefix:@"iPhone"] && deviceModel.length) {
+                                CFTypeRef replacement = (CFTypeRef)PXCreateCFStringFromNSString(deviceModel);
+                                if (replacement) {
+                                    CFArraySetValueAtIndex(newArray, i, replacement);
+                                    CFRelease(replacement);
+                                }
                             }
                         }
 
