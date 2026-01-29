@@ -46,6 +46,27 @@
 // Cache for values
 static NSMutableDictionary *valueCache;
 
+// Compatibility shims for apps calling weakly-linked selectors.
+static BOOL PXCompatReturnNo(id self, SEL _cmd) {
+    return NO;
+}
+
+static void PXInstallCompatibilityShims(void) {
+    @autoreleasepool {
+        // Some apps call selectors that may not exist on all iOS builds.
+        // Add safe implementations only when missing to prevent crashes.
+        Class procInfoCls = objc_getClass("NSProcessInfo");
+        if (procInfoCls && !class_getInstanceMethod(procInfoCls, @selector(isiOSAppOnMac))) {
+            class_addMethod(procInfoCls, @selector(isiOSAppOnMac), (IMP)PXCompatReturnNo, "B@:");
+        }
+
+        Class ctProvCls = objc_getClass("CTCellularPlanProvisioning");
+        if (ctProvCls && !class_getInstanceMethod(ctProvCls, @selector(supportsEmbeddedSIM))) {
+            class_addMethod(ctProvCls, @selector(supportsEmbeddedSIM), (IMP)PXCompatReturnNo, "B@:");
+        }
+    }
+}
+
 // Owner hook installation flags
 BOOL gOwnerSysctlInstalled = NO;
 BOOL gOwnerSysctlBynameInstalled = NO;
@@ -2768,6 +2789,9 @@ static char* hook_GSSystemGetSerialNo(void) {
     
     // Add at beginning of ctor
     setupHookingEnvironment();
+
+    // Install shims for weakly-linked selectors to prevent crashes
+    PXInstallCompatibilityShims();
     
     PXLog(@"ProjectX tweak initializing...");
     
