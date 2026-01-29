@@ -92,10 +92,12 @@ static NSString *PXHookMissingLogPath(void) {
     }
     NSString *preferred = dirs.firstObject;
     if (preferred.length) {
-        [fm createDirectoryAtPath:preferred withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755, NSFileOwnerAccountName: @"mobile"} error:nil];
+        // Keep this simple; attributes may fail under some environments.
+        [fm createDirectoryAtPath:preferred withIntermediateDirectories:YES attributes:nil error:nil];
         return [preferred stringByAppendingPathComponent:@"hook_missing.log"];
     }
-    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"hook_missing.log"];
+    // Last resort
+    return @"/tmp/hook_missing.log";
 }
 
 static void PXHookMissingLogLine(NSString *line) {
@@ -125,6 +127,11 @@ static void PXHookMissingLogLine(NSString *line) {
         }
         [fh closeFile];
     }
+}
+
+static void PXEnsureHookMissingLogExists(void) {
+    // Creates the log file early so we can confirm ctor ran.
+    PXHookMissingLogLine([NSString stringWithFormat:@"ts=%@ api=ctor req=start bundle=%@ proc=%@", PXISO8601Now(), [[NSBundle mainBundle] bundleIdentifier] ?: @"", [NSProcessInfo processInfo].processName ?: @""]);
 }
 
 static void PXHookMissingLogOnce(NSString *signature, NSString *line) {
@@ -260,6 +267,14 @@ static CFDataRef PXCreateCFDataFromNSString(NSString *s) {
 static CFStringRef PXCreateCFStringFromNSString(NSString *s) {
     if (!s.length) return NULL;
     return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)s);
+}
+
+static CFTypeRef PXReturnReplacingCFType(CFTypeRef original, CFTypeRef replacement) {
+    if (replacement) {
+        if (original) CFRelease(original);
+        return replacement;
+    }
+    return original;
 }
 
 static NSString *PXStringFromCFType(CFTypeRef v) {
@@ -2626,11 +2641,9 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
                     }
                     NSString *deviceModel = deviceIds[@"DeviceModel"];
                     if (original && CFGetTypeID(original) == CFDataGetTypeID()) {
-                        CFRelease(original);
-                        return PXCreateCFDataFromNSString(deviceModel);
+                        return PXReturnReplacingCFType(original, PXCreateCFDataFromNSString(deviceModel));
                     }
-                    if (original) CFRelease(original);
-                    return PXCreateCFStringFromNSString(deviceModel);
+                    return PXReturnReplacingCFType(original, PXCreateCFStringFromNSString(deviceModel));
                 }
 
                 if (wantsBoardID) {
@@ -2639,11 +2652,9 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
                     }
                     NSString *boardID = deviceIds[@"BoardID"];
                     if (original && CFGetTypeID(original) == CFDataGetTypeID()) {
-                        CFRelease(original);
-                        return PXCreateCFDataFromNSString(boardID);
+                        return PXReturnReplacingCFType(original, PXCreateCFDataFromNSString(boardID));
                     }
-                    if (original) CFRelease(original);
-                    return PXCreateCFStringFromNSString(boardID);
+                    return PXReturnReplacingCFType(original, PXCreateCFStringFromNSString(boardID));
                 }
 
                 if (wantsHWModel) {
@@ -2653,11 +2664,9 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
                     NSString *hwModel = deviceIds[@"HwModel"];
                     if (!hwModel.length) hwModel = deviceIds[@"BoardID"];
                     if (original && CFGetTypeID(original) == CFDataGetTypeID()) {
-                        CFRelease(original);
-                        return PXCreateCFDataFromNSString(hwModel);
+                        return PXReturnReplacingCFType(original, PXCreateCFDataFromNSString(hwModel));
                     }
-                    if (original) CFRelease(original);
-                    return PXCreateCFStringFromNSString(hwModel);
+                    return PXReturnReplacingCFType(original, PXCreateCFStringFromNSString(hwModel));
                 }
 
                 if (wantsCompatible) {
@@ -2672,8 +2681,8 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
                         CFArrayRef origArray = (CFArrayRef)original;
                         CFMutableArrayRef newArray = CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, origArray);
                         if (!newArray) {
-                            CFRelease(original);
-                            return NULL;
+                            // Never return NULL here; some callers don't handle it.
+                            return original;
                         }
 
                         // First pass: decide if the array prefers CFData elements.
@@ -2720,11 +2729,9 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
                     }
 
                     if (original && CFGetTypeID(original) == CFDataGetTypeID()) {
-                        CFRelease(original);
-                        return PXCreateCFDataFromNSString(hwModel);
+                        return PXReturnReplacingCFType(original, PXCreateCFDataFromNSString(hwModel));
                     }
-                    if (original) CFRelease(original);
-                    return PXCreateCFStringFromNSString(hwModel);
+                    return PXReturnReplacingCFType(original, PXCreateCFStringFromNSString(hwModel));
                 }
 
                 if (original) CFRelease(original);
@@ -2804,6 +2811,9 @@ static char* hook_GSSystemGetSerialNo(void) {
 
     // Install shims for weakly-linked selectors to prevent crashes
     PXInstallCompatibilityShims();
+
+    // Ensure missing-key log file exists (debug)
+    PXEnsureHookMissingLogExists();
     
     PXLog(@"ProjectX tweak initializing...");
     
