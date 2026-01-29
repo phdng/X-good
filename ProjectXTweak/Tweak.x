@@ -499,8 +499,8 @@ static int PXWriteSysctlCStringLocalTruncating(const char *value, void *outBuf, 
     if (toCopy > 0) {
         memcpy(outBuf, value, toCopy);
     }
-    // Keep the reported required size so callers doing a size-query can reallocate.
-    *outLen = required;
+    // Report actual bytes written (including NUL) to avoid over-reads by callers.
+    *outLen = toCopy + 1;
     return 0;
 }
 
@@ -542,7 +542,8 @@ static int PXWriteSysctlCStringTruncating(const char *name, const char *value, v
     if (toCopy > 0) {
         memcpy(oldp, value, toCopy);
     }
-    *oldlenp = required;
+    // Report actual bytes written (including NUL) to avoid over-reads by callers.
+    *oldlenp = toCopy + 1;
     return 0;
 }
 
