@@ -719,6 +719,7 @@ static int uname_hook(struct utsname *buf) {
                     NSString *boardID = deviceIds[@"BoardID"];
                     return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)boardID);
                 }
+            }
         }
     }
 
