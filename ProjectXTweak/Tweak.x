@@ -938,6 +938,15 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     // OS Version spoofing
     else if ((strcmp(name, "kern.osversion") == 0 || strcmp(name, "kern.osrelease") == 0 || strcmp(name, "kern.version") == 0) &&
              [manager isIdentifierEnabled:@"IOSVersion"]) {
+        // Some apps crash when kern.* strings are spoofed via sysctlbyname.
+        // Allow disabling only this subset while keeping other sysctlbyname spoofing (e.g. kern.osproductversion).
+        if (PXDebugFlag(@"debugDisableIOSVersionSysctlBynameKernel")) {
+            NSString *reqName = [NSString stringWithUTF8String:name];
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.kernel_disable|%@|%@|%@", bundleID, gen ?: @0, reqName ?: @""],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ kernel_disabled bundle=%@ gen=%@", PXISO8601Now(), reqName ?: @"", bundleID ?: @"", gen ?: @""]);
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+        }
         if (PXDebugFlag(@"debugDisableIOSVersionSysctlByname")) {
             PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.disable|%@", bundleID],
                                [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.* disabled bundle=%@", PXISO8601Now(), bundleID ?: @""]);
