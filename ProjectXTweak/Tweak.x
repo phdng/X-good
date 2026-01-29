@@ -2671,15 +2671,26 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
                     if (original && CFGetTypeID(original) == CFArrayGetTypeID()) {
                         CFArrayRef origArray = (CFArrayRef)original;
                         CFMutableArrayRef newArray = CFArrayCreateMutableCopy(kCFAllocatorDefault, 0, origArray);
-                        BOOL prefersData = NO;
-                        BOOL hasHwModel = NO;
+                        if (!newArray) {
+                            CFRelease(original);
+                            return NULL;
+                        }
 
+                        // First pass: decide if the array prefers CFData elements.
+                        BOOL prefersData = NO;
                         CFIndex count = CFArrayGetCount(origArray);
                         for (CFIndex i = 0; i < count; i++) {
                             CFTypeRef item = CFArrayGetValueAtIndex(origArray, i);
                             if (item && CFGetTypeID(item) == CFDataGetTypeID()) {
                                 prefersData = YES;
+                                break;
                             }
+                        }
+
+                        // Second pass: detect existing hwModel and replace any ProductType-like slot if present.
+                        BOOL hasHwModel = NO;
+                        for (CFIndex i = 0; i < count; i++) {
+                            CFTypeRef item = CFArrayGetValueAtIndex(origArray, i);
                             NSString *itemStr = PXStringFromCFType(item);
                             if (itemStr.length > 0) {
                                 if ([itemStr isEqualToString:hwModel]) {
@@ -2695,6 +2706,7 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
                             }
                         }
 
+                        // Ensure hwModel exists at index 0.
                         if (!hasHwModel && hwModel.length) {
                             CFTypeRef repl = prefersData ? (CFTypeRef)PXCreateCFDataFromNSString(hwModel) : (CFTypeRef)PXCreateCFStringFromNSString(hwModel);
                             if (repl) {
