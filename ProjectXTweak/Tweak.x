@@ -129,11 +129,6 @@ static void PXHookMissingLogLine(NSString *line) {
     }
 }
 
-static void PXEnsureHookMissingLogExists(void) {
-    // Creates the log file early so we can confirm ctor ran.
-    PXHookMissingLogLine([NSString stringWithFormat:@"ts=%@ api=ctor req=start bundle=%@ proc=%@", PXISO8601Now(), [[NSBundle mainBundle] bundleIdentifier] ?: @"", [NSProcessInfo processInfo].processName ?: @""]);
-}
-
 static void PXHookMissingLogOnce(NSString *signature, NSString *line) {
     if (!signature.length) {
         PXHookMissingLogLine(line);
@@ -160,6 +155,14 @@ static NSString *PXISO8601Now(void) {
         [df setDateFormat:@"yyyy-MM-dd'T'HH:mm:ss.SSSZZZZZ"]; 
     });
     return [df stringFromDate:[NSDate date]];
+}
+
+static void PXEnsureHookMissingLogExists(void) {
+    // Creates the log file early so we can confirm ctor ran.
+    PXHookMissingLogLine([NSString stringWithFormat:@"ts=%@ api=ctor req=start bundle=%@ proc=%@",
+                         PXISO8601Now(),
+                         [[NSBundle mainBundle] bundleIdentifier] ?: @"",
+                         [NSProcessInfo processInfo].processName ?: @""]);
 }
 
 // Snapshot loader/cache
