@@ -1389,6 +1389,13 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
         }
         
         IOSVERSION_LOG(@"Initializing iOS Version Hooks for %@...", bundleID);
+
+        // Debug flag to disable IOSVersionHooks entirely
+        NSUserDefaults *debugSettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+        if ([debugSettings boolForKey:@"debugDisableIOSVersionHooks"]) {
+            IOSVERSION_LOG(@"debugDisableIOSVersionHooks enabled; skipping iOS Version hooks");
+            return;
+        }
         
         // CRITICAL: Only install hooks if this app is actually scoped
         if (!isInScopedAppsList()) {

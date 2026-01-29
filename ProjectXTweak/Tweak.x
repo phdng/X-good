@@ -77,6 +77,7 @@ BOOL gOwnerCFSystemInstalled = NO;
 
 // Missing-key logging
 static NSMutableSet *gMissingLogSeen = nil;
+static NSMutableSet *gTraceLogSeen = nil;
 
 static NSString *PXHookMissingLogPath(void) {
     NSArray<NSString *> *dirs = @[
@@ -98,6 +99,26 @@ static NSString *PXHookMissingLogPath(void) {
     }
     // Last resort
     return @"/tmp/hook_missing.log";
+}
+
+static NSString *PXHookTraceLogPath(void) {
+    NSArray<NSString *> *dirs = @[
+        @"/var/mobile/Library/WeaponX/Logs",
+        @"/private/var/mobile/Library/WeaponX/Logs"
+    ];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    for (NSString *dir in dirs) {
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:dir isDirectory:&isDir] && isDir) {
+            return [dir stringByAppendingPathComponent:@"hook_trace.log"];
+        }
+    }
+    NSString *preferred = dirs.firstObject;
+    if (preferred.length) {
+        [fm createDirectoryAtPath:preferred withIntermediateDirectories:YES attributes:nil error:nil];
+        return [preferred stringByAppendingPathComponent:@"hook_trace.log"];
+    }
+    return @"/tmp/hook_trace.log";
 }
 
 static void PXHookMissingLogLine(NSString *line) {
@@ -145,6 +166,59 @@ static void PXHookMissingLogOnce(NSString *signature, NSString *line) {
         [gMissingLogSeen addObject:signature];
     }
     PXHookMissingLogLine(line);
+}
+
+static void PXHookTraceLogLine(NSString *line) {
+    if (!line.length) return;
+    static NSObject *lock = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        lock = [NSObject new];
+        gTraceLogSeen = [NSMutableSet set];
+    });
+    NSString *path = PXHookTraceLogPath();
+    NSString *out = [line stringByAppendingString:@"\n"];
+    @synchronized(lock) {
+        if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+            [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            return;
+        }
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+        if (!fh) {
+            [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+            return;
+        }
+        [fh seekToEndOfFile];
+        NSData *data = [out dataUsingEncoding:NSUTF8StringEncoding];
+        if (data) {
+            [fh writeData:data];
+        }
+        [fh closeFile];
+    }
+}
+
+static void PXHookTraceLogOnce(NSString *signature, NSString *line) {
+    if (!signature.length) {
+        PXHookTraceLogLine(line);
+        return;
+    }
+    static NSObject *lock = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        lock = [NSObject new];
+        if (!gTraceLogSeen) gTraceLogSeen = [NSMutableSet set];
+    });
+    @synchronized(lock) {
+        if ([gTraceLogSeen containsObject:signature]) return;
+        [gTraceLogSeen addObject:signature];
+    }
+    PXHookTraceLogLine(line);
+}
+
+static BOOL PXDebugFlag(NSString *key) {
+    if (!key.length) return NO;
+    NSUserDefaults *settings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+    return [settings boolForKey:key];
 }
 
 static NSString *PXISO8601Now(void) {
@@ -351,23 +425,32 @@ static int sysctl_hook(int *name, u_int namelen, void *oldp, size_t *oldlenp, vo
                     }
 
                     if (name[0] == CTL_KERN && [manager isIdentifierEnabled:@"IOSVersion"]) {
+                        if (PXDebugFlag(@"debugDisableIOSVersionSysctl")) {
+                            return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
+                        }
                         if (name[1] == KERN_OSVERSION) {
                             if (!PXRequireKeysAll(deviceIds, @[@"IOSBuild"], @"sysctl", @"CTL_KERN/KERN_OSVERSION", bundleID, profileId, gen)) {
                                 return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
                             }
                             NSString *spoofed = deviceIds[@"IOSBuild"];
+                            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctl|KERN_OSVERSION|%@|%@", bundleID, gen ?: @0],
+                                               [NSString stringWithFormat:@"ts=%@ api=sysctl req=KERN_OSVERSION bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
                             return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
                         } else if (name[1] == KERN_OSRELEASE) {
                             if (!PXRequireKeysAll(deviceIds, @[@"Darwin"], @"sysctl", @"CTL_KERN/KERN_OSRELEASE", bundleID, profileId, gen)) {
                                 return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
                             }
                             NSString *spoofed = deviceIds[@"Darwin"];
+                            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctl|KERN_OSRELEASE|%@|%@", bundleID, gen ?: @0],
+                                               [NSString stringWithFormat:@"ts=%@ api=sysctl req=KERN_OSRELEASE bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
                             return PXWriteSysctlCStringLocal([spoofed UTF8String], oldp, oldlenp);
                         } else if (name[1] == KERN_VERSION) {
                             if (!PXRequireKeysAll(deviceIds, @[@"KernelVersion"], @"sysctl", @"CTL_KERN/KERN_VERSION", bundleID, profileId, gen)) {
                                 return sysctl_orig(name, namelen, oldp, oldlenp, newp, newlen);
                             }
                             NSString *spoofed = deviceIds[@"KernelVersion"];
+                            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctl|KERN_VERSION|%@|%@", bundleID, gen ?: @0],
+                                               [NSString stringWithFormat:@"ts=%@ api=sysctl req=KERN_VERSION bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
                             return PXWriteSysctlCStringLocalTruncating([spoofed UTF8String], oldp, oldlenp);
                         }
                     }
@@ -491,6 +574,10 @@ static CFDictionaryRef CFCopySystemVersionDictionary_hook(void) {
                 return original;
             }
 
+            if (PXDebugFlag(@"debugDisableIOSVersionCFSystem")) {
+                return original;
+            }
+
             NSString *profileId = nil;
             NSNumber *gen = nil;
             NSDictionary *deviceIds = PXGetDeviceIdsSnapshot(&profileId, &gen);
@@ -599,13 +686,17 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     }
 
     // NEW: kern.osproductversion - Critical for Facebook
-     if (strcmp(name, "kern.osproductversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
-         if (!PXRequireKeysAll(deviceIds, @[@"IOSVersion"], @"sysctlbyname", @"kern.osproductversion", bundleID, profileId, gen)) {
-             px_sysctlbyname_in_hook = NO;
-             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-         }
-         spoofedValue = deviceIds[@"IOSVersion"];
-     }
+    if (strcmp(name, "kern.osproductversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
+        if (PXDebugFlag(@"debugDisableIOSVersionSysctlByname")) {
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+        }
+        if (!PXRequireKeysAll(deviceIds, @[@"IOSVersion"], @"sysctlbyname", @"kern.osproductversion", bundleID, profileId, gen)) {
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+        }
+        spoofedValue = deviceIds[@"IOSVersion"];
+    }
     // Machine/Model spoofing
     else if (strcmp(name, "hw.machine") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
         if (!PXRequireKeysAll(deviceIds, @[@"DeviceModel"], @"sysctlbyname", @"hw.machine", bundleID, profileId, gen)) {
@@ -632,25 +723,35 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     // OS Version spoofing
     else if ((strcmp(name, "kern.osversion") == 0 || strcmp(name, "kern.osrelease") == 0 || strcmp(name, "kern.version") == 0) &&
              [manager isIdentifierEnabled:@"IOSVersion"]) {
-         if (strcmp(name, "kern.osversion") == 0) {
-             if (!PXRequireKeysAll(deviceIds, @[@"IOSBuild"], @"sysctlbyname", @"kern.osversion", bundleID, profileId, gen)) {
-                 px_sysctlbyname_in_hook = NO;
-                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-             }
-             spoofedValue = deviceIds[@"IOSBuild"];
-         } else if (strcmp(name, "kern.osrelease") == 0) {
-             if (!PXRequireKeysAll(deviceIds, @[@"Darwin"], @"sysctlbyname", @"kern.osrelease", bundleID, profileId, gen)) {
-                 px_sysctlbyname_in_hook = NO;
-                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-             }
-             spoofedValue = deviceIds[@"Darwin"];
-         } else {
-             if (!PXRequireKeysAll(deviceIds, @[@"KernelVersion"], @"sysctlbyname", @"kern.version", bundleID, profileId, gen)) {
-                 px_sysctlbyname_in_hook = NO;
-                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-             }
-             spoofedValue = deviceIds[@"KernelVersion"];
-         }
+        if (PXDebugFlag(@"debugDisableIOSVersionSysctlByname")) {
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+        }
+        if (strcmp(name, "kern.osversion") == 0) {
+            if (!PXRequireKeysAll(deviceIds, @[@"IOSBuild"], @"sysctlbyname", @"kern.osversion", bundleID, profileId, gen)) {
+                px_sysctlbyname_in_hook = NO;
+                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+            }
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osversion|%@|%@", bundleID, gen ?: @0],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osversion bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
+            spoofedValue = deviceIds[@"IOSBuild"];
+        } else if (strcmp(name, "kern.osrelease") == 0) {
+            if (!PXRequireKeysAll(deviceIds, @[@"Darwin"], @"sysctlbyname", @"kern.osrelease", bundleID, profileId, gen)) {
+                px_sysctlbyname_in_hook = NO;
+                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+            }
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osrelease|%@|%@", bundleID, gen ?: @0],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osrelease bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
+            spoofedValue = deviceIds[@"Darwin"];
+        } else {
+            if (!PXRequireKeysAll(deviceIds, @[@"KernelVersion"], @"sysctlbyname", @"kern.version", bundleID, profileId, gen)) {
+                px_sysctlbyname_in_hook = NO;
+                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+            }
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.version|%@|%@", bundleID, gen ?: @0],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.version bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
+            spoofedValue = deviceIds[@"KernelVersion"];
+        }
     }
     else if (strcmp(name, "kern.hostname") == 0 && [manager isIdentifierEnabled:@"DeviceName"]) {
         spoofedValue = [manager currentValueForIdentifier:@"DeviceName"];
@@ -817,6 +918,9 @@ static int uname_hook(struct utsname *buf) {
 
     // iOS build number (AIDA64 reads this on some paths)
     if (propertyString && [manager isIdentifierEnabled:@"IOSVersion"]) {
+        if (PXDebugFlag(@"debugDisableIOSVersionMG")) {
+            return %orig;
+        }
         if ([propertyString isEqualToString:@"ReleaseType"]) {
             return CFStringCreateCopy(kCFAllocatorDefault, CFSTR("User"));
         }
