@@ -296,6 +296,8 @@ static NSString *PXStringFromCFType(CFTypeRef v) {
 static int (*sysctlbyname_orig)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 static int (*sysctl_orig)(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
 
+static int PXWriteSysctlCStringLocalTruncating(const char *value, void *outBuf, size_t *outLen);
+
 static int PXWriteSysctlCStringLocal(const char *value, void *outBuf, size_t *outLen) {
     if (!outLen || !value) { errno = EINVAL; return -1; }
     size_t required = strlen(value) + 1;
