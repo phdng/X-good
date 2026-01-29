@@ -742,6 +742,18 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
     else if ((strcmp(name, "kern.osversion") == 0 || strcmp(name, "kern.osrelease") == 0 || strcmp(name, "kern.version") == 0) &&
              [manager isIdentifierEnabled:@"IOSVersion"]) {
         if (PXDebugFlag(@"debugDisableIOSVersionSysctlByname")) {
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.disable|%@", bundleID],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.* disabled bundle=%@", PXISO8601Now(), bundleID ?: @""]);
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+        }
+        if (!oldlenp) {
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.nolen|%@", bundleID],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.* nolen bundle=%@", PXISO8601Now(), bundleID ?: @""]);
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+        }
+        if (!oldp) {
             px_sysctlbyname_in_hook = NO;
             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
         }
