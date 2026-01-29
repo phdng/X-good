@@ -7,12 +7,15 @@
 #import "IOSVersionInfo.h"
 #import "IOSBuildDB.h"
 #import "IPhoneModelDB.h"
+#import "VersionCompare.h"
 #import "DBDebugLogger.h"
 #import "ProjectXLogging.h"
 #import "WiFiManager.h"
 #import "StorageManager.h"
 #import "BatteryManager.h"
 #import "SystemUUIDManager.h"
+
+#import <sys/sysctl.h>
 #import "DyldCacheUUIDManager.h"
 #import "PasteboardUUIDManager.h"
 #import "KeychainUUIDManager.h"
@@ -155,11 +158,17 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
     }
 
     // Pick an iOS build compatible with this device model and version range.
-    NSDictionary *iosMeta = [buildDB randomMetaForDevice:productType min:@"13.0" max:maxIOS error:&dbErr];
+    // To keep runtime stable, cap the spoofed iOS to the current OS version.
+    NSString *runtimeIOS = PXGetRuntimeIOSVersionString();
+    NSString *effectiveMax = maxIOS;
+    if (runtimeIOS.length && effectiveMax.length && PXCompareVersions(runtimeIOS, effectiveMax) == NSOrderedAscending) {
+        effectiveMax = runtimeIOS;
+    }
+    NSDictionary *iosMeta = [buildDB randomMetaForDevice:productType min:@"13.0" max:effectiveMax error:&dbErr];
     if (!iosMeta) {
         self.error = dbErr;
         PXLog(@"[WeaponX] ❌ DeviceProfileGroup: no compatible build for %@ (%@)", productType, dbErr.localizedDescription ?: @"unknown");
-        PXDBLog(@"DeviceProfileGroup: no compatible build device=%@ maxIOS=%@ err=%@", productType, maxIOS, dbErr.localizedDescription ?: @"nil");
+        PXDBLog(@"DeviceProfileGroup: no compatible build device=%@ maxIOS=%@ effectiveMax=%@ runtime=%@ err=%@", productType, maxIOS, effectiveMax, runtimeIOS, dbErr.localizedDescription ?: @"nil");
         return nil;
     }
 
@@ -615,6 +624,9 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
     @try {
         NSString *identityDir = [self profileIdentityPath];
         NSString *deviceModel = [self currentValueForIdentifier:@"DeviceModel"];
+        if (!deviceModel.length) {
+            deviceModel = PXGetActualHWMachine();
+        }
         if (identityDir.length && deviceModel.length) {
             NSError *dbErr = nil;
             IPhoneModelDB *modelDB = [IPhoneModelDB sharedManager];
@@ -623,7 +635,13 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
                 NSDictionary *spec = [modelDB specForProductType:deviceModel];
                 NSString *maxIOS = [spec[@"maxIOS"] isKindOfClass:[NSString class]] ? spec[@"maxIOS"] : nil;
                 if (maxIOS.length) {
-                    NSDictionary *meta = [buildDB randomMetaForDevice:deviceModel min:@"13.0" max:maxIOS error:&dbErr];
+                    NSString *runtimeIOS = PXGetRuntimeIOSVersionString();
+                    NSString *effectiveMax = maxIOS;
+                    if (runtimeIOS.length && effectiveMax.length && PXCompareVersions(runtimeIOS, effectiveMax) == NSOrderedAscending) {
+                        effectiveMax = runtimeIOS;
+                    }
+
+                    NSDictionary *meta = [buildDB randomMetaForDevice:deviceModel min:@"13.0" max:effectiveMax error:&dbErr];
                     if (meta) {
                         NSString *iosVersion = meta[@"version"];
                         NSString *iosBuild = meta[@"build"];
@@ -651,6 +669,7 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
 
                         [[IOSVersionInfo sharedManager] setCurrentIOSVersionInfo:versionDict];
                         PXLog(@"[WeaponX] ✅ Generated iOS version from DB: %@ (%@)", iosVersion, iosBuild);
+                        PXDBLog(@"GenerateIOSVersion: deviceModel=%@ maxIOS=%@ effectiveMax=%@ runtime=%@ -> %@ (%@)", deviceModel, maxIOS, effectiveMax, runtimeIOS, iosVersion ?: @"", iosBuild ?: @"");
                         return versionDict;
                     }
                 }
@@ -1034,9 +1053,9 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         if (meid) [self setCustomMEID:meid];
     }
     
-    // Device profile group: DeviceModel + dependent specs + iOS version/build.
-    // Only regenerate when at least one of the dependent identifiers is enabled.
-    BOOL wantsDeviceProfileGroup = [self isIdentifierEnabled:@"DeviceModel"] || [self isIdentifierEnabled:@"IOSVersion"];
+    // Device profile group is only regenerated when DeviceModel is enabled.
+    // Enabling IOSVersion alone should not randomize DeviceModel (prevents app crashes).
+    BOOL wantsDeviceProfileGroup = [self isIdentifierEnabled:@"DeviceModel"];
     if (wantsDeviceProfileGroup) {
         NSString *newModel = [self regenerateDeviceProfileGroup];
         if (!newModel) {
@@ -1046,16 +1065,17 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
                 // Use legacy setter for existing model DB.
                 [self setCustomDeviceModel:deviceModel];
             }
+            // If IOSVersion is enabled, generate it based on the (now-set) device model.
             if ([self isIdentifierEnabled:@"IOSVersion"]) {
                 [self generateIOSVersion];
             }
         }
     } else {
-        // Ensure we still have a model stored for spec-dependent UI.
+        // Ensure we have a baseline model stored (real hw.machine) without randomization.
         if (![self currentValueForIdentifier:@"DeviceModel"]) {
-            NSString *deviceModel = [self generateDeviceModel];
-            if (deviceModel) {
-                [self setCustomDeviceModel:deviceModel];
+            NSString *realModel = PXGetActualHWMachine();
+            if (realModel.length) {
+                [self setCustomDeviceModel:realModel];
             }
         }
     }
@@ -1069,7 +1089,10 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
     }
     
-    // IOSVersion is handled by regenerateDeviceProfileGroup when enabled.
+    // If IOSVersion is enabled but DeviceModel isn't, only regenerate iOS info.
+    if ([self isIdentifierEnabled:@"IOSVersion"] && ![self isIdentifierEnabled:@"DeviceModel"]) {
+        [self generateIOSVersion];
+    }
     if ([self isIdentifierEnabled:@"SystemBootUUID"]) {
         [self generateSystemBootUUID];
     }
@@ -1296,14 +1319,11 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
         }
     }
     
-    // Always ensure device model exists (prefer DB-based device profile if available)
+    // Always ensure device model exists (baseline only; do not randomize here)
     if (![self currentValueForIdentifier:@"DeviceModel"]) {
-        NSString *m = [self regenerateDeviceProfileGroup];
-        if (!m) {
-            NSString *deviceModel = [self generateDeviceModel];
-            if (deviceModel) {
-                [self setCustomDeviceModel:deviceModel];
-            }
+        NSString *realModel = PXGetActualHWMachine();
+        if (realModel.length) {
+            [self setCustomDeviceModel:realModel];
         }
     }
     
@@ -3070,3 +3090,27 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 }
 
 @end
+static NSString *PXGetActualHWMachine(void) {
+    size_t size = 0;
+    if (sysctlbyname("hw.machine", NULL, &size, NULL, 0) != 0 || size == 0) {
+        return nil;
+    }
+    char *buf = (char *)malloc(size);
+    if (!buf) return nil;
+    memset(buf, 0, size);
+    if (sysctlbyname("hw.machine", buf, &size, NULL, 0) != 0) {
+        free(buf);
+        return nil;
+    }
+    NSString *s = [NSString stringWithUTF8String:buf];
+    free(buf);
+    return s;
+}
+
+static NSString *PXGetRuntimeIOSVersionString(void) {
+    NSOperatingSystemVersion v = [[NSProcessInfo processInfo] operatingSystemVersion];
+    if (v.patchVersion > 0) {
+        return [NSString stringWithFormat:@"%ld.%ld.%ld", (long)v.majorVersion, (long)v.minorVersion, (long)v.patchVersion];
+    }
+    return [NSString stringWithFormat:@"%ld.%ld", (long)v.majorVersion, (long)v.minorVersion];
+}
