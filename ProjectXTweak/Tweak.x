@@ -31,6 +31,7 @@
 #import "MobileGestalt.h"
 #import "IOSVersionInfo.h"
 #import "HookOwnership.h"
+#import <pthread.h>
 #import <CoreFoundation/CoreFoundation.h>
 // Forward declarations for classes we need to hook
 @interface SBScreenshotManager : NSObject
@@ -78,6 +79,7 @@ BOOL gOwnerCFSystemInstalled = NO;
 // Missing-key logging
 static NSMutableSet *gMissingLogSeen = nil;
 static NSMutableSet *gTraceLogSeen = nil;
+static NSMutableDictionary *gSysctlSizeCache = nil;
 
 static NSString *PXHookMissingLogPath(void) {
     NSArray<NSString *> *dirs = @[
@@ -213,6 +215,48 @@ static void PXHookTraceLogOnce(NSString *signature, NSString *line) {
         [gTraceLogSeen addObject:signature];
     }
     PXHookTraceLogLine(line);
+}
+
+static NSString *PXSysctlCacheKey(NSString *name) {
+    return [NSString stringWithFormat:@"%p|%@", pthread_self(), name ?: @""];
+}
+
+static void PXRecordSysctlSizeQuery(NSString *name, size_t required) {
+    static NSObject *lock = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        lock = [NSObject new];
+        gSysctlSizeCache = [NSMutableDictionary dictionary];
+    });
+    NSString *key = PXSysctlCacheKey(name);
+    NSDictionary *entry = @{
+        @"ts": @([[NSDate date] timeIntervalSince1970]),
+        @"required": @(required)
+    };
+    @synchronized(lock) {
+        gSysctlSizeCache[key] = entry;
+    }
+}
+
+static NSNumber *PXConsumeSysctlSizeQuery(NSString *name) {
+    static NSObject *lock = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        lock = [NSObject new];
+        if (!gSysctlSizeCache) gSysctlSizeCache = [NSMutableDictionary dictionary];
+    });
+    NSString *key = PXSysctlCacheKey(name);
+    NSDictionary *entry = nil;
+    @synchronized(lock) {
+        entry = gSysctlSizeCache[key];
+        [gSysctlSizeCache removeObjectForKey:key];
+    }
+    if (!entry) return nil;
+    NSTimeInterval ts = [entry[@"ts"] doubleValue];
+    if ([[NSDate date] timeIntervalSince1970] - ts > 1.0) {
+        return nil;
+    }
+    return entry[@"required"];
 }
 
 static BOOL PXReadBoolFromSettingsPlist(NSString *key) {
@@ -748,15 +792,53 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
         }
         if (!oldlenp) {
-            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.nolen|%@", bundleID],
-                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.* nolen bundle=%@", PXISO8601Now(), bundleID ?: @""]);
+            NSString *reqName = [NSString stringWithUTF8String:name];
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.nolen|%@|%@", bundleID, gen ?: @0],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ nolen bundle=%@ gen=%@", PXISO8601Now(), reqName ?: @"", bundleID ?: @"", gen ?: @""]);
             px_sysctlbyname_in_hook = NO;
             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
         }
+
+        // Size-query: return spoofed required size and record it.
         if (!oldp) {
+            NSString *reqName = [NSString stringWithUTF8String:name];
+            NSString *spoofed = nil;
+            if (strcmp(name, "kern.osversion") == 0) {
+                if (!PXRequireKeysAll(deviceIds, @[@"IOSBuild"], @"sysctlbyname", @"kern.osversion", bundleID, profileId, gen)) {
+                    px_sysctlbyname_in_hook = NO;
+                    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+                }
+                spoofed = deviceIds[@"IOSBuild"];
+            } else if (strcmp(name, "kern.osrelease") == 0) {
+                if (!PXRequireKeysAll(deviceIds, @[@"Darwin"], @"sysctlbyname", @"kern.osrelease", bundleID, profileId, gen)) {
+                    px_sysctlbyname_in_hook = NO;
+                    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+                }
+                spoofed = deviceIds[@"Darwin"];
+            } else {
+                // Keep kern.version spoofing disabled via sysctlbyname (too long/fragile)
+                px_sysctlbyname_in_hook = NO;
+                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+            }
+            size_t required = strlen([spoofed UTF8String]) + 1;
+            *oldlenp = required;
+            PXRecordSysctlSizeQuery(reqName, required);
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.size|%@|%@|%@", bundleID, gen ?: @0, reqName ?: @""],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ size=%zu bundle=%@ gen=%@", PXISO8601Now(), reqName ?: @"", required, bundleID ?: @"", gen ?: @""]);
+            px_sysctlbyname_in_hook = NO;
+            return 0;
+        }
+
+        // Require a recent size-query before spoofing to avoid one-shot callers.
+        NSString *reqName = [NSString stringWithUTF8String:name];
+        NSNumber *expected = PXConsumeSysctlSizeQuery(reqName);
+        if (!expected) {
+            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.nosize|%@|%@", bundleID, gen ?: @0],
+                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ nosize bundle=%@ gen=%@", PXISO8601Now(), reqName ?: @"", bundleID ?: @"", gen ?: @""]);
             px_sysctlbyname_in_hook = NO;
             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
         }
+
         if (strcmp(name, "kern.osversion") == 0) {
             if (!PXRequireKeysAll(deviceIds, @[@"IOSBuild"], @"sysctlbyname", @"kern.osversion", bundleID, profileId, gen)) {
                 px_sysctlbyname_in_hook = NO;
@@ -765,15 +847,6 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osversion|%@|%@", bundleID, gen ?: @0],
                                [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osversion bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
             spoofedValue = deviceIds[@"IOSBuild"];
-            if (oldp && oldlenp) {
-                size_t required = strlen([spoofedValue UTF8String]) + 1;
-                if (*oldlenp < required) {
-                    PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osversion|shortbuf|%@|%@", bundleID, gen ?: @0],
-                                       [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osversion shortbuf=%zu need=%zu bundle=%@ gen=%@", PXISO8601Now(), (size_t)*oldlenp, required, bundleID ?: @"", gen ?: @""]);
-                    px_sysctlbyname_in_hook = NO;
-                    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-                }
-            }
         } else if (strcmp(name, "kern.osrelease") == 0) {
             if (!PXRequireKeysAll(deviceIds, @[@"Darwin"], @"sysctlbyname", @"kern.osrelease", bundleID, profileId, gen)) {
                 px_sysctlbyname_in_hook = NO;
@@ -782,32 +855,10 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osrelease|%@|%@", bundleID, gen ?: @0],
                                [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osrelease bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
             spoofedValue = deviceIds[@"Darwin"];
-            if (oldp && oldlenp) {
-                size_t required = strlen([spoofedValue UTF8String]) + 1;
-                if (*oldlenp < required) {
-                    PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osrelease|shortbuf|%@|%@", bundleID, gen ?: @0],
-                                       [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osrelease shortbuf=%zu need=%zu bundle=%@ gen=%@", PXISO8601Now(), (size_t)*oldlenp, required, bundleID ?: @"", gen ?: @""]);
-                    px_sysctlbyname_in_hook = NO;
-                    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-                }
-            }
         } else {
-            if (!PXRequireKeysAll(deviceIds, @[@"KernelVersion"], @"sysctlbyname", @"kern.version", bundleID, profileId, gen)) {
-                px_sysctlbyname_in_hook = NO;
-                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-            }
-            PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.version|%@|%@", bundleID, gen ?: @0],
-                               [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.version bundle=%@ gen=%@", PXISO8601Now(), bundleID ?: @"", gen ?: @""]);
-            spoofedValue = deviceIds[@"KernelVersion"];
-            if (oldp && oldlenp) {
-                size_t required = strlen([spoofedValue UTF8String]) + 1;
-                if (*oldlenp < required) {
-                    PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.version|shortbuf|%@|%@", bundleID, gen ?: @0],
-                                       [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.version shortbuf=%zu need=%zu bundle=%@ gen=%@", PXISO8601Now(), (size_t)*oldlenp, required, bundleID ?: @"", gen ?: @""]);
-                    px_sysctlbyname_in_hook = NO;
-                    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-                }
-            }
+            // kern.version stays original via sysctlbyname
+            px_sysctlbyname_in_hook = NO;
+            return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
         }
     }
     else if (strcmp(name, "kern.hostname") == 0 && [manager isIdentifierEnabled:@"DeviceName"]) {
@@ -820,6 +871,14 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         int r = 0;
         // Avoid crashing apps that use fixed buffers and ignore ENOMEM for kernel strings.
         if (strcmp(name, "kern.version") == 0 || strcmp(name, "kern.osversion") == 0 || strcmp(name, "kern.osrelease") == 0) {
+            if (oldp && oldlenp) {
+                size_t required = strlen(v) + 1;
+                if (*oldlenp > 0 && *oldlenp < required) {
+                    NSString *reqName = [NSString stringWithUTF8String:name];
+                    PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.trunc|%@|%@|%@", bundleID, gen ?: @0, reqName ?: @""],
+                                       [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ trunc=%zu/%zu bundle=%@ gen=%@", PXISO8601Now(), reqName ?: @"", (size_t)(*oldlenp), required, bundleID ?: @"", gen ?: @""]);
+                }
+            }
             r = PXWriteSysctlCStringTruncating(name, v, oldp, oldlenp);
         } else {
             r = PXWriteSysctlCString(name, v, oldp, oldlenp);
