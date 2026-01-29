@@ -305,6 +305,74 @@ static BOOL PXIsValidOSProductVersionString(NSString *s) {
     return PXIsValidDotVersionString(s, 2, 3);
 }
 
+static NSInteger PXParseLeadingInt(NSString *s) {
+    if (![s isKindOfClass:[NSString class]] || s.length == 0) return -1;
+    NSInteger v = 0;
+    BOOL any = NO;
+    for (NSUInteger i = 0; i < s.length; i++) {
+        unichar c = [s characterAtIndex:i];
+        if (c < '0' || c > '9') break;
+        any = YES;
+        v = (v * 10) + (NSInteger)(c - '0');
+        if (v > 1000) break;
+    }
+    return any ? v : -1;
+}
+
+static NSInteger PXMajorFromBuildString(NSString *build) {
+    // "20E252" -> 20
+    if (![build isKindOfClass:[NSString class]] || build.length < 2) return -1;
+    NSString *prefix = [build substringToIndex:2];
+    return PXParseLeadingInt(prefix);
+}
+
+static NSInteger PXMajorFromDotVersion(NSString *v) {
+    // "22.4.0" -> 22
+    if (![v isKindOfClass:[NSString class]] || v.length < 1) return -1;
+    NSArray<NSString *> *parts = [v componentsSeparatedByString:@"."];
+    if (parts.count < 1) return -1;
+    return PXParseLeadingInt(parts.firstObject);
+}
+
+static BOOL PXIsCoherentIOSSpoofSet(NSString *iosVersion, NSString *iosBuild, NSString *darwin, NSString **outReason) {
+    // Coherence heuristic:
+    // - iOS major ~= Darwin major - 6 (e.g. iOS 17 => Darwin 23)
+    // - iOS major ~= Build major - 4 (e.g. iOS 17 => build starts with 21)
+    NSInteger im = PXMajorFromDotVersion(iosVersion);
+    NSInteger dm = PXMajorFromDotVersion(darwin);
+    NSInteger bm = PXMajorFromBuildString(iosBuild);
+    // Require at least two signals to validate.
+    int present = 0;
+    if (im > 0) present++;
+    if (dm > 0) present++;
+    if (bm > 0) present++;
+    if (present < 2) return YES;
+
+    if (im > 0 && dm > 0) {
+        NSInteger expectedDM = im + 6;
+        if (dm != expectedDM) {
+            if (outReason) *outReason = [NSString stringWithFormat:@"ios/darwin mismatch iosMajor=%ld darwinMajor=%ld", (long)im, (long)dm];
+            return NO;
+        }
+    }
+    if (im > 0 && bm > 0) {
+        NSInteger expectedBM = im + 4;
+        if (bm != expectedBM) {
+            if (outReason) *outReason = [NSString stringWithFormat:@"ios/build mismatch iosMajor=%ld buildMajor=%ld", (long)im, (long)bm];
+            return NO;
+        }
+    }
+    if (dm > 0 && bm > 0) {
+        NSInteger iosFromDarwin = dm - 6;
+        NSInteger iosFromBuild = bm - 4;
+        if (iosFromDarwin != iosFromBuild) {
+            if (outReason) *outReason = [NSString stringWithFormat:@"darwin/build mismatch darwinMajor=%ld buildMajor=%ld", (long)dm, (long)bm];
+            return NO;
+        }
+    }
+    return YES;
+}
+
 static BOOL PXReadBoolFromSettingsPlist(NSString *key) {
     if (!key.length) return NO;
     NSArray<NSString *> *paths = @[
@@ -816,6 +884,32 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             px_sysctlbyname_in_hook = NO;
             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
         }
+
+        if (PXDebugFlag(@"debugStrictIOSVersionSysctlBynameCoherent")) {
+            NSString *reason = nil;
+            if (!PXIsCoherentIOSSpoofSet(candidate, deviceIds[@"IOSBuild"], deviceIds[@"Darwin"], &reason)) {
+                PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|ios.coherence_mismatch|%@|%@|kern.osproductversion", bundleID, gen ?: @0],
+                                   [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osproductversion coherence_mismatch reason=%@ ios=%@ build=%@ darwin=%@ bundle=%@ gen=%@",
+                                    PXISO8601Now(), reason ?: @"", candidate ?: @"", deviceIds[@"IOSBuild"] ?: @"", deviceIds[@"Darwin"] ?: @"", bundleID ?: @"", gen ?: @""]);
+                px_sysctlbyname_in_hook = NO;
+                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+            }
+        }
+
+        // Optional safety: only spoof within same major as runtime to avoid app bugs.
+        if (PXDebugFlag(@"debugStrictIOSVersionSysctlBynameSameMajor")) {
+            if (oldp && oldlenp) {
+                NSString *orig = [NSString stringWithUTF8String:originalValue];
+                NSInteger om = PXMajorFromDotVersion(orig);
+                NSInteger sm = PXMajorFromDotVersion(candidate);
+                if (om > 0 && sm > 0 && om != sm) {
+                    PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osproductversion.mismatch|%@|%@", bundleID, gen ?: @0],
+                                       [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osproductversion mismatch orig=%@ spoof=%@ bundle=%@ gen=%@", PXISO8601Now(), orig ?: @"", candidate ?: @"", bundleID ?: @"", gen ?: @""]);
+                    px_sysctlbyname_in_hook = NO;
+                    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+                }
+            }
+        }
         spoofedValue = candidate;
     }
     // Machine/Model spoofing
@@ -858,6 +952,18 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
         }
 
+        if (PXDebugFlag(@"debugStrictIOSVersionSysctlBynameCoherent")) {
+            NSString *reason = nil;
+            if (!PXIsCoherentIOSSpoofSet(deviceIds[@"IOSVersion"], deviceIds[@"IOSBuild"], deviceIds[@"Darwin"], &reason)) {
+                NSString *reqName = [NSString stringWithUTF8String:name];
+                PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|ios.coherence_mismatch|%@|%@|%@", bundleID, gen ?: @0, reqName ?: @""],
+                                   [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ coherence_mismatch reason=%@ ios=%@ build=%@ darwin=%@ bundle=%@ gen=%@",
+                                    PXISO8601Now(), reqName ?: @"", reason ?: @"", deviceIds[@"IOSVersion"] ?: @"", deviceIds[@"IOSBuild"] ?: @"", deviceIds[@"Darwin"] ?: @"", bundleID ?: @"", gen ?: @""]);
+                px_sysctlbyname_in_hook = NO;
+                return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+            }
+        }
+
         // Size-query: return spoofed required size and record it.
         if (!oldp) {
             NSString *reqName = [NSString stringWithUTF8String:name];
@@ -891,6 +997,24 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                 px_sysctlbyname_in_hook = NO;
                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
             }
+
+            if (PXDebugFlag(@"debugStrictIOSVersionSysctlBynameSameMajor")) {
+                char realBuf[64] = {0};
+                size_t realLen = sizeof(realBuf);
+                int rr = sysctlbyname_orig(name, realBuf, &realLen, NULL, 0);
+                if (rr == 0 && realLen > 1) {
+                    NSString *real = [NSString stringWithUTF8String:realBuf];
+                    NSInteger rm = (strcmp(name, "kern.osversion") == 0) ? PXMajorFromBuildString(real) : PXMajorFromDotVersion(real);
+                    NSInteger sm = (strcmp(name, "kern.osversion") == 0) ? PXMajorFromBuildString(spoofed) : PXMajorFromDotVersion(spoofed);
+                    if (rm > 0 && sm > 0 && rm != sm) {
+                        PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.major_mismatch|%@|%@|%@", bundleID, gen ?: @0, reqName ?: @""],
+                                           [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=%@ major_mismatch orig=%@ spoof=%@ bundle=%@ gen=%@", PXISO8601Now(), reqName ?: @"", real ?: @"", spoofed ?: @"", bundleID ?: @"", gen ?: @""]);
+                        px_sysctlbyname_in_hook = NO;
+                        return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+                    }
+                }
+            }
+
             size_t required = strlen([spoofed UTF8String]) + 1;
             *oldlenp = required;
             PXRecordSysctlSizeQuery(reqName, required);
@@ -921,6 +1045,17 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                 px_sysctlbyname_in_hook = NO;
                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
             }
+            if (PXDebugFlag(@"debugStrictIOSVersionSysctlBynameSameMajor")) {
+                NSString *real = [NSString stringWithUTF8String:originalValue];
+                NSInteger rm = PXMajorFromBuildString(real);
+                NSInteger sm = PXMajorFromBuildString(deviceIds[@"IOSBuild"]);
+                if (rm > 0 && sm > 0 && rm != sm) {
+                    PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.major_mismatch|%@|%@|kern.osversion", bundleID, gen ?: @0],
+                                       [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osversion major_mismatch orig=%@ spoof=%@ bundle=%@ gen=%@", PXISO8601Now(), real ?: @"", deviceIds[@"IOSBuild"] ?: @"", bundleID ?: @"", gen ?: @""]);
+                    px_sysctlbyname_in_hook = NO;
+                    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+                }
+            }
             PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osversion|%@|%@", bundleID, gen ?: @0],
                                [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osversion expected=%@ oldlen=%zu bundle=%@ gen=%@", PXISO8601Now(), expected ?: @0, (size_t)(oldlenp ? *oldlenp : 0), bundleID ?: @"", gen ?: @""]);
             spoofedValue = deviceIds[@"IOSBuild"];
@@ -934,6 +1069,17 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
                                    [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osrelease invalid value=%@ bundle=%@ gen=%@", PXISO8601Now(), deviceIds[@"Darwin"] ?: @"", bundleID ?: @"", gen ?: @""]);
                 px_sysctlbyname_in_hook = NO;
                 return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+            }
+            if (PXDebugFlag(@"debugStrictIOSVersionSysctlBynameSameMajor")) {
+                NSString *real = [NSString stringWithUTF8String:originalValue];
+                NSInteger rm = PXMajorFromDotVersion(real);
+                NSInteger sm = PXMajorFromDotVersion(deviceIds[@"Darwin"]);
+                if (rm > 0 && sm > 0 && rm != sm) {
+                    PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.major_mismatch|%@|%@|kern.osrelease", bundleID, gen ?: @0],
+                                       [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osrelease major_mismatch orig=%@ spoof=%@ bundle=%@ gen=%@", PXISO8601Now(), real ?: @"", deviceIds[@"Darwin"] ?: @"", bundleID ?: @"", gen ?: @""]);
+                    px_sysctlbyname_in_hook = NO;
+                    return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+                }
             }
             PXHookTraceLogOnce([NSString stringWithFormat:@"sysctlbyname|kern.osrelease|%@|%@", bundleID, gen ?: @0],
                                [NSString stringWithFormat:@"ts=%@ api=sysctlbyname req=kern.osrelease expected=%@ oldlen=%zu bundle=%@ gen=%@", PXISO8601Now(), expected ?: @0, (size_t)(oldlenp ? *oldlenp : 0), bundleID ?: @"", gen ?: @""]);
