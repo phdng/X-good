@@ -767,28 +767,57 @@ static NSDictionary *PXArtifactInfo(NSString *path, NSString *name) {
         }
 
         AppDataCleaner *cleaner = [AppDataCleaner sharedManager];
-        NSString *dataUUID = [cleaner findDataContainerUUIDForBundleID:bundleID];
-        if (!dataUUID.length) {
-            NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
-                                               code:303
-                                           userInfo:@{NSLocalizedDescriptionKey: @"Data container not found"}];
-            dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
-            return;
+
+        // Data container lookup:
+        // - Prefer current container UUID (handles reinstall/new UUID)
+        // - Fall back to manifest UUID if current lookup fails
+        NSString *manifestDataUUID = nil;
+        if ([manifest[@"data"] isKindOfClass:[NSDictionary class]] && [manifest[@"data"][@"uuid"] isKindOfClass:[NSString class]]) {
+            manifestDataUUID = manifest[@"data"][@"uuid"];
         }
 
+        NSString *currentDataUUID = [cleaner findDataContainerUUIDForBundleID:bundleID];
+        NSArray<NSString *> *uuidCandidates = @[
+            currentDataUUID ?: @"",
+            manifestDataUUID ?: @""
+        ];
+
+        NSString *dataUUID = nil;
         NSString *dataContainerPath = nil;
-        for (NSString *base in @[@"/var/mobile/Containers/Data/Application", @"/containers/Data/Application"]) {
-            NSString *p = [base stringByAppendingPathComponent:dataUUID];
+        NSArray<NSString *> *bases = @[@"/var/mobile/Containers/Data/Application", @"/containers/Data/Application", @"/private/var/mobile/Containers/Data/Application", @"/private/var/containers/Data/Application"]; 
+
+        // First, try the manifest's recorded containerPath (best effort)
+        if ([manifest[@"data"] isKindOfClass:[NSDictionary class]] && [manifest[@"data"][@"containerPath"] isKindOfClass:[NSString class]]) {
+            NSString *p = manifest[@"data"][@"containerPath"];
             BOOL isDir = NO;
-            if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
+            if (p.length && [fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
                 dataContainerPath = p;
-                break;
+                dataUUID = manifestDataUUID;
             }
         }
+
         if (!dataContainerPath) {
+            for (NSString *cand in uuidCandidates) {
+                if (!cand.length) continue;
+                for (NSString *base in bases) {
+                    NSString *p = [base stringByAppendingPathComponent:cand];
+                    BOOL isDir = NO;
+                    if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
+                        dataUUID = cand;
+                        dataContainerPath = p;
+                        break;
+                    }
+                }
+                if (dataContainerPath) break;
+            }
+        }
+
+        if (!dataUUID.length || !dataContainerPath.length) {
+            NSString *hint = @"Data container not found. Ensure the app is installed and launched at least once (to create its data container).";
+            NSString *detail = [NSString stringWithFormat:@"%@ (bundleID=%@ currentUUID=%@ manifestUUID=%@)", hint, bundleID, currentDataUUID ?: @"", manifestDataUUID ?: @""];
             NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
-                                               code:304
-                                           userInfo:@{NSLocalizedDescriptionKey: @"Data container path missing"}];
+                                               code:303
+                                           userInfo:@{NSLocalizedDescriptionKey: detail}];
             dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
             return;
         }
