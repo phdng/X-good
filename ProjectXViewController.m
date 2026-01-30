@@ -29,6 +29,52 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID);
 
 static NSString * const PXKeychainGroupsSavedNotification = @"com.hydra.projectx.keychainGroupsSaved";
 
+static UIImage *PXDrawCircleIcon(BOOL drawX, BOOL drawMinus) {
+    CGSize size = CGSizeMake(24, 24);
+    UIGraphicsBeginImageContextWithOptions(size, NO, 0.0);
+    CGContextRef ctx = UIGraphicsGetCurrentContext();
+    if (!ctx) {
+        return nil;
+    }
+
+    CGContextSetLineWidth(ctx, 2.0);
+    CGContextSetStrokeColorWithColor(ctx, [UIColor blackColor].CGColor);
+    CGRect circleRect = CGRectInset((CGRect){CGPointZero, size}, 2.0, 2.0);
+    CGContextStrokeEllipseInRect(ctx, circleRect);
+
+    if (drawX) {
+        CGContextMoveToPoint(ctx, 7.0, 7.0);
+        CGContextAddLineToPoint(ctx, 17.0, 17.0);
+        CGContextMoveToPoint(ctx, 17.0, 7.0);
+        CGContextAddLineToPoint(ctx, 7.0, 17.0);
+        CGContextStrokePath(ctx);
+    } else if (drawMinus) {
+        CGContextMoveToPoint(ctx, 7.0, 12.0);
+        CGContextAddLineToPoint(ctx, 17.0, 12.0);
+        CGContextStrokePath(ctx);
+    }
+
+    UIImage *img = UIGraphicsGetImageFromCurrentImageContext();
+    UIGraphicsEndImageContext();
+    return [img imageWithRenderingMode:UIImageRenderingModeAlwaysTemplate];
+}
+
+static UIImage *PXClearDataIcon(void) {
+    if (@available(iOS 13.0, *)) {
+        UIImage *img = [UIImage systemImageNamed:@"externaldrive.fill.badge.minus"];
+        if (img) return img;
+    }
+    return PXDrawCircleIcon(NO, YES);
+}
+
+static UIImage *PXRemoveFromScopeIcon(void) {
+    if (@available(iOS 13.0, *)) {
+        UIImage *img = [UIImage systemImageNamed:@"trash.slash.circle.fill"];
+        if (img) return img;
+    }
+    return PXDrawCircleIcon(YES, NO);
+}
+
 // Add missing methods via category
 @interface LSApplicationWorkspace (ProjectX)
 - (NSArray *)allInstalledApplications;
@@ -595,7 +641,7 @@ static NSString * const PXKeychainGroupsSavedNotification = @"com.hydra.projectx
     controlStack.spacing = 8;
     
     UIButton *deleteButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [deleteButton setImage:[UIImage systemImageNamed:@"trash.slash.circle.fill"] forState:UIControlStateNormal];
+    [deleteButton setImage:PXRemoveFromScopeIcon() forState:UIControlStateNormal];
     [deleteButton setTintColor:[UIColor systemRedColor]];
     deleteButton.tag = [self.appSwitches.allKeys indexOfObject:bundleID];
     [deleteButton addTarget:self action:@selector(deleteAppButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -611,7 +657,7 @@ static NSString * const PXKeychainGroupsSavedNotification = @"com.hydra.projectx
     
     // Add clear data button
     UIButton *clearDataButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    [clearDataButton setImage:[UIImage systemImageNamed:@"externaldrive.fill.badge.minus"] forState:UIControlStateNormal];
+    [clearDataButton setImage:PXClearDataIcon() forState:UIControlStateNormal];
     [clearDataButton setTintColor:[UIColor systemRedColor]];
     clearDataButton.tag = [self.appSwitches.allKeys indexOfObject:bundleID];
     [clearDataButton addTarget:self action:@selector(clearDataButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -1333,7 +1379,7 @@ static NSString * const PXKeychainGroupsSavedNotification = @"com.hydra.projectx
         infoLabel.font = [UIFont systemFontOfSize:12];
         [contentStack addArrangedSubview:infoLabel];
         
-        // Add delete button with trash icon
+        // Add delete button with icon
         UIStackView *controlStack = [[UIStackView alloc] init];
         controlStack.axis = UILayoutConstraintAxisHorizontal;
         controlStack.alignment = UIStackViewAlignmentCenter;
@@ -1341,7 +1387,7 @@ static NSString * const PXKeychainGroupsSavedNotification = @"com.hydra.projectx
         controlStack.spacing = 8;
         
         UIButton *deleteButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        [deleteButton setImage:[UIImage systemImageNamed:@"trash.slash.circle.fill"] forState:UIControlStateNormal];
+        [deleteButton setImage:PXRemoveFromScopeIcon() forState:UIControlStateNormal];
         [deleteButton setTintColor:[UIColor systemRedColor]];
         deleteButton.tag = [self.appSwitches.allKeys indexOfObject:bundleID];
         [deleteButton addTarget:self action:@selector(deleteAppButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
@@ -1357,7 +1403,7 @@ static NSString * const PXKeychainGroupsSavedNotification = @"com.hydra.projectx
         
         // Add clear data button
         UIButton *clearDataButton = [UIButton buttonWithType:UIButtonTypeSystem];
-        [clearDataButton setImage:[UIImage systemImageNamed:@"externaldrive.fill.badge.minus"] forState:UIControlStateNormal];
+        [clearDataButton setImage:PXClearDataIcon() forState:UIControlStateNormal];
         [clearDataButton setTintColor:[UIColor systemRedColor]];
         clearDataButton.tag = [self.appSwitches.allKeys indexOfObject:bundleID];
         [clearDataButton addTarget:self action:@selector(clearDataButtonTapped:) forControlEvents:UIControlEventTouchUpInside];
