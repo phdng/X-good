@@ -126,8 +126,14 @@ static BOOL PXContainerUUIDMatchesBundleID(NSFileManager *fm, NSString *baseDir,
     if (![fm fileExistsAtPath:containerPath isDirectory:&isDir] || !isDir) return NO;
     NSString *metadataPath = [containerPath stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
     NSDictionary *meta = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
-    NSString *ident = [meta isKindOfClass:[NSDictionary class]] ? meta[@"MCMMetadataIdentifier"] : nil;
-    return [ident isKindOfClass:[NSString class]] && [ident isEqualToString:bundleID];
+    id ident = [meta isKindOfClass:[NSDictionary class]] ? meta[@"MCMMetadataIdentifier"] : nil;
+    if ([ident isKindOfClass:[NSString class]]) {
+        return [(NSString *)ident isEqualToString:bundleID];
+    }
+    if ([ident isKindOfClass:[NSArray class]]) {
+        return [(NSArray *)ident containsObject:bundleID];
+    }
+    return NO;
 }
 
 static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *baseDir, NSString *bundleID) {
@@ -493,26 +499,43 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             return;
         }
 
-        AppDataCleaner *cleaner = [AppDataCleaner sharedManager];
-        NSString *dataUUID = [cleaner findDataContainerUUIDForBundleID:bundleID];
-        if (!dataUUID.length) {
-            NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
-                                               code:102
-                                           userInfo:@{NSLocalizedDescriptionKey: @"Data container not found"}];
-            dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
-            return;
-        }
-
+        // Prefer LaunchServices-reported container path (active container).
         NSString *dataContainerPath = nil;
-        for (NSString *base in @[@"/var/mobile/Containers/Data/Application", @"/containers/Data/Application"]) {
-            NSString *p = [base stringByAppendingPathComponent:dataUUID];
+        NSString *dataUUID = nil;
+        {
+            NSString *lsPath = PXDataContainerPathFromLaunchServices(bundleID);
             BOOL isDir = NO;
-            if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
-                dataContainerPath = p;
-                break;
+            if (lsPath.length && [fm fileExistsAtPath:lsPath isDirectory:&isDir] && isDir) {
+                dataContainerPath = lsPath;
+                dataUUID = lsPath.lastPathComponent;
             }
         }
+
         if (!dataContainerPath) {
+            AppDataCleaner *cleaner = [AppDataCleaner sharedManager];
+            NSString *uuid = [cleaner findDataContainerUUIDForBundleID:bundleID];
+            if (!uuid.length) {
+                NSString *lsPath = PXDataContainerPathFromLaunchServices(bundleID) ?: @"";
+                NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                   code:102
+                                               userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Data container not found (bundleID=%@ lsPath=%@)", bundleID, lsPath]}];
+                dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                return;
+            }
+            dataUUID = uuid;
+
+            NSArray<NSString *> *bases = @[@"/var/mobile/Containers/Data/Application", @"/private/var/mobile/Containers/Data/Application", @"/containers/Data/Application", @"/private/var/containers/Data/Application"]; 
+            for (NSString *base in bases) {
+                NSString *p = [base stringByAppendingPathComponent:uuid];
+                BOOL isDir = NO;
+                if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
+                    dataContainerPath = p;
+                    break;
+                }
+            }
+        }
+
+        if (!dataContainerPath.length) {
             NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
                                                code:103
                                            userInfo:@{NSLocalizedDescriptionKey: @"Data container path missing"}];
