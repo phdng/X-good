@@ -10,6 +10,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     return [NSString stringWithFormat:@"dataCleanerKeychainWipeGroups_%@", bundleID ?: @""];
 }
 
+static NSString * const PXKeychainGroupsSavedNotification = @"com.hydra.projectx.keychainGroupsSaved";
+
 @interface KeychainGroupsViewController () <UITableViewDelegate, UITableViewDataSource, UISearchBarDelegate>
 @property (nonatomic, copy) NSString *bundleID;
 @property (nonatomic, strong) NSUserDefaults *defaults;
@@ -155,9 +157,9 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     [self.defaults setObject:sorted forKey:PXKeychainWipeGroupsKey(self.bundleID)];
     [self.defaults synchronize];
 
-    if (self.onSave) {
-        self.onSave();
-    }
+    [[NSNotificationCenter defaultCenter] postNotificationName:PXKeychainGroupsSavedNotification
+                                                        object:nil
+                                                      userInfo:@{ @"bundleID": self.bundleID ?: @"" }];
     [self.navigationController popViewControllerAnimated:YES];
 }
 

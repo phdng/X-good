@@ -24,6 +24,11 @@
 #import <objc/runtime.h>
 #import "common/UIButton+SafeConfiguration.h"
 
+static NSString *PXKeychainWipeEnabledKey(NSString *bundleID);
+static NSString *PXKeychainWipeGroupsKey(NSString *bundleID);
+
+static NSString * const PXKeychainGroupsSavedNotification = @"com.hydra.projectx.keychainGroupsSaved";
+
 // Add missing methods via category
 @interface LSApplicationWorkspace (ProjectX)
 - (NSArray *)allInstalledApplications;
@@ -61,6 +66,10 @@
 @property (nonatomic, strong) NSArray *filteredVersions;
 @property (nonatomic, strong) NSDateFormatter *dateFormatter;
 @property (nonatomic, strong) NSCache *iconCache;
+@property (nonatomic, weak) UIButton *pendingClearDataSender;
+@property (nonatomic, copy) NSString *pendingClearDataBundleID;
+@property (nonatomic, copy) NSString *pendingClearDataSizeStr;
+@property (nonatomic, copy) NSString *pendingClearDataDetailsStr;
 @property (nonatomic, strong) NSArray *scopedApps;
 @property (nonatomic, strong) UIButton *scrollToBottomButton;
 
@@ -746,6 +755,11 @@
 
 - (void)viewDidLoad {
     [super viewDidLoad];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(handleKeychainGroupsSaved:)
+                                                 name:PXKeychainGroupsSavedNotification
+                                               object:nil];
     
     // Add iPad-specific layout adaptations
     if (UIDevice.currentDevice.userInterfaceIdiom == UIUserInterfaceIdiomPad) {
@@ -2714,6 +2728,32 @@
     });
 }
 
+- (void)handleKeychainGroupsSaved:(NSNotification *)note {
+    NSString *bundleID = nil;
+    if ([note.userInfo[@"bundleID"] isKindOfClass:[NSString class]]) {
+        bundleID = note.userInfo[@"bundleID"];
+    }
+    if (!bundleID.length) return;
+    if (!self.pendingClearDataBundleID.length || ![bundleID isEqualToString:self.pendingClearDataBundleID]) {
+        return;
+    }
+    if (!self.pendingClearDataSender) {
+        return;
+    }
+    NSString *sizeStr = self.pendingClearDataSizeStr ?: @"";
+    NSString *detailsStr = self.pendingClearDataDetailsStr ?: @"";
+    UIButton *sender = self.pendingClearDataSender;
+
+    self.pendingClearDataBundleID = nil;
+    self.pendingClearDataSender = nil;
+    self.pendingClearDataSizeStr = nil;
+    self.pendingClearDataDetailsStr = nil;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        [self presentClearDataAlertForBundleID:bundleID sender:sender dataSizeStr:sizeStr dataDetailsStr:detailsStr];
+    });
+}
+
 - (void)presentClearDataAlertForBundleID:(NSString *)bundleID
                                  sender:(UIButton *)sender
                              dataSizeStr:(NSString *)dataSizeStr
@@ -2780,11 +2820,10 @@
                                                          style:UIAlertActionStyleDefault
                                                        handler:^(__unused UIAlertAction *action) {
         KeychainGroupsViewController *vc = [[KeychainGroupsViewController alloc] initWithBundleID:bundleID];
-        vc.onSave = ^{
-            dispatch_async(dispatch_get_main_queue(), ^{
-                [weakSelf presentClearDataAlertForBundleID:bundleID sender:sender dataSizeStr:dataSizeStr dataDetailsStr:dataDetailsStr];
-            });
-        };
+        weakSelf.pendingClearDataBundleID = bundleID;
+        weakSelf.pendingClearDataSender = sender;
+        weakSelf.pendingClearDataSizeStr = dataSizeStr;
+        weakSelf.pendingClearDataDetailsStr = dataDetailsStr;
         [weakSelf.navigationController pushViewController:vc animated:YES];
     }];
     [alert addAction:groupsAction];

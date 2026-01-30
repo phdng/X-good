@@ -4,6 +4,4 @@
 
 - (instancetype)initWithBundleID:(NSString *)bundleID;
 
-@property (nonatomic, copy) void (^onSave)(void);
-
 @end
