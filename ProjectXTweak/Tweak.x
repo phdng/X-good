@@ -78,6 +78,38 @@ BOOL gOwnerCFSystemInstalled = NO;
 // Missing-key logging
 static NSMutableSet *gMissingLogSeen = nil;
 
+// Security settings helpers
+static id PXReadSecuritySettingObject(NSString *key) {
+    if (!key.length) return nil;
+    NSArray<NSString *> *paths = @[
+        @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
+        @"/private/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist"
+    ];
+    for (NSString *path in paths) {
+        NSDictionary *dict = [NSDictionary dictionaryWithContentsOfFile:path];
+        if (dict && dict[key] != nil) {
+            return dict[key];
+        }
+    }
+    NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+    return [securitySettings objectForKey:key];
+}
+
+static BOOL PXReadSecuritySettingBool(NSString *key) {
+    id v = PXReadSecuritySettingObject(key);
+    return v ? [v boolValue] : NO;
+}
+
+static BOOL PXFixVersionAppliesToBundle(NSString *bundleID) {
+    if (!bundleID.length) return NO;
+    if (!PXReadSecuritySettingBool(@"fixVersionEnabled")) return NO;
+    id list = PXReadSecuritySettingObject(@"fixVersionApps");
+    if ([list isKindOfClass:[NSArray class]]) {
+        return [(NSArray *)list containsObject:bundleID];
+    }
+    return NO;
+}
+
 static NSString *PXHookMissingLogPath(void) {
     NSArray<NSString *> *dirs = @[
         @"/var/mobile/Library/WeaponX/Logs",
@@ -533,14 +565,20 @@ static int sysctlbyname_hook(const char *name, void *oldp, size_t *oldlenp, void
         return r;
     }
 
-    // NEW: kern.osproductversion - Critical for Facebook
-     if (strcmp(name, "kern.osproductversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
-         if (!PXRequireKeysAll(deviceIds, @[@"IOSVersion"], @"sysctlbyname", @"kern.osproductversion", bundleID, profileId, gen)) {
-             px_sysctlbyname_in_hook = NO;
-             return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
-         }
-         spoofedValue = deviceIds[@"IOSVersion"];
-     }
+     // NEW: kern.osproductversion - Critical for Facebook
+      if (strcmp(name, "kern.osproductversion") == 0 && [manager isIdentifierEnabled:@"IOSVersion"]) {
+          // Fix Version (runtime-capped): for selected apps, always return runtime value to avoid crashes.
+          if (PXFixVersionAppliesToBundle(bundleID)) {
+              px_sysctlbyname_in_hook = NO;
+              return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+          }
+
+          if (!PXRequireKeysAll(deviceIds, @[@"IOSVersion"], @"sysctlbyname", @"kern.osproductversion", bundleID, profileId, gen)) {
+              px_sysctlbyname_in_hook = NO;
+              return sysctlbyname_orig(name, oldp, oldlenp, newp, newlen);
+          }
+          spoofedValue = deviceIds[@"IOSVersion"];
+      }
     // Machine/Model spoofing
     else if (strcmp(name, "hw.machine") == 0 && [manager isIdentifierEnabled:@"DeviceModel"]) {
         if (!PXRequireKeysAll(deviceIds, @[@"DeviceModel"], @"sysctlbyname", @"hw.machine", bundleID, profileId, gen)) {

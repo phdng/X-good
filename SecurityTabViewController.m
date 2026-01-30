@@ -1,4 +1,5 @@
 #import "SecurityTabViewController.h"
+#import "FixVersionAppsViewController.h"
 #import "ProjectXLogging.h"
 #import "IdentifierManager.h"
 #import "AppVersionSpoofingViewController.h"
@@ -667,7 +668,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:770],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:890],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -1188,6 +1189,11 @@
     UITapGestureRecognizer *tapGesture = [[UITapGestureRecognizer alloc] initWithTarget:self action:@selector(dismissKeyboard)];
     tapGesture.cancelsTouchesInView = NO;
     [self.view addGestureRecognizer:tapGesture];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(fixVersionAppsChanged:)
+                                                 name:@"com.hydra.projectx.fixVersionAppsChanged"
+                                               object:nil];
     
     // Create scroll view container
     UIScrollView *scrollView = [[UIScrollView alloc] init];
@@ -1235,6 +1241,9 @@
     
     // Add App Version Spoofing control
     [self setupAppVersionSpoofingControl:contentView];
+
+    // Fix Version (runtime-capped) control
+    [self setupFixVersionControl:contentView];
     
     // Add Domain Blocking control
     [self setupDomainBlockingControl:contentView];
@@ -1255,6 +1264,10 @@
     
     // Add HYDRA copyright at bottom
     [self setupCopyrightLabel:contentView];
+}
+
+- (void)fixVersionAppsChanged:(NSNotification *)note {
+    [self refreshFixVersionAppsButtonTitle];
 }
 
 - (void)setupMatrixControl:(UIView *)contentView {
@@ -2574,7 +2587,7 @@
 
     // Position above Setup Alert Checks (e.g., top: 790)
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:920],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1040],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:60],
@@ -2774,7 +2787,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1230],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1350],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:140],
@@ -2981,7 +2994,7 @@
     [NSLayoutConstraint activateConstraints:@[
         [self.copyrightLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
         [self.copyrightLabel.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
-        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1670], // Positioned after Canvas Fingerprinting (1530 + 120 + 20)
+        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1790], // Positioned after Canvas Fingerprinting
         [self.copyrightLabel.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-30] // More bottom padding
     ]];
     
@@ -3542,6 +3555,181 @@
     ]];
 }
 
+- (void)setupFixVersionControl:(UIView *)contentView {
+    UIVisualEffectView *controlView = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialLight]];
+    controlView.layer.cornerRadius = 20;
+    controlView.clipsToBounds = YES;
+    controlView.alpha = 0.8;
+    controlView.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:controlView];
+
+    self.fixVersionLabel = [[UILabel alloc] init];
+    self.fixVersionLabel.text = @"Fix Version";
+    self.fixVersionLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    self.fixVersionLabel.textColor = [UIColor labelColor];
+    self.fixVersionLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:self.fixVersionLabel];
+
+    UIView *infoBgView = [[UIView alloc] init];
+    infoBgView.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
+    infoBgView.layer.cornerRadius = 12;
+    infoBgView.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:infoBgView];
+
+    UIButton *infoButton = [UIButton buttonWithType:UIButtonTypeInfoLight];
+    infoButton.tintColor = [UIColor systemBlueColor];
+    infoButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [infoButton addTarget:self action:@selector(showFixVersionInfo) forControlEvents:UIControlEventTouchUpInside];
+    [infoBgView addSubview:infoButton];
+
+    UIView *bottomRowContainer = [[UIView alloc] init];
+    bottomRowContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:bottomRowContainer];
+
+    UIView *wrenchBgView = [[UIView alloc] init];
+    wrenchBgView.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
+    wrenchBgView.layer.cornerRadius = 12;
+    wrenchBgView.translatesAutoresizingMaskIntoConstraints = NO;
+    [bottomRowContainer addSubview:wrenchBgView];
+
+    UIImageView *wrenchIconView = [[UIImageView alloc] init];
+    wrenchIconView.image = [UIImage systemImageNamed:@"wrench.and.screwdriver"];
+    wrenchIconView.tintColor = [UIColor systemBlueColor];
+    wrenchIconView.contentMode = UIViewContentModeScaleAspectFit;
+    wrenchIconView.translatesAutoresizingMaskIntoConstraints = NO;
+    [wrenchBgView addSubview:wrenchIconView];
+
+    self.fixVersionAppsButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    if ([UIButton buttonConfigurationClassExists]) {
+        UIButtonConfiguration *config = [UIButtonConfiguration filledButtonConfiguration];
+        config.title = @"Apps";
+        config.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *attributes) {
+            NSMutableDictionary *newAttributes = [attributes mutableCopy];
+            [newAttributes setObject:[UIFont systemFontOfSize:14 weight:UIFontWeightSemibold] forKey:NSFontAttributeName];
+            return newAttributes;
+        };
+        config.contentInsets = NSDirectionalEdgeInsetsMake(4, 12, 4, 12);
+        config.background.backgroundColor = [UIColor systemBlueColor];
+        config.cornerStyle = UIButtonConfigurationCornerStyleMedium;
+        config.baseForegroundColor = [UIColor whiteColor];
+        [self.fixVersionAppsButton safeSetConfiguration:config];
+    } else {
+        [self.fixVersionAppsButton setTitle:@"Apps" forState:UIControlStateNormal];
+        self.fixVersionAppsButton.titleLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+        self.fixVersionAppsButton.backgroundColor = [UIColor systemBlueColor];
+        self.fixVersionAppsButton.layer.cornerRadius = 15;
+        self.fixVersionAppsButton.tintColor = [UIColor whiteColor];
+        #pragma clang diagnostic push
+        #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+        self.fixVersionAppsButton.contentEdgeInsets = UIEdgeInsetsMake(4, 12, 4, 12);
+        #pragma clang diagnostic pop
+    }
+    self.fixVersionAppsButton.layer.shadowColor = [UIColor blackColor].CGColor;
+    self.fixVersionAppsButton.layer.shadowOffset = CGSizeMake(0, 1);
+    self.fixVersionAppsButton.layer.shadowOpacity = 0.2;
+    self.fixVersionAppsButton.layer.shadowRadius = 2;
+    self.fixVersionAppsButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.fixVersionAppsButton addTarget:self action:@selector(fixVersionAppsTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [bottomRowContainer addSubview:self.fixVersionAppsButton];
+
+    self.fixVersionToggleSwitch = [[UISwitch alloc] init];
+    self.fixVersionToggleSwitch.onTintColor = [UIColor systemBlueColor];
+    self.fixVersionToggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    BOOL enabled = [self.securitySettings boolForKey:@"fixVersionEnabled"];
+    [self.fixVersionToggleSwitch setOn:enabled animated:NO];
+    [self.fixVersionToggleSwitch addTarget:self action:@selector(fixVersionToggleChanged:) forControlEvents:UIControlEventValueChanged];
+    [bottomRowContainer addSubview:self.fixVersionToggleSwitch];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:770],
+        [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
+        [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
+        [controlView.heightAnchor constraintEqualToConstant:100],
+
+        [self.fixVersionLabel.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
+        [self.fixVersionLabel.topAnchor constraintEqualToAnchor:controlView.contentView.topAnchor constant:15],
+
+        [infoBgView.leadingAnchor constraintEqualToAnchor:self.fixVersionLabel.trailingAnchor constant:10],
+        [infoBgView.centerYAnchor constraintEqualToAnchor:self.fixVersionLabel.centerYAnchor],
+        [infoBgView.widthAnchor constraintEqualToConstant:24],
+        [infoBgView.heightAnchor constraintEqualToConstant:24],
+
+        [infoButton.centerXAnchor constraintEqualToAnchor:infoBgView.centerXAnchor],
+        [infoButton.centerYAnchor constraintEqualToAnchor:infoBgView.centerYAnchor],
+
+        [bottomRowContainer.centerXAnchor constraintEqualToAnchor:controlView.contentView.centerXAnchor],
+        [bottomRowContainer.topAnchor constraintEqualToAnchor:self.fixVersionLabel.bottomAnchor constant:15],
+        [bottomRowContainer.heightAnchor constraintEqualToConstant:30],
+
+        [wrenchBgView.leadingAnchor constraintEqualToAnchor:bottomRowContainer.leadingAnchor],
+        [wrenchBgView.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
+        [wrenchBgView.widthAnchor constraintEqualToConstant:24],
+        [wrenchBgView.heightAnchor constraintEqualToConstant:24],
+
+        [wrenchIconView.centerXAnchor constraintEqualToAnchor:wrenchBgView.centerXAnchor],
+        [wrenchIconView.centerYAnchor constraintEqualToAnchor:wrenchBgView.centerYAnchor],
+        [wrenchIconView.widthAnchor constraintEqualToConstant:16],
+        [wrenchIconView.heightAnchor constraintEqualToConstant:16],
+
+        [self.fixVersionAppsButton.leadingAnchor constraintEqualToAnchor:wrenchBgView.trailingAnchor constant:10],
+        [self.fixVersionAppsButton.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
+        [self.fixVersionAppsButton.widthAnchor constraintEqualToConstant:120],
+        [self.fixVersionAppsButton.heightAnchor constraintEqualToConstant:30],
+
+        [self.fixVersionToggleSwitch.leadingAnchor constraintEqualToAnchor:self.fixVersionAppsButton.trailingAnchor constant:10],
+        [self.fixVersionToggleSwitch.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
+        [self.fixVersionToggleSwitch.trailingAnchor constraintEqualToAnchor:bottomRowContainer.trailingAnchor]
+    ]];
+
+    [self refreshFixVersionAppsButtonTitle];
+}
+
+- (void)showFixVersionInfo {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Fix Version"
+                                                                   message:@"Runtime-capped OS version for selected apps.\n\nIf an app crashes when kern.osproductversion is spoofed, enable Fix Version and add that app to the list."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)fixVersionToggleChanged:(UISwitch *)sender {
+    BOOL enabled = sender.isOn;
+    [self.securitySettings setBool:enabled forKey:@"fixVersionEnabled"];
+    [self.securitySettings synchronize];
+
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"com.hydra.projectx.fixVersionChanged"
+                                                        object:nil
+                                                      userInfo:@{ @"enabled": @(enabled) }];
+
+    UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [generator prepare];
+    [generator impactOccurred];
+}
+
+- (void)fixVersionAppsTapped:(UIButton *)sender {
+    UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [generator prepare];
+    [generator impactOccurred];
+
+    FixVersionAppsViewController *vc = [[FixVersionAppsViewController alloc] init];
+    [self.navigationController pushViewController:vc animated:YES];
+}
+
+- (void)refreshFixVersionAppsButtonTitle {
+    NSArray *apps = [self.securitySettings objectForKey:@"fixVersionApps"];
+    NSUInteger count = [apps isKindOfClass:[NSArray class]] ? [(NSArray *)apps count] : 0;
+    NSString *title = (count > 0) ? [NSString stringWithFormat:@"Apps (%lu)", (unsigned long)count] : @"Apps";
+    if ([UIButton buttonConfigurationClassExists]) {
+        if (self.fixVersionAppsButton.configuration) {
+            UIButtonConfiguration *config = [self.fixVersionAppsButton.configuration copy];
+            config.title = title;
+            [self.fixVersionAppsButton setConfiguration:config];
+            return;
+        }
+    }
+    [self.fixVersionAppsButton setTitle:title forState:UIControlStateNormal];
+}
+
 - (void)showAppVersionSpoofingInfo {
     UIAlertController *alert = [UIAlertController 
                                alertControllerWithTitle:@"APP Specific Version Spoofing"
@@ -3661,6 +3849,7 @@
 }
 
 - (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
     [self.timeUpdateTimer invalidate];
     self.timeUpdateTimer = nil;
 }
@@ -4050,7 +4239,7 @@
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
         // Control view
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1390], // Position between App Version Spoofing and Canvas Fingerprinting
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1510], // Position between App Version Spoofing and Canvas Fingerprinting
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -4226,7 +4415,7 @@
     
     // Position control between Domain Blocking and Copyright label
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1530], // Moved down to be below Domain Blocking
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1650], // Moved down to be below Domain Blocking
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],

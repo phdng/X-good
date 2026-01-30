@@ -67,6 +67,11 @@
 @property (nonatomic, strong) UISwitch *appVersionSpoofingToggleSwitch;
 @property (nonatomic, strong) UIButton *appVersionSpoofingAccessButton;
 
+// Fix Version (runtime-capped) control
+@property (nonatomic, strong) UILabel *fixVersionLabel;
+@property (nonatomic, strong) UISwitch *fixVersionToggleSwitch;
+@property (nonatomic, strong) UIButton *fixVersionAppsButton;
+
 // Canvas fingerprinting protection control
 @property (nonatomic, strong) UILabel *canvasFingerprintingLabel;
 @property (nonatomic, strong) UISwitch *canvasFingerprintingToggleSwitch;
@@ -96,6 +101,7 @@
 - (void)setupNetworkConnectionTypeControl:(UIView *)contentView;
 - (void)setupDeviceSpecificSpoofingControl:(UIView *)contentView;
 - (void)setupAppVersionSpoofingControl:(UIView *)contentView;
+- (void)setupFixVersionControl:(UIView *)contentView;
 - (void)setupCanvasFingerprintingControl:(UIView *)contentView;
 - (void)setupAlertChecksSection:(UIView *)contentView;
 - (void)setupCopyrightLabel:(UIView *)contentView;
