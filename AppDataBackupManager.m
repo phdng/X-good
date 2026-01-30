@@ -1,6 +1,7 @@
 #import "AppDataBackupManager.h"
 
 #import <UIKit/UIKit.h>
+#import <objc/message.h>
 
 #import "AppDataCleaner.h"
 #import "FreezeManager.h"
@@ -39,6 +40,35 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
     NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"].invertedSet;
     NSString *out = [[s componentsSeparatedByCharactersInSet:allowed] componentsJoinedByString:@"_"];
     return out.length ? out : @"unknown";
+}
+
+static NSString *PXDataContainerPathFromLaunchServices(NSString *bundleID) {
+    if (!bundleID.length) return nil;
+    Class LSApplicationProxyClass = NSClassFromString(@"LSApplicationProxy");
+    if (!LSApplicationProxyClass) return nil;
+
+    SEL sel = NSSelectorFromString(@"applicationProxyForIdentifier:");
+    if (![LSApplicationProxyClass respondsToSelector:sel]) return nil;
+
+    id proxy = ((id (*)(id, SEL, id))objc_msgSend)(LSApplicationProxyClass, sel, bundleID);
+    if (!proxy) return nil;
+
+    id url = nil;
+    @try {
+        url = [proxy valueForKey:@"dataContainerURL"]; 
+        if (!url) {
+            url = [proxy valueForKey:@"containerURL"]; 
+        }
+    } @catch (__unused NSException *e) {
+        url = nil;
+    }
+    if ([url isKindOfClass:[NSURL class]]) {
+        return [(NSURL *)url path];
+    }
+    if ([url isKindOfClass:[NSString class]]) {
+        return (NSString *)url;
+    }
+    return nil;
 }
 
 static NSString *PXBackupKeychainGroupsKey(NSString *bundleID) {
@@ -806,6 +836,16 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
         NSString *dataUUID = nil;
         NSString *dataContainerPath = nil;
 
+        // Prefer LaunchServices-reported container path (most reliable for the *active* container).
+        {
+            NSString *lsPath = PXDataContainerPathFromLaunchServices(bundleID);
+            BOOL isDir = NO;
+            if (lsPath.length && [fm fileExistsAtPath:lsPath isDirectory:&isDir] && isDir) {
+                dataContainerPath = lsPath;
+                dataUUID = lsPath.lastPathComponent;
+            }
+        }
+
         NSArray<NSString *> *bases = @[
             @"/var/mobile/Containers/Data/Application",
             @"/private/var/mobile/Containers/Data/Application",
@@ -814,7 +854,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
         ];
 
         // 1) If we have a current UUID, only accept it if metadata matches bundleID.
-        if (currentDataUUID.length) {
+        if (!dataContainerPath && currentDataUUID.length) {
             for (NSString *base in bases) {
                 if (PXContainerUUIDMatchesBundleID(fm, base, currentDataUUID, bundleID)) {
                     dataUUID = currentDataUUID;
@@ -850,7 +890,8 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
 
         if (!dataUUID.length || !dataContainerPath.length) {
             NSString *hint = @"Data container not found. Ensure the app is installed and launched at least once (to create its data container).";
-            NSString *detail = [NSString stringWithFormat:@"%@ (bundleID=%@ currentUUID=%@ manifestUUID=%@)", hint, bundleID, currentDataUUID ?: @"", manifestDataUUID ?: @""];
+            NSString *lsPath = PXDataContainerPathFromLaunchServices(bundleID) ?: @"";
+            NSString *detail = [NSString stringWithFormat:@"%@ (bundleID=%@ lsPath=%@ currentUUID=%@ manifestUUID=%@)", hint, bundleID, lsPath, currentDataUUID ?: @"", manifestDataUUID ?: @""];
             NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
                                                code:303
                                            userInfo:@{NSLocalizedDescriptionKey: detail}];
