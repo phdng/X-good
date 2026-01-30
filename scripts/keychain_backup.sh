@@ -863,23 +863,6 @@ ACTION="$1"
 BUNDLE_ID="$2"
 shift 2
 
-# Parse action options
-while [[ "$1" == --* ]]; do
-    case "$1" in
-        --groups)
-            OVERRIDE_KEYCHAIN_GROUPS="$2"
-            shift 2
-            ;;
-        --groups=*)
-            OVERRIDE_KEYCHAIN_GROUPS="${1#*=}"
-            shift 1
-            ;;
-        *)
-            break
-            ;;
-    esac
-done
-
 case "$ACTION" in
     backup)
         if [ -z "$1" ]; then
@@ -887,7 +870,25 @@ case "$ACTION" in
             print_usage
             exit 1
         fi
-        do_backup "$BUNDLE_ID" "$1" "$OVERRIDE_KEYCHAIN_GROUPS"
+        shift_file="$1"
+        shift
+        # Parse optional args after required ones
+        while [[ "$1" == --* ]]; do
+            case "$1" in
+                --groups)
+                    OVERRIDE_KEYCHAIN_GROUPS="$2"
+                    shift 2
+                    ;;
+                --groups=*)
+                    OVERRIDE_KEYCHAIN_GROUPS="${1#*=}"
+                    shift 1
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
+        do_backup "$BUNDLE_ID" "$shift_file" "$OVERRIDE_KEYCHAIN_GROUPS"
         ;;
     restore)
         if [ -z "$1" ]; then
@@ -895,12 +896,66 @@ case "$ACTION" in
             print_usage
             exit 1
         fi
-        do_restore "$BUNDLE_ID" "$1" "$2" "$OVERRIDE_KEYCHAIN_GROUPS"
+        shift_file="$1"
+        shift
+        # Next arg may be --overwrite
+        restore_overwrite="$1"
+        if [ "$restore_overwrite" = "--overwrite" ]; then
+            shift
+        else
+            restore_overwrite=""
+        fi
+        while [[ "$1" == --* ]]; do
+            case "$1" in
+                --groups)
+                    OVERRIDE_KEYCHAIN_GROUPS="$2"
+                    shift 2
+                    ;;
+                --groups=*)
+                    OVERRIDE_KEYCHAIN_GROUPS="${1#*=}"
+                    shift 1
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
+        do_restore "$BUNDLE_ID" "$shift_file" "$restore_overwrite" "$OVERRIDE_KEYCHAIN_GROUPS"
         ;;
     wipe)
+        while [[ "$1" == --* ]]; do
+            case "$1" in
+                --groups)
+                    OVERRIDE_KEYCHAIN_GROUPS="$2"
+                    shift 2
+                    ;;
+                --groups=*)
+                    OVERRIDE_KEYCHAIN_GROUPS="${1#*=}"
+                    shift 1
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
         do_wipe "$BUNDLE_ID" "$OVERRIDE_KEYCHAIN_GROUPS"
         ;;
     list)
+        while [[ "$1" == --* ]]; do
+            case "$1" in
+                --groups)
+                    OVERRIDE_KEYCHAIN_GROUPS="$2"
+                    shift 2
+                    ;;
+                --groups=*)
+                    OVERRIDE_KEYCHAIN_GROUPS="${1#*=}"
+                    shift 1
+                    ;;
+                *)
+                    break
+                    ;;
+            esac
+        done
         do_list "$BUNDLE_ID" "$OVERRIDE_KEYCHAIN_GROUPS"
         ;;
     *)

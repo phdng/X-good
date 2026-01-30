@@ -231,7 +231,15 @@ static NSDictionary *PXArtifactInfo(NSString *path, NSString *name) {
     
     CommandResult *res = [runner runAndCapture:cmd];
     if (res.exitCode != 0) {
-        NSString *msg = res.stderrString.length ? res.stderrString : @"Keychain backup failed";
+        NSString *stderrMsg = res.stderrString.length ? res.stderrString : @"";
+        NSString *stdoutMsg = res.stdoutString.length ? res.stdoutString : @"";
+        NSMutableString *msg = [NSMutableString stringWithString:@"Keychain backup failed"]; 
+        if (stderrMsg.length) {
+            [msg appendFormat:@"\nstderr: %@", stderrMsg];
+        }
+        if (stdoutMsg.length) {
+            [msg appendFormat:@"\nstdout: %@", stdoutMsg];
+        }
         [warnings addObject:[NSString stringWithFormat:@"Keychain backup: %@", msg]];
         return NO;
     }
@@ -266,8 +274,27 @@ static NSDictionary *PXArtifactInfo(NSString *path, NSString *name) {
                      groupsArg];
     
     CommandResult *res = [runner runAndCapture:cmd];
+    // Store last keychain restore output for debugging
+    NSDictionary *report = @{
+        @"bundleID": bundleID ?: @"",
+        @"groups": groups ?: @[],
+        @"cmd": cmd ?: @"",
+        @"exitCode": @(res.exitCode),
+        @"stdout": res.stdoutString ?: @"",
+        @"stderr": res.stderrString ?: @"",
+    };
+    [[NSUserDefaults standardUserDefaults] setObject:report forKey:[NSString stringWithFormat:@"PXKeychainRestoreResult_%@", bundleID]];
+    [[NSUserDefaults standardUserDefaults] synchronize];
     if (res.exitCode != 0) {
-        NSString *msg = res.stderrString.length ? res.stderrString : @"Keychain restore failed";
+        NSString *stderrMsg = res.stderrString.length ? res.stderrString : @"";
+        NSString *stdoutMsg = res.stdoutString.length ? res.stdoutString : @"";
+        NSMutableString *msg = [NSMutableString stringWithString:@"Keychain restore failed"]; 
+        if (stderrMsg.length) {
+            [msg appendFormat:@"\nstderr: %@", stderrMsg];
+        }
+        if (stdoutMsg.length) {
+            [msg appendFormat:@"\nstdout: %@", stdoutMsg];
+        }
         [warnings addObject:[NSString stringWithFormat:@"Keychain restore: %@", msg]];
         return NO;
     }
@@ -859,10 +886,21 @@ static NSDictionary *PXArtifactInfo(NSString *path, NSString *name) {
                               PXShellQuote(dataContainerPath)];
         CommandResult *cloneRes = [runner runAndCapture:cloneCmd];
         if (cloneRes.exitCode != 0) {
-            NSString *fallbackCmd = [NSString stringWithFormat:@"cp -a %@/. %@/ 2>/dev/null || true",
+            NSString *fallbackCmd = [NSString stringWithFormat:@"cp -a %@/. %@/ 2>/dev/null",
                                      PXShellQuote(stagingData),
                                      PXShellQuote(dataContainerPath)];
-            [runner runAndCapture:fallbackCmd];
+            CommandResult *cpRes = [runner runAndCapture:fallbackCmd];
+            if (cpRes.exitCode != 0) {
+                NSString *msg = cloneRes.stderrString.length ? cloneRes.stderrString : @"tar pipe clone failed";
+                if (cpRes.stderrString.length) {
+                    msg = [msg stringByAppendingFormat:@"; cp: %@", cpRes.stderrString];
+                }
+                NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                   code:317
+                                               userInfo:@{NSLocalizedDescriptionKey: msg}];
+                dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                return;
+            }
         }
 
         [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]];

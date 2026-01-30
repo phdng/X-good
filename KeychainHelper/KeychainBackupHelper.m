@@ -292,8 +292,8 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
 #pragma mark - Restore
 
 + (PXKeychainBackupResult *)restoreKeychainFromFile:(NSString *)filePath
-                                          overwrite:(BOOL)overwrite
-                                              error:(NSError **)error {
+                                           overwrite:(BOOL)overwrite
+                                               error:(NSError **)error {
     if (!filePath.length) {
         if (error) {
             *error = [NSError errorWithDomain:PXKeychainBackupErrorDomain
@@ -343,6 +343,39 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
     NSMutableArray<NSString *> *warnings = [NSMutableArray array];
     NSMutableArray<NSString *> *errors = [NSMutableArray array];
     NSSet<NSString *> *excluded = PXExcludedRestoreAttributes();
+
+    // If overwrite, wipe target groups/classes up-front to avoid duplicate items
+    // due to incomplete per-item delete queries.
+    if (overwrite) {
+        NSArray<NSString *> *groups = [backup[@"accessGroups"] isKindOfClass:[NSArray class]] ? backup[@"accessGroups"] : @[];
+        NSMutableSet *classes = [NSMutableSet set];
+        for (NSDictionary *item in items) {
+            if (![item isKindOfClass:[NSDictionary class]]) continue;
+            id secClassValue = item[@"_secClass"];
+            if (secClassValue) {
+                [classes addObject:secClassValue];
+            }
+        }
+
+        for (NSString *group in groups) {
+            if (![group isKindOfClass:[NSString class]] || group.length == 0) continue;
+            for (id secClassValue in classes) {
+                if (!secClassValue) continue;
+                NSMutableDictionary *q = [NSMutableDictionary dictionary];
+                q[(__bridge id)kSecClass] = secClassValue;
+                q[(__bridge id)kSecAttrAccessGroup] = group;
+                // Include synchronizable items too.
+                q[(__bridge id)kSecAttrSynchronizable] = (__bridge id)kSecAttrSynchronizableAny;
+                OSStatus st = SecItemDelete((__bridge CFDictionaryRef)q);
+                if (st != errSecSuccess && st != errSecItemNotFound) {
+                    [warnings addObject:[NSString stringWithFormat:@"Pre-wipe failed for %@/%@: %@",
+                                         group,
+                                         secClassValue,
+                                         PXSecurityErrorDescription(st)]];
+                }
+            }
+        }
+    }
     
     for (NSDictionary *item in items) {
         if (![item isKindOfClass:[NSDictionary class]]) continue;
@@ -389,26 +422,13 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
             }
         }
         
-        // If overwrite mode, delete existing item first.
-        if (overwrite) {
-            NSMutableDictionary *deleteQuery = [NSMutableDictionary dictionary];
-            deleteQuery[(__bridge id)kSecClass] = secClassValue;
-            
-            // Use unique identifiers for deletion.
-            if (addQuery[(__bridge id)kSecAttrAccount]) {
-                deleteQuery[(__bridge id)kSecAttrAccount] = addQuery[(__bridge id)kSecAttrAccount];
-            }
-            if (addQuery[(__bridge id)kSecAttrService]) {
-                deleteQuery[(__bridge id)kSecAttrService] = addQuery[(__bridge id)kSecAttrService];
-            }
-            if (addQuery[(__bridge id)kSecAttrAccessGroup]) {
-                deleteQuery[(__bridge id)kSecAttrAccessGroup] = addQuery[(__bridge id)kSecAttrAccessGroup];
-            }
-            
-            SecItemDelete((__bridge CFDictionaryRef)deleteQuery);
-        }
+        // If overwrite mode, we already performed a group-wide pre-wipe.
         
         // Add the item.
+        // Ensure we can restore synchronizable items.
+        if (addQuery[(__bridge id)kSecAttrSynchronizable]) {
+            // Nothing else to do; keep value as-is.
+        }
         OSStatus status = SecItemAdd((__bridge CFDictionaryRef)addQuery, NULL);
         
         if (status == errSecSuccess) {
@@ -418,8 +438,14 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
                                addQuery[(__bridge id)kSecAttrAccount] ?: @"unknown"]];
             result.itemsFailed++;
         } else {
-            [errors addObject:[NSString stringWithFormat:@"Failed to add item: %@", 
-                             PXSecurityErrorDescription(status)]];
+            NSString *acct = addQuery[(__bridge id)kSecAttrAccount];
+            NSString *svc = addQuery[(__bridge id)kSecAttrService];
+            NSString *grp = addQuery[(__bridge id)kSecAttrAccessGroup];
+            [errors addObject:[NSString stringWithFormat:@"Failed to add item (acct=%@ svc=%@ group=%@): %@",
+                              acct ?: @"",
+                              svc ?: @"",
+                              grp ?: @"",
+                              PXSecurityErrorDescription(status)]];
             result.itemsFailed++;
         }
     }
