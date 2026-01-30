@@ -89,6 +89,32 @@ static NSDictionary *PXArtifactInfo(NSString *path, NSString *name) {
     };
 }
 
+static BOOL PXContainerUUIDMatchesBundleID(NSFileManager *fm, NSString *baseDir, NSString *uuid, NSString *bundleID) {
+    if (!baseDir.length || !uuid.length || !bundleID.length) return NO;
+    NSString *containerPath = [baseDir stringByAppendingPathComponent:uuid];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:containerPath isDirectory:&isDir] || !isDir) return NO;
+    NSString *metadataPath = [containerPath stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
+    NSDictionary *meta = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+    NSString *ident = [meta isKindOfClass:[NSDictionary class]] ? meta[@"MCMMetadataIdentifier"] : nil;
+    return [ident isKindOfClass:[NSString class]] && [ident isEqualToString:bundleID];
+}
+
+static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *baseDir, NSString *bundleID) {
+    if (!baseDir.length || !bundleID.length) return nil;
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:baseDir isDirectory:&isDir] || !isDir) return nil;
+    NSArray<NSString *> *items = [fm contentsOfDirectoryAtPath:baseDir error:nil];
+    for (NSString *uuid in items) {
+        if (![uuid isKindOfClass:[NSString class]] || uuid.length < 8) continue;
+        if ([uuid hasPrefix:@"."]) continue;
+        if (PXContainerUUIDMatchesBundleID(fm, baseDir, uuid, bundleID)) {
+            return uuid;
+        }
+    }
+    return nil;
+}
+
 - (void)_killRelatedProcessesForBundleID:(NSString *)bundleID {
     // Always kill the main app process via existing manager.
     [[FreezeManager sharedManager] killApplication:bundleID];
@@ -769,46 +795,56 @@ static NSDictionary *PXArtifactInfo(NSString *path, NSString *name) {
         AppDataCleaner *cleaner = [AppDataCleaner sharedManager];
 
         // Data container lookup:
-        // - Prefer current container UUID (handles reinstall/new UUID)
-        // - Fall back to manifest UUID if current lookup fails
+        // IMPORTANT: don't trust manifest containerPath, because old (orphaned) containers can still exist
+        // after reinstall, and restoring into them won't affect the live app.
         NSString *manifestDataUUID = nil;
         if ([manifest[@"data"] isKindOfClass:[NSDictionary class]] && [manifest[@"data"][@"uuid"] isKindOfClass:[NSString class]]) {
             manifestDataUUID = manifest[@"data"][@"uuid"];
         }
 
         NSString *currentDataUUID = [cleaner findDataContainerUUIDForBundleID:bundleID];
-        NSArray<NSString *> *uuidCandidates = @[
-            currentDataUUID ?: @"",
-            manifestDataUUID ?: @""
-        ];
-
         NSString *dataUUID = nil;
         NSString *dataContainerPath = nil;
-        NSArray<NSString *> *bases = @[@"/var/mobile/Containers/Data/Application", @"/containers/Data/Application", @"/private/var/mobile/Containers/Data/Application", @"/private/var/containers/Data/Application"]; 
 
-        // First, try the manifest's recorded containerPath (best effort)
-        if ([manifest[@"data"] isKindOfClass:[NSDictionary class]] && [manifest[@"data"][@"containerPath"] isKindOfClass:[NSString class]]) {
-            NSString *p = manifest[@"data"][@"containerPath"];
-            BOOL isDir = NO;
-            if (p.length && [fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
-                dataContainerPath = p;
-                dataUUID = manifestDataUUID;
+        NSArray<NSString *> *bases = @[
+            @"/var/mobile/Containers/Data/Application",
+            @"/private/var/mobile/Containers/Data/Application",
+            @"/containers/Data/Application",
+            @"/private/var/containers/Data/Application"
+        ];
+
+        // 1) If we have a current UUID, only accept it if metadata matches bundleID.
+        if (currentDataUUID.length) {
+            for (NSString *base in bases) {
+                if (PXContainerUUIDMatchesBundleID(fm, base, currentDataUUID, bundleID)) {
+                    dataUUID = currentDataUUID;
+                    dataContainerPath = [base stringByAppendingPathComponent:currentDataUUID];
+                    break;
+                }
             }
         }
 
+        // 2) Otherwise scan bases for a container with matching metadata.
         if (!dataContainerPath) {
-            for (NSString *cand in uuidCandidates) {
-                if (!cand.length) continue;
-                for (NSString *base in bases) {
-                    NSString *p = [base stringByAppendingPathComponent:cand];
-                    BOOL isDir = NO;
-                    if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
-                        dataUUID = cand;
-                        dataContainerPath = p;
-                        break;
-                    }
+            for (NSString *base in bases) {
+                NSString *found = PXFindDataContainerUUIDByMetadata(fm, base, bundleID);
+                if (found.length) {
+                    dataUUID = found;
+                    dataContainerPath = [base stringByAppendingPathComponent:found];
+                    break;
                 }
-                if (dataContainerPath) break;
+            }
+        }
+
+        // 3) Last resort: try manifest UUID, but only if metadata matches.
+        if (!dataContainerPath && manifestDataUUID.length) {
+            for (NSString *base in bases) {
+                if (PXContainerUUIDMatchesBundleID(fm, base, manifestDataUUID, bundleID)) {
+                    dataUUID = manifestDataUUID;
+                    dataContainerPath = [base stringByAppendingPathComponent:manifestDataUUID];
+                    [warnings addObject:@"Using manifest container UUID for restore"]; 
+                    break;
+                }
             }
         }
 
