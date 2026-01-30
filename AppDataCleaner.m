@@ -5,6 +5,7 @@
 #import <UIKit/UIKit.h>
 #import <errno.h>
 #import <unistd.h>
+#import <sys/stat.h>
 #import <signal.h>
 
 #import "AppEntitlementsReader.h"
@@ -4176,9 +4177,7 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     
     // Get the app's base identifier components for searching
     NSArray *parts = [bundleID componentsSeparatedByString:@"."];
-    NSString *appName = parts.lastObject;
     NSString *companyName = parts.count > 1 ? parts[1] : @"";
-    NSString *firstComponent = parts.firstObject;
     
     // Handle standard app group containers
     for (NSString *uuid in groupUUIDs) {
