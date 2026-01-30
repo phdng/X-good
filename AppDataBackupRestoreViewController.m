@@ -1,12 +1,20 @@
 #import "AppDataBackupRestoreViewController.h"
 #import "common/UIButton+SafeConfiguration.h"
 #import "AppDataBackupManager.h"
+#import "BackupKeychainGroupsViewController.h"
+
+static NSString *PXBackupKeychainGroupsKey(NSString *bundleID) {
+    return [NSString stringWithFormat:@"dataBackupKeychainGroups_%@", bundleID ?: @""];
+}
+
+static NSString * const PXBackupKeychainGroupsSavedNotification = @"com.hydra.projectx.backupKeychainGroupsSaved";
 
 @interface AppDataBackupRestoreViewController ()
 @property (nonatomic, strong) UILabel *appLabel;
 @property (nonatomic, strong) UISwitch *includeGroupsSwitch;
 @property (nonatomic, strong) UISwitch *includePrefsSwitch;
 @property (nonatomic, strong) UISwitch *includeKeychainSwitch;
+@property (nonatomic, strong) UIButton *keychainGroupsButton;
 @end
 
 @implementation AppDataBackupRestoreViewController
@@ -113,6 +121,31 @@
     UIView *keychainRow = makeOptionRow(@"Include Keychain Items", &_includeKeychainSwitch);
     self.includeKeychainSwitch.on = NO; // Off by default - keychain backup is sensitive
     [optionsStack addArrangedSubview:keychainRow];
+
+    // Keychain groups selector (enabled only when keychain toggle is on)
+    self.keychainGroupsButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    if ([UIButton buttonConfigurationClassExists]) {
+        UIButtonConfiguration *cfg = [UIButtonConfiguration plainButtonConfiguration];
+        cfg.title = @"Keychain Groups";
+        cfg.image = [UIImage systemImageNamed:@"key.fill"]; 
+        cfg.imagePlacement = NSDirectionalRectEdgeLeading;
+        cfg.imagePadding = 6;
+        cfg.baseForegroundColor = [UIColor systemBlueColor];
+        [self.keychainGroupsButton safeSetConfiguration:cfg];
+    } else {
+        [self.keychainGroupsButton setTitle:@"Keychain Groups" forState:UIControlStateNormal];
+    }
+    self.keychainGroupsButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.keychainGroupsButton addTarget:self action:@selector(keychainGroupsTapped) forControlEvents:UIControlEventTouchUpInside];
+    [optionsStack addArrangedSubview:self.keychainGroupsButton];
+
+    [self.includeKeychainSwitch addTarget:self action:@selector(includeKeychainChanged:) forControlEvents:UIControlEventValueChanged];
+    [self refreshKeychainGroupsButton];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(keychainGroupsSaved:)
+                                                 name:PXBackupKeychainGroupsSavedNotification
+                                               object:nil];
     
     UIStackView *buttonStack = [[UIStackView alloc] init];
     buttonStack.axis = UILayoutConstraintAxisVertical;
@@ -203,6 +236,61 @@
         [buttonStack.topAnchor constraintEqualToAnchor:optionsStack.bottomAnchor constant:30],
         [buttonStack.centerXAnchor constraintEqualToAnchor:self.view.centerXAnchor]
     ]];
+}
+
+- (void)dealloc {
+    [[NSNotificationCenter defaultCenter] removeObserver:self];
+}
+
+- (void)includeKeychainChanged:(UISwitch *)sender {
+    if (sender.isOn && self.bundleID.length) {
+        // Default selection: ALL groups (resolved lazily by picker on first open)
+        NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+        if (![defaults objectForKey:PXBackupKeychainGroupsKey(self.bundleID)]) {
+            // Leave empty until picker resolves; still show button enabled.
+        }
+    }
+    [self refreshKeychainGroupsButton];
+}
+
+- (void)keychainGroupsSaved:(NSNotification *)note {
+    [self refreshKeychainGroupsButton];
+}
+
+- (void)refreshKeychainGroupsButton {
+    BOOL enabled = self.includeKeychainSwitch.isOn;
+    self.keychainGroupsButton.enabled = enabled;
+    self.keychainGroupsButton.alpha = enabled ? 1.0 : 0.5;
+
+    NSUInteger count = 0;
+    if (self.bundleID.length) {
+        id v = [[NSUserDefaults standardUserDefaults] objectForKey:PXBackupKeychainGroupsKey(self.bundleID)];
+        if ([v isKindOfClass:[NSArray class]]) {
+            count = [(NSArray *)v count];
+        }
+    }
+
+    NSString *title = (count > 0) ? [NSString stringWithFormat:@"Keychain Groups (%lu)", (unsigned long)count] : @"Keychain Groups";
+    if ([UIButton buttonConfigurationClassExists]) {
+        if (self.keychainGroupsButton.configuration) {
+            UIButtonConfiguration *cfg = [self.keychainGroupsButton.configuration copy];
+            cfg.title = title;
+            [self.keychainGroupsButton setConfiguration:cfg];
+            return;
+        }
+    }
+    [self.keychainGroupsButton setTitle:title forState:UIControlStateNormal];
+}
+
+- (void)keychainGroupsTapped {
+    if (!self.includeKeychainSwitch.isOn) {
+        return;
+    }
+    if (!self.bundleID.length) {
+        return;
+    }
+    BackupKeychainGroupsViewController *vc = [[BackupKeychainGroupsViewController alloc] initWithBundleID:self.bundleID];
+    [self.navigationController pushViewController:vc animated:YES];
 }
 
 - (void)dismissVC {

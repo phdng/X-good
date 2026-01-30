@@ -24,6 +24,9 @@ HELPER_TOOL_PATH="/Library/WeaponX/backup_helper"
 TEMP_DIR="/tmp/keychain_helper_$$"
 VERBOSE=0
 
+# Optional subset of keychain groups (CSV) provided by caller.
+OVERRIDE_KEYCHAIN_GROUPS=""
+
 # === Color Output ===
 # Only use colors if running in a TTY (interactive terminal)
 if [ -t 1 ]; then
@@ -494,6 +497,7 @@ resign_helper() {
 do_backup() {
     local bundle_id="$1"
     local backup_file="$2"
+    local override_groups="$3"
     
     log_info "Starting keychain backup for: $bundle_id"
     
@@ -518,6 +522,12 @@ do_backup() {
     log_info "Parsing keychain access groups..."
     local keychain_groups
     keychain_groups=$(parse_keychain_groups "$ent_file")
+
+    # If caller provided a subset, use it.
+    if [ -n "$override_groups" ]; then
+        log_info "Using override keychain groups: $override_groups"
+        keychain_groups="$override_groups"
+    fi
     
     if [ -z "$keychain_groups" ]; then
         log_error "No keychain-access-groups found in app entitlements"
@@ -594,6 +604,7 @@ do_restore() {
     local bundle_id="$1"
     local backup_file="$2"
     local overwrite="$3"
+    local override_groups="$4"
     
     log_info "Starting keychain restore for: $bundle_id"
     
@@ -618,6 +629,11 @@ do_restore() {
     
     local keychain_groups
     keychain_groups=$(parse_keychain_groups "$ent_file")
+
+    if [ -n "$override_groups" ]; then
+        log_info "Using override keychain groups: $override_groups"
+        keychain_groups="$override_groups"
+    fi
     local app_groups
     app_groups=$(parse_app_groups "$ent_file")
     local app_identifier
@@ -668,6 +684,7 @@ do_restore() {
 
 do_wipe() {
     local bundle_id="$1"
+    local override_groups="$2"
     
     log_info "Starting keychain wipe for: $bundle_id"
     
@@ -685,6 +702,11 @@ do_wipe() {
     
     local keychain_groups
     keychain_groups=$(parse_keychain_groups "$ent_file")
+
+    if [ -n "$override_groups" ]; then
+        log_info "Using override keychain groups: $override_groups"
+        keychain_groups="$override_groups"
+    fi
     
     if [ -z "$keychain_groups" ]; then
         log_error "No keychain-access-groups found"
@@ -727,6 +749,7 @@ do_wipe() {
 
 do_list() {
     local bundle_id="$1"
+    local override_groups="$2"
     
     log_info "Listing keychain items for: $bundle_id"
     
@@ -743,6 +766,11 @@ do_list() {
     
     local keychain_groups
     keychain_groups=$(parse_keychain_groups "$ent_file")
+
+    if [ -n "$override_groups" ]; then
+        log_info "Using override keychain groups: $override_groups"
+        keychain_groups="$override_groups"
+    fi
     
     if [ -z "$keychain_groups" ]; then
         log_info "No keychain-access-groups found in app"
@@ -835,6 +863,23 @@ ACTION="$1"
 BUNDLE_ID="$2"
 shift 2
 
+# Parse action options
+while [[ "$1" == --* ]]; do
+    case "$1" in
+        --groups)
+            OVERRIDE_KEYCHAIN_GROUPS="$2"
+            shift 2
+            ;;
+        --groups=*)
+            OVERRIDE_KEYCHAIN_GROUPS="${1#*=}"
+            shift 1
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
 case "$ACTION" in
     backup)
         if [ -z "$1" ]; then
@@ -842,7 +887,7 @@ case "$ACTION" in
             print_usage
             exit 1
         fi
-        do_backup "$BUNDLE_ID" "$1"
+        do_backup "$BUNDLE_ID" "$1" "$OVERRIDE_KEYCHAIN_GROUPS"
         ;;
     restore)
         if [ -z "$1" ]; then
@@ -850,13 +895,13 @@ case "$ACTION" in
             print_usage
             exit 1
         fi
-        do_restore "$BUNDLE_ID" "$1" "$2"
+        do_restore "$BUNDLE_ID" "$1" "$2" "$OVERRIDE_KEYCHAIN_GROUPS"
         ;;
     wipe)
-        do_wipe "$BUNDLE_ID"
+        do_wipe "$BUNDLE_ID" "$OVERRIDE_KEYCHAIN_GROUPS"
         ;;
     list)
-        do_list "$BUNDLE_ID"
+        do_list "$BUNDLE_ID" "$OVERRIDE_KEYCHAIN_GROUPS"
         ;;
     *)
         log_error "Unknown action: $ACTION"

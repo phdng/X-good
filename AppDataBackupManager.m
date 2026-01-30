@@ -9,6 +9,8 @@
 #import "AppGroupContainerResolver.h"
 #import "CommandRunner.h"
 
+#import <CommonCrypto/CommonDigest.h>
+
 static NSString * const PXBackupErrorDomain = @"com.hydra.projectx.backup";
 
 @implementation PXBackupResult
@@ -37,6 +39,54 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
     NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789.-_"].invertedSet;
     NSString *out = [[s componentsSeparatedByCharactersInSet:allowed] componentsJoinedByString:@"_"];
     return out.length ? out : @"unknown";
+}
+
+static NSString *PXBackupKeychainGroupsKey(NSString *bundleID) {
+    return [NSString stringWithFormat:@"dataBackupKeychainGroups_%@", bundleID ?: @""];
+}
+
+static NSData *PXFileSHA256(NSString *path) {
+    NSFileHandle *fh = [NSFileHandle fileHandleForReadingAtPath:path];
+    if (!fh) return nil;
+    CC_SHA256_CTX ctx;
+    CC_SHA256_Init(&ctx);
+    for (;;) {
+        @autoreleasepool {
+            NSData *data = [fh readDataOfLength:(1024 * 1024)];
+            if (!data.length) {
+                break;
+            }
+            CC_SHA256_Update(&ctx, data.bytes, (CC_LONG)data.length);
+        }
+    }
+    [fh closeFile];
+    unsigned char digest[CC_SHA256_DIGEST_LENGTH];
+    CC_SHA256_Final(digest, &ctx);
+    return [NSData dataWithBytes:digest length:CC_SHA256_DIGEST_LENGTH];
+}
+
+static NSString *PXHexString(NSData *data) {
+    if (!data.length) return @"";
+    const unsigned char *bytes = data.bytes;
+    NSMutableString *out = [NSMutableString stringWithCapacity:data.length * 2];
+    for (NSUInteger i = 0; i < data.length; i++) {
+        [out appendFormat:@"%02x", bytes[i]];
+    }
+    return out;
+}
+
+static NSDictionary *PXArtifactInfo(NSString *path, NSString *name) {
+    if (!path.length) return nil;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDictionary *attrs = [fm attributesOfItemAtPath:path error:nil];
+    NSNumber *size = attrs[NSFileSize];
+    NSData *sha = PXFileSHA256(path);
+    return @{
+        @"name": name ?: path.lastPathComponent ?: @"",
+        @"path": path,
+        @"size": size ?: @0,
+        @"sha256": sha ? PXHexString(sha) : @""
+    };
 }
 
 - (void)_killRelatedProcessesForBundleID:(NSString *)bundleID {
@@ -162,6 +212,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
 }
 
 - (BOOL)_backupKeychainForBundleID:(NSString *)bundleID
+                            groups:(NSArray<NSString *> *)groups
                             toFile:(NSString *)backupFile
                           warnings:(NSMutableArray<NSString *> *)warnings {
     NSString *scriptPath = [self _keychainBackupScriptPath];
@@ -171,10 +222,12 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
     }
     
     CommandRunner *runner = [CommandRunner shared];
-    NSString *cmd = [NSString stringWithFormat:@"%@ backup %@ %@",
+    NSString *groupsArg = groups.count ? [NSString stringWithFormat:@" --groups %@", PXShellQuote([groups componentsJoinedByString:@","])] : @"";
+    NSString *cmd = [NSString stringWithFormat:@"%@ backup %@ %@%@",
                      PXShellQuote(scriptPath),
                      PXShellQuote(bundleID),
-                     PXShellQuote(backupFile)];
+                     PXShellQuote(backupFile),
+                     groupsArg];
     
     CommandResult *res = [runner runAndCapture:cmd];
     if (res.exitCode != 0) {
@@ -187,6 +240,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
 }
 
 - (BOOL)_restoreKeychainForBundleID:(NSString *)bundleID
+                             groups:(NSArray<NSString *> *)groups
                            fromFile:(NSString *)backupFile
                           overwrite:(BOOL)overwrite
                            warnings:(NSMutableArray<NSString *> *)warnings {
@@ -203,11 +257,13 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
     
     CommandRunner *runner = [CommandRunner shared];
     NSString *overwriteArg = overwrite ? @"--overwrite" : @"";
-    NSString *cmd = [NSString stringWithFormat:@"%@ restore %@ %@ %@",
+    NSString *groupsArg = groups.count ? [NSString stringWithFormat:@" --groups %@", PXShellQuote([groups componentsJoinedByString:@","])] : @"";
+    NSString *cmd = [NSString stringWithFormat:@"%@ restore %@ %@ %@%@",
                      PXShellQuote(scriptPath),
                      PXShellQuote(bundleID),
                      PXShellQuote(backupFile),
-                     overwriteArg];
+                     overwriteArg,
+                     groupsArg];
     
     CommandResult *res = [runner runAndCapture:cmd];
     if (res.exitCode != 0) {
@@ -499,9 +555,34 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
         // Keychain backup
         BOOL keychainIncluded = (options & PXBackupOptionIncludeKeychain) != 0;
         NSString *keychainBackupPath = nil;
+        NSArray<NSString *> *selectedKeychainGroups = @[];
         if (keychainIncluded) {
             keychainBackupPath = [backupDir stringByAppendingPathComponent:@"keychain.plist"];
+            // Default selection: ALL groups from entitlements if no saved preference.
+            id saved = [[NSUserDefaults standardUserDefaults] objectForKey:PXBackupKeychainGroupsKey(bundleID)];
+            if ([saved isKindOfClass:[NSArray class]] && [(NSArray *)saved count] > 0) {
+                NSMutableArray<NSString *> *tmp = [NSMutableArray array];
+                for (id v in (NSArray *)saved) {
+                    if ([v isKindOfClass:[NSString class]] && [(NSString *)v length] > 0) {
+                        [tmp addObject:(NSString *)v];
+                    }
+                }
+                selectedKeychainGroups = tmp;
+            } else {
+                NSError *entErr = nil;
+                AppEntitlementsReader *reader = [[AppEntitlementsReader alloc] init];
+                NSArray<NSString *> *entGroups = [reader keychainAccessGroupsForBundleID:bundleID error:&entErr];
+                if (entGroups.count) {
+                    selectedKeychainGroups = entGroups;
+                    [[NSUserDefaults standardUserDefaults] setObject:entGroups forKey:PXBackupKeychainGroupsKey(bundleID)];
+                    [[NSUserDefaults standardUserDefaults] synchronize];
+                } else if (entErr) {
+                    [warnings addObject:[NSString stringWithFormat:@"Keychain groups read failed: %@", entErr.localizedDescription]];
+                }
+            }
+
             BOOL keychainSuccess = [self _backupKeychainForBundleID:bundleID
+                                                            groups:selectedKeychainGroups
                                                             toFile:keychainBackupPath
                                                           warnings:warnings];
             if (!keychainSuccess) {
@@ -515,7 +596,36 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
         NSString *iosVersion = device.systemVersion ?: @"";
         NSString *profileId = [self _activeProfileId] ?: @"";
 
+        NSMutableArray *artifacts = [NSMutableArray array];
+        NSDictionary *dataArtifact = PXArtifactInfo(dataArchivePath, @"data.tar.gz");
+        if (dataArtifact) [artifacts addObject:dataArtifact];
+        for (NSDictionary *g in groupManifests) {
+            NSString *rel = g[@"archive"]; // groups/<name>.tar.gz
+            if ([rel isKindOfClass:[NSString class]]) {
+                NSString *abs = [backupDir stringByAppendingPathComponent:(NSString *)rel];
+                NSDictionary *gi = PXArtifactInfo(abs, rel);
+                if (gi) [artifacts addObject:gi];
+            }
+        }
+        if (profileAppDataArchivePath) {
+            NSDictionary *a = PXArtifactInfo(profileAppDataArchivePath, @"profile_appdata.tar.gz");
+            if (a) [artifacts addObject:a];
+        }
+        if (globalSafariArchivePath) {
+            NSDictionary *a = PXArtifactInfo(globalSafariArchivePath, @"global_safari.tar.gz");
+            if (a) [artifacts addObject:a];
+        }
+        if (prefDestPath && [[NSFileManager defaultManager] fileExistsAtPath:prefDestPath]) {
+            NSDictionary *a = PXArtifactInfo(prefDestPath, [NSString stringWithFormat:@"preferences/%@.plist", bundleID]);
+            if (a) [artifacts addObject:a];
+        }
+        if (keychainBackupPath && [[NSFileManager defaultManager] fileExistsAtPath:keychainBackupPath]) {
+            NSDictionary *a = PXArtifactInfo(keychainBackupPath, @"keychain.plist");
+            if (a) [artifacts addObject:a];
+        }
+
         NSDictionary *manifest = @{
+            @"manifestVersion": @2,
             @"bundleID": bundleID,
             @"appName": appName ?: @"",
             @"timestamp": timestamp,
@@ -534,7 +644,8 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             },
             @"keychain": @{
                 @"included": @(keychainBackupPath != nil),
-                @"archive": keychainBackupPath ? @"keychain.plist" : @""
+                @"archive": keychainBackupPath ? @"keychain.plist" : @"",
+                @"groupsSelected": selectedKeychainGroups ?: @[]
             },
             @"profileAppData": @{
                 @"included": @(profileAppDataArchivePath != nil),
@@ -546,6 +657,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
                 @"archive": globalSafariArchivePath ? @"global_safari.tar.gz" : @"",
                 @"path": globalSafariPath ?: @""
             },
+            @"artifacts": artifacts,
             @"options": @{
                 @"includeAppGroups": @((options & PXBackupOptionIncludeAppGroups) != 0),
                 @"includePreferences": @(prefsIncluded),
@@ -574,8 +686,8 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
 }
 
 - (void)restoreBackupAtDirectory:(NSString *)backupDir
-                       bundleID:(NSString *)bundleID
-                        appName:(NSString *)appName
+                        bundleID:(NSString *)bundleID
+                         appName:(NSString *)appName
                      completion:(void (^)(PXRestoreResult *, NSError *))completion {
     if (!backupDir.length || !bundleID.length) {
         if (completion) {
@@ -674,10 +786,21 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             }
         }
 
-        // Wipe data container
-        [cleaner completelyWipeContainer:dataContainerPath];
+        // Integrity verify artifacts (best-effort)
+        NSDictionary *artByName = nil;
+        if ([manifest[@"artifacts"] isKindOfClass:[NSArray class]]) {
+            NSMutableDictionary *m = [NSMutableDictionary dictionary];
+            for (NSDictionary *a in (NSArray *)manifest[@"artifacts"]) {
+                if (![a isKindOfClass:[NSDictionary class]]) continue;
+                NSString *name = a[@"name"];
+                if ([name isKindOfClass:[NSString class]] && name.length) {
+                    m[name] = a;
+                }
+            }
+            artByName = m;
+        }
 
-        // Extract data archive
+        // Validate data archive before wiping
         NSString *dataArchive = [backupDir stringByAppendingPathComponent:@"data.tar.gz"];
         if (![fm fileExistsAtPath:dataArchive]) {
             NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
@@ -686,17 +809,68 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
             return;
         }
-        CommandResult *dx = [self _tarExtract:tarPath archive:dataArchive toDir:dataContainerPath];
-        if (dx.exitCode != 0) {
-            NSString *msg = dx.stderrString.length ? dx.stderrString : @"Failed to extract data archive";
+        NSDictionary *dataArt = artByName ? artByName[@"data.tar.gz"] : nil;
+        if ([dataArt isKindOfClass:[NSDictionary class]]) {
+            NSNumber *expectedSize = dataArt[@"size"];
+            NSString *expectedHash = dataArt[@"sha256"];
+            NSDictionary *attrs = [fm attributesOfItemAtPath:dataArchive error:nil];
+            NSNumber *size = attrs[NSFileSize];
+            if (expectedSize && size && [expectedSize longLongValue] > 0 && [size longLongValue] != [expectedSize longLongValue]) {
+                NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                   code:314
+                                               userInfo:@{NSLocalizedDescriptionKey: @"data.tar.gz size mismatch"}];
+                dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                return;
+            }
+            if ([expectedHash isKindOfClass:[NSString class]] && expectedHash.length > 0) {
+                NSString *actual = PXHexString(PXFileSHA256(dataArchive));
+                if (actual.length && ![actual isEqualToString:expectedHash]) {
+                    NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                       code:315
+                                                   userInfo:@{NSLocalizedDescriptionKey: @"data.tar.gz sha256 mismatch"}];
+                    dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                    return;
+                }
+            }
+        }
+
+        // Two-phase restore for data container: extract to staging first.
+        NSString *stagingRoot = [NSString stringWithFormat:@"/tmp/weaponx_restore_%d", getpid()];
+        NSString *stagingData = [stagingRoot stringByAppendingPathComponent:@"data"]; 
+        [fm removeItemAtPath:stagingRoot error:nil];
+        [fm createDirectoryAtPath:stagingData withIntermediateDirectories:YES attributes:nil error:nil];
+
+        CommandResult *stx = [self _tarExtract:tarPath archive:dataArchive toDir:stagingData];
+        if (stx.exitCode != 0) {
+            NSString *msg = stx.stderrString.length ? stx.stderrString : @"Failed to extract data archive to staging";
             NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
-                                               code:306
+                                               code:316
                                            userInfo:@{NSLocalizedDescriptionKey: msg}];
             dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
             return;
         }
 
+        // Wipe data container contents and clone from staging via tar pipe.
+        [self _wipeDirectoryContents:dataContainerPath];
+        NSString *cloneCmd = [NSString stringWithFormat:@"%@ --xattrs --acls -cf - -C %@ . | %@ --xattrs --acls -xf - -C %@",
+                              PXShellQuote(tarPath),
+                              PXShellQuote(stagingData),
+                              PXShellQuote(tarPath),
+                              PXShellQuote(dataContainerPath)];
+        CommandResult *cloneRes = [runner runAndCapture:cloneCmd];
+        if (cloneRes.exitCode != 0) {
+            NSString *fallbackCmd = [NSString stringWithFormat:@"cp -a %@/. %@/ 2>/dev/null || true",
+                                     PXShellQuote(stagingData),
+                                     PXShellQuote(dataContainerPath)];
+            [runner runAndCapture:fallbackCmd];
+        }
+
         [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]];
+
+        // Cleanup staging best-effort
+        [fm removeItemAtPath:stagingRoot error:nil];
+
+        // Data container restored.
 
         // Restore profile redirected appdata (if present)
         NSDictionary *profileAppData = manifest[@"profileAppData"];
@@ -819,7 +993,7 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
             }
         }
 
-        // Keychain restore
+        // Keychain restore (warning-only on failure)
         NSDictionary *keychainInfo = manifest[@"keychain"];
         BOOL includeKeychain = NO;
         if ([keychainInfo isKindOfClass:[NSDictionary class]] && [keychainInfo[@"included"] respondsToSelector:@selector(boolValue)]) {
@@ -827,10 +1001,18 @@ static NSString *PXSanitizeFilenameComponent(NSString *s) {
         }
         if (includeKeychain) {
             NSString *keychainBackupPath = [backupDir stringByAppendingPathComponent:@"keychain.plist"];
-            [self _restoreKeychainForBundleID:bundleID
-                                     fromFile:keychainBackupPath
-                                    overwrite:YES  // Overwrite to ensure clean restore
-                                     warnings:warnings];
+            NSArray<NSString *> *groups = @[];
+            if ([keychainInfo isKindOfClass:[NSDictionary class]] && [keychainInfo[@"groupsSelected"] isKindOfClass:[NSArray class]]) {
+                groups = keychainInfo[@"groupsSelected"];
+            }
+            BOOL ok = [self _restoreKeychainForBundleID:bundleID
+                                                groups:groups
+                                              fromFile:keychainBackupPath
+                                             overwrite:YES
+                                              warnings:warnings];
+            if (!ok) {
+                [warnings addObject:@"Keychain restore failed (continuing)" ];
+            }
         }
 
         PXRestoreResult *out = [[PXRestoreResult alloc] init];
