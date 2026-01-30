@@ -131,6 +131,7 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
             (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
             (__bridge id)kSecReturnAttributes: @YES,
             (__bridge id)kSecReturnData: @YES,
+            (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
             (__bridge id)kSecAttrAccessGroup: groups.firstObject, // Primary group
         };
         
@@ -205,6 +206,7 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
                 (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
                 (__bridge id)kSecReturnAttributes: @YES,
                 (__bridge id)kSecReturnData: @YES,
+                (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
                 (__bridge id)kSecAttrAccessGroup: group,
             };
             

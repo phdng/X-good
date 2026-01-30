@@ -1055,7 +1055,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
 
         // Wipe and restore each group
         for (AppGroupContainerInfo *info in groupContainers) {
-            [cleaner completelyWipeContainer:info.path];
+            [self _wipeDirectoryContents:info.path];
 
             NSString *archiveName = [NSString stringWithFormat:@"%@.tar.gz", PXSanitizeFilenameComponent(info.groupID)];
             NSString *archivePath = [[backupDir stringByAppendingPathComponent:@"groups"] stringByAppendingPathComponent:archiveName];
