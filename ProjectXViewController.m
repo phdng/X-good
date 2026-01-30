@@ -5,6 +5,8 @@
 #import "BottomButtons.h"
 #import "FreezeManager.h"
 #import "AppDataCleaner.h"
+#import "AppEntitlementsReader.h"
+#import "KeychainGroupsViewController.h"
 #import "AppVersionManager.h"
 #import "ProfileButtonsView.h"
 #import "ProfileManagerViewController.h"
@@ -2707,72 +2709,139 @@
                     dataDetailsStr = [dataDetailsStr stringByAppendingFormat:@"\n• Shared Data: %@",
                                      [formatter stringFromByteCount:[dataUsage[@"sharedSize"] longLongValue]]];
             }
-            // Show confirmation alert with size info
-            UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clear App Data"
-                                                                           message:[NSString stringWithFormat:@"Are you sure you want to clear all data for this app? This will remove %@.%@\n\nThis action cannot be undone.", dataSizeStr, dataDetailsStr]
-                                                                    preferredStyle:UIAlertControllerStyleAlert];
-            
-            UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel"
-                                                                 style:UIAlertActionStyleCancel
-                                                               handler:nil];
-            
-            UIAlertAction *clearAction = [UIAlertAction actionWithTitle:@"Clear Data"
-                                                                 style:UIAlertActionStyleDestructive
-                                                               handler:^(UIAlertAction * _Nonnull action) {
-                // Disable the button temporarily
-                sender.enabled = NO;
-                [sender setTintColor:[UIColor systemGrayColor]];
-                // --- Show progress HUD for data clearing ---
-                [self showProgressHUDWithTitle:@"Clearing data..."];
-                // Simulate progress for cleaning (replace with real progress if possible)
-                dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
-                    for (int i = 0; i <= 100; i += 10) {
-                        [self updateProgress:i/100.0 detail:[NSString stringWithFormat:@"Deleting... %d%%", i]];
-                        [NSThread sleepForTimeInterval:0.01];
-                    }
-                    // Clear the data
-                    [[AppDataCleaner sharedManager] clearDataForBundleID:bundleID completion:^(BOOL success, NSError *error) {
-                        [self hideProgressHUD];
-                        dispatch_async(dispatch_get_main_queue(), ^{
-                            // Re-enable the button
-                            sender.enabled = YES;
-                            [sender setTintColor:[UIColor systemRedColor]];
-                            if (!success) {
-                                [self showError:error];
-                                return;
-                            }
-                            // Get results of the cleaning operation from UserDefaults
-                            NSDictionary *cleaningResult = [defaults objectForKey:[NSString stringWithFormat:@"DataCleaningResult_%@", bundleID]];
-                            NSString *resultMessage = @"App data has been cleared successfully.";
-                            if (cleaningResult) {
-                                NSDictionary *beforeSize = cleaningResult[@"beforeSize"];
-                                NSDictionary *afterSize = cleaningResult[@"afterSize"];
-                                if (beforeSize && afterSize && beforeSize[@"totalSize"] && afterSize[@"totalSize"]) {
-                                    long long clearedBytes = [beforeSize[@"totalSize"] longLongValue] - [afterSize[@"totalSize"] longLongValue];
-                                    if (clearedBytes > 0) {
-                                        NSByteCountFormatter *formatter = [[NSByteCountFormatter alloc] init];
-                                        formatter.countStyle = NSByteCountFormatterCountStyleFile;
-                                        NSString *clearedSizeStr = [formatter stringFromByteCount:clearedBytes];
-                                        resultMessage = [NSString stringWithFormat:@"Successfully cleared %@ of app data.", clearedSizeStr];
-                                    }
-                                }
-                            }
-                            // Show success message
-                            UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Success"
-                                                                                                   message:resultMessage
-                                                                                            preferredStyle:UIAlertControllerStyleAlert];
-                            UIAlertAction *okAction = [UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil];
-                            [successAlert addAction:okAction];
-                            [self presentViewController:successAlert animated:YES completion:nil];
-                        });
-                    }];
-                });
-            }];
-            [alert addAction:cancelAction];
-            [alert addAction:clearAction];
-            [self presentViewController:alert animated:YES completion:nil];
+            [self presentClearDataAlertForBundleID:bundleID sender:sender dataSizeStr:dataSizeStr dataDetailsStr:dataDetailsStr];
         });
     });
+}
+
+- (void)presentClearDataAlertForBundleID:(NSString *)bundleID
+                                 sender:(UIButton *)sender
+                             dataSizeStr:(NSString *)dataSizeStr
+                          dataDetailsStr:(NSString *)dataDetailsStr {
+    if (!bundleID.length) return;
+
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *enabledKey = PXKeychainWipeEnabledKey(bundleID);
+    NSString *groupsKey = PXKeychainWipeGroupsKey(bundleID);
+
+    BOOL keychainEnabled = YES;
+    if ([defaults objectForKey:enabledKey] != nil) {
+        keychainEnabled = [defaults boolForKey:enabledKey];
+    }
+
+    NSArray<NSString *> *selectedGroups = nil;
+    id savedGroups = [defaults objectForKey:groupsKey];
+    if ([savedGroups isKindOfClass:[NSArray class]]) {
+        selectedGroups = (NSArray<NSString *> *)savedGroups;
+    }
+
+    // Default: select ALL groups from entitlements if not present.
+    if (!selectedGroups.count) {
+        NSError *err = nil;
+        AppEntitlementsReader *reader = [[AppEntitlementsReader alloc] init];
+        NSArray<NSString *> *entGroups = [reader keychainAccessGroupsForBundleID:bundleID error:&err];
+        if (entGroups.count > 0) {
+            selectedGroups = entGroups;
+            [defaults setObject:entGroups forKey:groupsKey];
+            [defaults setBool:YES forKey:enabledKey];
+            [defaults synchronize];
+            keychainEnabled = YES;
+        } else {
+            selectedGroups = @[];
+        }
+    }
+
+    NSString *keychainState = keychainEnabled ? @"ON" : @"OFF";
+    NSString *groupsLine = selectedGroups.count > 0 ? [NSString stringWithFormat:@"%lu", (unsigned long)selectedGroups.count] : @"Unavailable";
+
+    NSString *msg = [NSString stringWithFormat:@"Are you sure you want to clear all data for this app? This will remove %@.%@\n\nKeychain Wipe: %@\nKeychain Groups: %@\n\nThis action cannot be undone.",
+                     dataSizeStr ?: @"", dataDetailsStr ?: @"", keychainState, groupsLine];
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clear App Data"
+                                                                   message:msg
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+
+    __weak typeof(self) weakSelf = self;
+    NSString *toggleTitle = [NSString stringWithFormat:@"Keychain Wipe: %@", keychainState];
+    UIAlertAction *toggleAction = [UIAlertAction actionWithTitle:toggleTitle
+                                                         style:UIAlertActionStyleDefault
+                                                       handler:^(__unused UIAlertAction *action) {
+        BOOL newVal = !keychainEnabled;
+        [defaults setBool:newVal forKey:enabledKey];
+        [defaults synchronize];
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [weakSelf presentClearDataAlertForBundleID:bundleID sender:sender dataSizeStr:dataSizeStr dataDetailsStr:dataDetailsStr];
+        });
+    }];
+    [alert addAction:toggleAction];
+
+    NSString *groupsTitle = selectedGroups.count > 0 ? [NSString stringWithFormat:@"Keychain Groups (%lu)…", (unsigned long)selectedGroups.count] : @"Keychain Groups…";
+    UIAlertAction *groupsAction = [UIAlertAction actionWithTitle:groupsTitle
+                                                         style:UIAlertActionStyleDefault
+                                                       handler:^(__unused UIAlertAction *action) {
+        KeychainGroupsViewController *vc = [[KeychainGroupsViewController alloc] initWithBundleID:bundleID];
+        vc.onSave = ^{
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf presentClearDataAlertForBundleID:bundleID sender:sender dataSizeStr:dataSizeStr dataDetailsStr:dataDetailsStr];
+            });
+        };
+        [weakSelf.navigationController pushViewController:vc animated:YES];
+    }];
+    [alert addAction:groupsAction];
+
+    UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil];
+    [alert addAction:cancelAction];
+
+    UIAlertAction *clearAction = [UIAlertAction actionWithTitle:@"Clear Data"
+                                                         style:UIAlertActionStyleDestructive
+                                                       handler:^(__unused UIAlertAction *action) {
+        // Disable the button temporarily
+        sender.enabled = NO;
+        [sender setTintColor:[UIColor systemGrayColor]];
+
+        [weakSelf showProgressHUDWithTitle:@"Clearing data..."];
+        dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0), ^{
+            for (int i = 0; i <= 100; i += 10) {
+                [weakSelf updateProgress:i/100.0 detail:[NSString stringWithFormat:@"Deleting... %d%%", i]];
+                [NSThread sleepForTimeInterval:0.01];
+            }
+
+            [[AppDataCleaner sharedManager] clearDataForBundleID:bundleID completion:^(BOOL success, NSError *error) {
+                [weakSelf hideProgressHUD];
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    sender.enabled = YES;
+                    [sender setTintColor:[UIColor systemRedColor]];
+                    if (!success) {
+                        [weakSelf showError:error];
+                        return;
+                    }
+                    NSDictionary *cleaningResult = [defaults objectForKey:[NSString stringWithFormat:@"DataCleaningResult_%@", bundleID]];
+                    NSString *resultMessage = @"App data has been cleared successfully.";
+                    if (cleaningResult) {
+                        NSDictionary *beforeSize = cleaningResult[@"beforeSize"];
+                        NSDictionary *afterSize = cleaningResult[@"afterSize"];
+                        if (beforeSize && afterSize && beforeSize[@"totalSize"] && afterSize[@"totalSize"]) {
+                            long long clearedBytes = [beforeSize[@"totalSize"] longLongValue] - [afterSize[@"totalSize"] longLongValue];
+                            if (clearedBytes > 0) {
+                                NSByteCountFormatter *formatter = [[NSByteCountFormatter alloc] init];
+                                formatter.countStyle = NSByteCountFormatterCountStyleFile;
+                                NSString *clearedSizeStr = [formatter stringFromByteCount:clearedBytes];
+                                resultMessage = [NSString stringWithFormat:@"Successfully cleared %@ of app data.", clearedSizeStr];
+                            }
+                        }
+                    }
+                    UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Success"
+                                                                                           message:resultMessage
+                                                                                    preferredStyle:UIAlertControllerStyleAlert];
+                    [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                    [weakSelf presentViewController:successAlert animated:YES completion:nil];
+                });
+            }];
+        });
+    }];
+    [alert addAction:clearAction];
+
+    [self presentViewController:alert animated:YES completion:nil];
 }
 
 - (void)deleteAppButtonTapped:(UIButton *)sender {
@@ -5056,3 +5125,11 @@ else if ([identifierType isEqualToString:@"AppContainerUUID"])
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
 @end
+
+static NSString *PXKeychainWipeEnabledKey(NSString *bundleID) {
+    return [NSString stringWithFormat:@"dataCleanerKeychainWipeEnabled_%@", bundleID ?: @""];
+}
+
+static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
+    return [NSString stringWithFormat:@"dataCleanerKeychainWipeGroups_%@", bundleID ?: @""];
+}

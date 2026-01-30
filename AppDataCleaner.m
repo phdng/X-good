@@ -7,6 +7,9 @@
 #import <unistd.h>
 #import <signal.h>
 
+#import "AppEntitlementsReader.h"
+#import "CommandRunner.h"
+
 // Add SearchableIndex framework if available
 #import <CoreSpotlight/CoreSpotlight.h>
 
@@ -22,6 +25,20 @@
 
 @implementation AppDataCleaner {
     NSFileManager *_fileManager;
+}
+
+static NSString *PXShellQuote(NSString *s) {
+    if (!s.length) return @"''";
+    NSString *escaped = [s stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]; 
+    return [NSString stringWithFormat:@"'%@'", escaped];
+}
+
+static NSString *PXKeychainWipeEnabledKey(NSString *bundleID) {
+    return [NSString stringWithFormat:@"dataCleanerKeychainWipeEnabled_%@", bundleID ?: @""];
+}
+
+static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
+    return [NSString stringWithFormat:@"dataCleanerKeychainWipeGroups_%@", bundleID ?: @""];
 }
 
 + (instancetype)sharedManager {
@@ -72,6 +89,225 @@
     }
 }
 
+#pragma mark - Keychain Wipe Settings
+
+- (BOOL)_isKeychainWipeEnabledForBundleID:(NSString *)bundleID {
+    if (!bundleID.length) return NO;
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    NSString *key = PXKeychainWipeEnabledKey(bundleID);
+    if ([defaults objectForKey:key] == nil) {
+        // Default ON
+        return YES;
+    }
+    return [defaults boolForKey:key];
+}
+
+- (NSArray<NSString *> *)_selectedKeychainGroupsForBundleID:(NSString *)bundleID
+                                                     error:(NSError **)error {
+    if (!bundleID.length) return @[];
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    id saved = [defaults objectForKey:PXKeychainWipeGroupsKey(bundleID)];
+    if ([saved isKindOfClass:[NSArray class]] && [(NSArray *)saved count] > 0) {
+        NSMutableArray<NSString *> *out = [NSMutableArray array];
+        for (id v in (NSArray *)saved) {
+            if ([v isKindOfClass:[NSString class]] && [(NSString *)v length] > 0) {
+                [out addObject:(NSString *)v];
+            }
+        }
+        return out;
+    }
+
+    // Default selection: ALL groups from entitlements.
+    AppEntitlementsReader *reader = [[AppEntitlementsReader alloc] init];
+    NSError *entErr = nil;
+    NSArray<NSString *> *groups = [reader keychainAccessGroupsForBundleID:bundleID error:&entErr];
+    if (groups.count > 0) {
+        [defaults setObject:groups forKey:PXKeychainWipeGroupsKey(bundleID)];
+        [defaults setBool:YES forKey:PXKeychainWipeEnabledKey(bundleID)];
+        [defaults synchronize];
+        return groups;
+    }
+
+    if (error) {
+        *error = entErr ?: [NSError errorWithDomain:@"AppDataCleaner"
+                                               code:100
+                                           userInfo:@{NSLocalizedDescriptionKey: @"Failed to read keychain-access-groups for this app"}];
+    }
+    return @[];
+}
+
+- (BOOL)_wipeSelectedKeychainForBundleID:(NSString *)bundleID
+                                   error:(NSError **)error {
+    if (!bundleID.length) return YES;
+    if (![self _isKeychainWipeEnabledForBundleID:bundleID]) {
+        [self logMessage:@"[AppDataCleaner] Keychain wipe disabled for %@", bundleID];
+        return YES;
+    }
+
+    NSError *groupsErr = nil;
+    NSArray<NSString *> *groups = [self _selectedKeychainGroupsForBundleID:bundleID error:&groupsErr];
+    if (groups.count == 0) {
+        // User may have selected none, or we couldn't resolve entitlements.
+        if (groupsErr) {
+            if (error) *error = groupsErr;
+            return NO;
+        }
+        [self logMessage:@"[AppDataCleaner] Keychain wipe enabled but 0 groups selected for %@ (skipping)", bundleID];
+        return YES;
+    }
+
+    // Refuse to operate on system apps by default (dangerous entitlements surface).
+    if ([bundleID hasPrefix:@"com.apple."]) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"AppDataCleaner"
+                                         code:101
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Keychain wipe for com.apple.* apps is not supported"}];
+        }
+        return NO;
+    }
+
+    AppEntitlementsReader *reader = [[AppEntitlementsReader alloc] init];
+    NSError *entErr = nil;
+    NSDictionary *fullEnt = [reader fullEntitlementsForBundleID:bundleID error:&entErr];
+    NSString *appIdentifier = nil;
+    if ([fullEnt isKindOfClass:[NSDictionary class]]) {
+        id v = fullEnt[@"application-identifier"];
+        if ([v isKindOfClass:[NSString class]] && [(NSString *)v length] > 0) {
+            appIdentifier = (NSString *)v;
+        }
+    }
+    if (!appIdentifier.length) {
+        appIdentifier = bundleID;
+    }
+
+    CommandRunner *runner = [CommandRunner shared];
+    NSString *ldidPath = [runner firstExistingPath:@[
+        @"/usr/bin/ldid",
+        @"/var/jb/usr/bin/ldid",
+        @"/private/preboot/jb/usr/bin/ldid",
+        @"/bin/ldid"
+    ]];
+    if (!ldidPath.length) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"AppDataCleaner"
+                                         code:102
+                                     userInfo:@{NSLocalizedDescriptionKey: @"ldid not found (required for keychain wipe)"}];
+        }
+        return NO;
+    }
+
+    NSString *helperPath = [runner firstExistingPath:@[
+        @"/Library/WeaponX/backup_helper",
+        @"/var/jb/Library/WeaponX/backup_helper",
+        @"/private/var/jb/Library/WeaponX/backup_helper"
+    ]];
+    if (!helperPath.length) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"AppDataCleaner"
+                                         code:103
+                                     userInfo:@{NSLocalizedDescriptionKey: @"backup_helper not found (WeaponX not installed?)"}];
+        }
+        return NO;
+    }
+
+    // Create temp dir
+    NSString *tmpDir = [NSString stringWithFormat:@"/tmp/keychain_wipe_%d", getpid()];
+    [_fileManager createDirectoryAtPath:tmpDir withIntermediateDirectories:YES attributes:nil error:nil];
+    NSString *workingHelper = [tmpDir stringByAppendingPathComponent:@"backup_helper"];
+    NSString *entPath = [tmpDir stringByAppendingPathComponent:@"helper_ent.plist"];
+
+    // Copy helper
+    [_fileManager removeItemAtPath:workingHelper error:nil];
+    NSError *copyErr = nil;
+    if (![_fileManager copyItemAtPath:helperPath toPath:workingHelper error:&copyErr]) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"AppDataCleaner"
+                                         code:104
+                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to copy backup_helper: %@", copyErr.localizedDescription ?: @"unknown"]}];
+        }
+        return NO;
+    }
+    chmod([workingHelper fileSystemRepresentation], 0755);
+
+    // Write entitlements for the helper (scoped to selected groups)
+    NSDictionary *helperEnt = @{
+        @"platform-application": @YES,
+        @"application-identifier": appIdentifier,
+        @"com.apple.private.security.no-sandbox": @YES,
+        @"com.apple.private.security.no-container": @YES,
+        @"com.apple.private.security.container-required": @NO,
+        @"com.apple.keystore.access-keychain-keys": @YES,
+        @"com.apple.keystore.device": @YES,
+        @"keychain-access-groups": groups,
+    };
+    NSError *plistErr = nil;
+    NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:helperEnt
+                                                                   format:NSPropertyListXMLFormat_v1_0
+                                                                  options:0
+                                                                    error:&plistErr];
+    if (!plistData.length || plistErr) {
+        if (error) {
+            *error = plistErr ?: [NSError errorWithDomain:@"AppDataCleaner"
+                                                    code:105
+                                                userInfo:@{NSLocalizedDescriptionKey: @"Failed to build helper entitlements"}];
+        }
+        return NO;
+    }
+    if (![plistData writeToFile:entPath atomically:YES]) {
+        if (error) {
+            *error = [NSError errorWithDomain:@"AppDataCleaner"
+                                         code:106
+                                     userInfo:@{NSLocalizedDescriptionKey: @"Failed to write helper entitlements file"}];
+        }
+        return NO;
+    }
+
+    // Resign
+    NSString *signCmd = [NSString stringWithFormat:@"%@ -S%@ %@",
+                         PXShellQuote(ldidPath),
+                         PXShellQuote(entPath),
+                         PXShellQuote(workingHelper)];
+    CommandResult *signRes = [runner runAndCapture:signCmd];
+    if (signRes.exitCode != 0) {
+        if (error) {
+            NSString *msg = signRes.stderrString.length ? signRes.stderrString : @"ldid failed";
+            *error = [NSError errorWithDomain:@"AppDataCleaner"
+                                         code:107
+                                     userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Failed to resign helper: %@", msg]}];
+        }
+        return NO;
+    }
+
+    NSString *groupsCSV = [groups componentsJoinedByString:@","];
+    NSString *wipeCmd = [NSString stringWithFormat:@"%@ --action wipe --groups %@",
+                         PXShellQuote(workingHelper),
+                         PXShellQuote(groupsCSV)];
+    [self logMessage:@"[AppDataCleaner] Keychain wipe via helper for %@ (groups=%lu)", bundleID, (unsigned long)groups.count];
+    CommandResult *wipeRes = [runner runAndCapture:wipeCmd];
+
+    NSDictionary *report = @{
+        @"bundleID": bundleID,
+        @"groups": groups,
+        @"exitCode": @(wipeRes.exitCode),
+        @"stdout": wipeRes.stdoutString ?: @"",
+        @"stderr": wipeRes.stderrString ?: @"",
+    };
+    [[NSUserDefaults standardUserDefaults] setObject:report forKey:[NSString stringWithFormat:@"DataCleaningKeychainResult_%@", bundleID]];
+    [[NSUserDefaults standardUserDefaults] synchronize];
+
+    if (wipeRes.exitCode != 0) {
+        if (error) {
+            NSString *msg = wipeRes.stderrString.length ? wipeRes.stderrString : @"Keychain wipe failed";
+            *error = [NSError errorWithDomain:@"AppDataCleaner"
+                                         code:108
+                                     userInfo:@{NSLocalizedDescriptionKey: msg}];
+        }
+        return NO;
+    }
+
+    return YES;
+}
+
 #pragma mark - Main Public Methods
 
 - (void)clearDataForBundleID:(NSString *)bundleID completion:(void (^)(BOOL, NSError *))completion {
@@ -103,8 +339,11 @@
     
     // Set up a watchdog timer to force completion after 120 seconds max
     dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-        [weakSelf logMessage:@"[AppDataCleaner] WATCHDOG: 120 second timeout reached, forcing completion"];
-        safeCompletion(YES, nil);
+        [weakSelf logMessage:@"[AppDataCleaner] WATCHDOG: 120 second timeout reached"];
+        NSError *timeoutError = [NSError errorWithDomain:@"AppDataCleaner"
+                                                   code:-100
+                                               userInfo:@{NSLocalizedDescriptionKey: @"Clear Data timed out"}];
+        safeCompletion(NO, timeoutError);
     });
     
     // Dispatch the cleaning process to background queue
@@ -148,9 +387,9 @@
                 [NSThread sleepForTimeInterval:0.5]; // Wait for process to die
                 
                 // Step 1: Clear keychain FIRST (most important for login data)
-                [strongSelf logMessage:@"[AppDataCleaner] Step 1: Clearing keychain items..."];
-                [strongSelf clearKeychainItemsForBundleID:bundleID];
-                [strongSelf universalKeychainWipeForBundleID:bundleID];
+                [strongSelf logMessage:@"[AppDataCleaner] Step 1: Clearing keychain (selected groups)..."];
+                NSError *keychainError1 = nil;
+                BOOL keychainOK1 = [strongSelf _wipeSelectedKeychainForBundleID:bundleID error:&keychainError1];
                 
                 // Step 2: Clear URL credentials (session tokens)
                 [strongSelf logMessage:@"[AppDataCleaner] Step 2: Clearing URL credentials..."];
@@ -174,16 +413,23 @@
                 [strongSelf logMessage:@"[AppDataCleaner] Cleared %lu cookies from memory", (unsigned long)allCookies.count];
                 
                 // Step 6: Clear keychain AGAIN to catch any recreated items
-                [strongSelf logMessage:@"[AppDataCleaner] Step 6: Final keychain cleanup..."];
-                [strongSelf clearKeychainItemsForBundleID:bundleID];
-                [strongSelf universalKeychainWipeForBundleID:bundleID];
+                [strongSelf logMessage:@"[AppDataCleaner] Step 6: Final keychain cleanup (selected groups)..."];
+                NSError *keychainError2 = nil;
+                BOOL keychainOK2 = [strongSelf _wipeSelectedKeychainForBundleID:bundleID error:&keychainError2];
                 
                 // Step 7: Sync filesystem
                 [strongSelf logMessage:@"[AppDataCleaner] Step 7: Syncing filesystem..."];
                 sync();
                 
                 [strongSelf logMessage:@"[AppDataCleaner] === COMPLETED data clearing for %@ ===", bundleID];
-                safeCompletion(YES, nil);
+                if (!keychainOK1 || !keychainOK2) {
+                    NSError *err = keychainError2 ?: keychainError1;
+                    safeCompletion(NO, err ?: [NSError errorWithDomain:@"AppDataCleaner"
+                                                                 code:-2
+                                                             userInfo:@{NSLocalizedDescriptionKey: @"Keychain wipe failed"}]);
+                } else {
+                    safeCompletion(YES, nil);
+                }
                 
             } @catch (NSException *exception) {
                 [strongSelf logMessage:@"[AppDataCleaner] EXCEPTION: %@", exception];
@@ -326,13 +572,8 @@
     // NOTE: Removed SpringBoard/ApplicationState deletion - it causes RESPRING!
     // NOTE: Removed PluginKit clearing - it uses slow findPathsMatchingPattern
     
-    // Clear keychain data
-    [self logMessage:@"[AppDataCleaner] Clearing keychain items"];
-    [self clearKeychainItemsForBundleID:bundleID];
-    
-    // Clear URL credentials
-    [self logMessage:@"[AppDataCleaner] Clearing URL credentials"];
-    [self clearURLCredentialsForBundleID:bundleID];
+    // Keychain wipe is handled by clearDataForBundleID using selected groups.
+    // Avoid running legacy heuristic wipes here.
     
     // Skip RootHide var data clearing - uses slow findPathsMatchingPattern
     [self logMessage:@"[AppDataCleaner] Skipping RootHide cleaning (optimization)"];
@@ -348,11 +589,7 @@
     // Clear app state data - SKIP second call to avoid respring
     // [self _internalClearAppStateData:bundleID];
     
-    // Clear keychain items again (in case some were recreated during the process)
-    [self clearKeychainItemsForBundleID:bundleID];
-    
-    // Clear URL credentials again
-    [self clearURLCredentialsForBundleID:bundleID];
+    // URL credentials are cleared by clearDataForBundleID.
     
     // Clear encrypted data 
     [self logMessage:@"[AppDataCleaner] DEBUG: Clearing encrypted data..."];
@@ -388,9 +625,7 @@
     
     [self logMessage:@"[AppDataCleaner] Skipped unsafe system state modifications"];
     
-    // === UNIVERSAL KEYCHAIN WIPE FOR 100% COVERAGE ===
-    NSLog(@"[AppDataCleaner] Starting universal keychain wipe for %@", bundleID);
-    [self universalKeychainWipeForBundleID:bundleID];
+    // NOTE: Universal keychain wipe removed (too broad / can delete unrelated items).
 
     // === FINAL SWEEP FOR 100% COVERAGE ===
     NSLog(@"[AppDataCleaner] Starting final sweep for any remaining traces of %@", bundleID);
@@ -1805,8 +2040,8 @@
         return;
     }
     
-    // Use non-blocking wait with 5 second timeout
-    const int maxWaitIterations = 50; // 50 * 100ms = 5 seconds
+    // Use non-blocking wait with 60 second timeout
+    const int maxWaitIterations = 600; // 600 * 100ms = 60 seconds
     int iterations = 0;
     int status;
     pid_t result;
@@ -2459,7 +2694,12 @@
     [self completelyWipeContainer:[NSString stringWithFormat:@"/containers/Data/Application/%@", rootlessDataUUID]];
     
     // Clear all kinds of user data
-    [self clearKeychainItemsForBundleID:bundleID];
+    {
+        NSError *kcErr = nil;
+        if (![self _wipeSelectedKeychainForBundleID:bundleID error:&kcErr]) {
+            [self logMessage:@"[AppDataCleaner] WARNING: Keychain wipe failed in performFullCleanup: %@", kcErr.localizedDescription ?: @"unknown"];
+        }
+    }
     [self clearURLCredentialsForBundleID:bundleID];
     [self clearICloudData:bundleID];
     [self clearPluginKitData:bundleID];
@@ -2568,7 +2808,10 @@
 }
 
 - (void)clearAppKeychain:(NSString *)bundleID {
-    [self clearKeychainItemsForBundleID:bundleID];
+    NSError *kcErr = nil;
+    if (![self _wipeSelectedKeychainForBundleID:bundleID error:&kcErr]) {
+        [self logMessage:@"[AppDataCleaner] WARNING: Keychain wipe failed: %@", kcErr.localizedDescription ?: @"unknown"];
+    }
 }
 
 - (void)clearAppGroupData:(NSString *)bundleID {
@@ -2587,7 +2830,12 @@
 }
 
 // Map the remaining methods to the main function
-- (void)clearKeychainData:(NSString *)bundleID { [self clearKeychainItemsForBundleID:bundleID]; }
+- (void)clearKeychainData:(NSString *)bundleID {
+    NSError *kcErr = nil;
+    if (![self _wipeSelectedKeychainForBundleID:bundleID error:&kcErr]) {
+        [self logMessage:@"[AppDataCleaner] WARNING: Keychain wipe failed: %@", kcErr.localizedDescription ?: @"unknown"];
+    }
+}
 - (void)clearSharedContainers:(NSString *)bundleID { [self clearAppGroupData:bundleID]; }
 - (void)clearUserDefaults:(NSString *)bundleID { [self clearAppPreferences:bundleID]; }
 - (void)clearSQLiteDatabases:(NSString *)bundleID { [self completeAppDataWipe:bundleID]; }
@@ -3245,8 +3493,13 @@
             }
         }
         
-        // 3. Clear extension keychain items
-        [self clearKeychainItemsForBundleID:extensionBundleID];
+        // 3. Clear extension keychain items (best-effort)
+        {
+            NSError *kcErr = nil;
+            if (![self _wipeSelectedKeychainForBundleID:extensionBundleID error:&kcErr]) {
+                [self logMessage:@"[AppDataCleaner] WARNING: Extension keychain wipe failed (%@): %@", extensionBundleID, kcErr.localizedDescription ?: @"unknown"];
+            }
+        }
         
         // 4. Clear extension preferences
         NSString *prefsPath = [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", extensionBundleID];
