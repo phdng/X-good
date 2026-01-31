@@ -15,6 +15,7 @@
 
     NSArray<NSString *> *baseDirs = @[
         @"/var/mobile/Containers/Shared/AppGroup",
+        @"/private/var/mobile/Containers/Shared/AppGroup",
         @"/containers/Shared/AppGroup"
     ];
 

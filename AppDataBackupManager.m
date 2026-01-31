@@ -22,6 +22,87 @@ static NSString * const PXBackupErrorDomain = @"com.hydra.projectx.backup";
 
 @implementation AppDataBackupManager
 
+static void PXDebugAppendLine(NSString *path, NSString *line) {
+    if (!path.length || !line.length) return;
+    @autoreleasepool {
+        NSFileManager *fm = [NSFileManager defaultManager];
+        NSString *dir = [path stringByDeletingLastPathComponent];
+        if (dir.length) {
+            [fm createDirectoryAtPath:dir withIntermediateDirectories:YES attributes:nil error:nil];
+        }
+        NSString *out = [line stringByAppendingString:@"\n"];
+        NSData *data = [out dataUsingEncoding:NSUTF8StringEncoding];
+        if (!data) return;
+
+        if (![fm fileExistsAtPath:path]) {
+            [data writeToFile:path atomically:YES];
+            return;
+        }
+        NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+        if (!fh) {
+            [data writeToFile:path atomically:YES];
+            return;
+        }
+        @try {
+            [fh seekToEndOfFile];
+            [fh writeData:data];
+        } @catch (__unused NSException *e) {
+        }
+        [fh closeFile];
+    }
+}
+
+static void PXDebugHeader(NSString *path, NSString *title) {
+    PXDebugAppendLine(path, @"----------------------------------------");
+    PXDebugAppendLine(path, [NSString stringWithFormat:@"[%@] %@", [NSDate date], title ?: @""]);
+}
+
+static void PXDebugRun(CommandRunner *runner, NSString *path, NSString *label, NSString *cmd) {
+    if (!runner || !path.length || !cmd.length) return;
+    PXDebugAppendLine(path, [NSString stringWithFormat:@"> %@", label ?: @"cmd"]);
+    PXDebugAppendLine(path, [NSString stringWithFormat:@"$ %@", cmd]);
+    CommandResult *res = [runner runAndCapture:cmd];
+    PXDebugAppendLine(path, [NSString stringWithFormat:@"exit=%d", (int)res.exitCode]);
+    if (res.stdoutString.length) {
+        PXDebugAppendLine(path, @"[stdout]");
+        PXDebugAppendLine(path, res.stdoutString);
+    }
+    if (res.stderrString.length) {
+        PXDebugAppendLine(path, @"[stderr]");
+        PXDebugAppendLine(path, res.stderrString);
+    }
+}
+
+static NSDictionary *PXResolvePathsForBundleID(NSString *bundleID) {
+    NSMutableDictionary *out = [NSMutableDictionary dictionary];
+    out[@"bundleID"] = bundleID ?: @"";
+
+    NSString *dataPath = PXDataContainerPathFromLaunchServices(bundleID);
+    if (dataPath) out[@"lsDataContainerPath"] = dataPath;
+
+    // Also capture containerURL for debugging (may be bundle container).
+    NSString *containerURLPath = nil;
+    @autoreleasepool {
+        Class LSApplicationProxyClass = NSClassFromString(@"LSApplicationProxy");
+        SEL sel = NSSelectorFromString(@"applicationProxyForIdentifier:");
+        if (LSApplicationProxyClass && [LSApplicationProxyClass respondsToSelector:sel]) {
+            id proxy = ((id (*)(id, SEL, id))objc_msgSend)(LSApplicationProxyClass, sel, bundleID);
+            if (proxy) {
+                id url = nil;
+                @try { url = [proxy valueForKey:@"containerURL"]; } @catch (__unused NSException *e) {}
+                if ([url isKindOfClass:[NSURL class]]) {
+                    containerURLPath = [(NSURL *)url path];
+                } else if ([url isKindOfClass:[NSString class]]) {
+                    containerURLPath = (NSString *)url;
+                }
+            }
+        }
+    }
+    if (containerURLPath) out[@"lsContainerURLPath"] = containerURLPath;
+
+    return out;
+}
+
 + (instancetype)shared {
     static AppDataBackupManager *sharedInstance = nil;
     static dispatch_once_t onceToken;
@@ -184,7 +265,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
     CommandRunner *runner = [CommandRunner shared];
 
     // Prefer preserving extended attributes (file protection class), ACLs and numeric owners.
-    NSString *cmd = [NSString stringWithFormat:@"%@ --xattrs --acls --numeric-owner -czf %@ --exclude '.com.apple*' -C %@ .",
+    NSString *cmd = [NSString stringWithFormat:@"%@ --xattrs --acls --numeric-owner -czf %@ --exclude '.com.apple.mobile_container_manager.metadata.plist' --exclude '.com.apple.containermanagerd.metadata.plist' -C %@ .",
                      PXShellQuote(tarPath),
                      PXShellQuote(archivePath),
                      PXShellQuote(sourceDir)];
@@ -194,7 +275,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
     }
 
     // Fallback for tar variants without these flags.
-    NSString *fallback = [NSString stringWithFormat:@"%@ -czf %@ --exclude '.com.apple*' -C %@ .",
+    NSString *fallback = [NSString stringWithFormat:@"%@ -czf %@ --exclude '.com.apple.mobile_container_manager.metadata.plist' --exclude '.com.apple.containermanagerd.metadata.plist' -C %@ .",
                           PXShellQuote(tarPath),
                           PXShellQuote(archivePath),
                           PXShellQuote(sourceDir)];
@@ -482,6 +563,25 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
         NSFileManager *fm = [NSFileManager defaultManager];
         CommandRunner *runner = [CommandRunner shared];
 
+        NSString *debugPre = [backupDir stringByAppendingPathComponent:@"debug_before_restore.txt"];
+        NSString *debugPost = [backupDir stringByAppendingPathComponent:@"debug_after_restore.txt"];
+        NSString *debugKeychain = [backupDir stringByAppendingPathComponent:@"debug_keychain.txt"];
+
+        PXDebugHeader(debugPre, @"Restore Start");
+        PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"bundleID=%@", bundleID]);
+        PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"backupDir=%@", backupDir]);
+        {
+            NSDictionary *rp = PXResolvePathsForBundleID(bundleID);
+            PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"lsDataContainerPath=%@", rp[@"lsDataContainerPath"] ?: @""]);
+            PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"lsContainerURLPath=%@", rp[@"lsContainerURLPath"] ?: @""]);
+        }
+        PXDebugRun(runner, debugPre, @"ls backupDir", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(backupDir)]);
+
+        PXDebugHeader(debugPre, @"System Snapshot (Debug Only)");
+        PXDebugRun(runner, debugPre, @"ls Accounts3", @"ls -lh /var/mobile/Library/Accounts/Accounts3.sqlite 2>/dev/null || true");
+        PXDebugRun(runner, debugPre, @"ls Cookies", @"ls -la /var/mobile/Library/Cookies 2>/dev/null || true");
+        PXDebugRun(runner, debugPre, @"ls WebKit WebsiteData", @"ls -la /var/mobile/Library/WebKit/WebsiteData 2>/dev/null || true");
+
         // Ensure target app is not running while archiving.
         [self _killRelatedProcessesForBundleID:bundleID];
 
@@ -512,26 +612,26 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
         }
 
         if (!dataContainerPath) {
-            AppDataCleaner *cleaner = [AppDataCleaner sharedManager];
-            NSString *uuid = [cleaner findDataContainerUUIDForBundleID:bundleID];
-            if (!uuid.length) {
+            NSArray<NSString *> *bases = @[@"/var/mobile/Containers/Data/Application", @"/private/var/mobile/Containers/Data/Application", @"/containers/Data/Application", @"/private/var/containers/Data/Application"]; 
+            for (NSString *base in bases) {
+                NSString *found = PXFindDataContainerUUIDByMetadata(fm, base, bundleID);
+                if (found.length) {
+                    NSString *p = [base stringByAppendingPathComponent:found];
+                    BOOL isDir = NO;
+                    if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
+                        dataUUID = found;
+                        dataContainerPath = p;
+                        break;
+                    }
+                }
+            }
+            if (!dataContainerPath.length) {
                 NSString *lsPath = PXDataContainerPathFromLaunchServices(bundleID) ?: @"";
                 NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
                                                    code:102
                                                userInfo:@{NSLocalizedDescriptionKey: [NSString stringWithFormat:@"Data container not found (bundleID=%@ lsPath=%@)", bundleID, lsPath]}];
                 dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
                 return;
-            }
-            dataUUID = uuid;
-
-            NSArray<NSString *> *bases = @[@"/var/mobile/Containers/Data/Application", @"/private/var/mobile/Containers/Data/Application", @"/containers/Data/Application", @"/private/var/containers/Data/Application"]; 
-            for (NSString *base in bases) {
-                NSString *p = [base stringByAppendingPathComponent:uuid];
-                BOOL isDir = NO;
-                if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
-                    dataContainerPath = p;
-                    break;
-                }
             }
         }
 
@@ -545,6 +645,8 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
 
         NSString *timestamp = [self _timestampString];
         NSString *backupDir = [[[self _backupRoot] stringByAppendingPathComponent:bundleID] stringByAppendingPathComponent:timestamp];
+        NSString *debugBefore = [backupDir stringByAppendingPathComponent:@"debug_before_backup.txt"];
+        NSString *debugAfter = [backupDir stringByAppendingPathComponent:@"debug_after_backup.txt"];
         NSString *groupsDir = [backupDir stringByAppendingPathComponent:@"groups"]; 
         NSString *prefsDir = [backupDir stringByAppendingPathComponent:@"preferences"]; 
 
@@ -562,6 +664,32 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
         [runner run:[NSString stringWithFormat:@"chmod 700 %@ 2>/dev/null || true", PXShellQuote(backupDir)]];
         [runner run:[NSString stringWithFormat:@"chmod 700 %@ 2>/dev/null || true", PXShellQuote(groupsDir)]];
         [runner run:[NSString stringWithFormat:@"chmod 700 %@ 2>/dev/null || true", PXShellQuote(prefsDir)]];
+
+        // Debug snapshot: before backup
+        {
+            PXDebugHeader(debugBefore, @"Backup Start");
+            NSDictionary *rp = PXResolvePathsForBundleID(bundleID);
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"bundleID=%@", bundleID]);
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"profileId=%@", profileId ?: @""]);
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"timestamp=%@", timestamp]);
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"lsDataContainerPath=%@", rp[@"lsDataContainerPath"] ?: @""]);
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"lsContainerURLPath=%@", rp[@"lsContainerURLPath"] ?: @""]);
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"chosenDataContainerPath=%@", dataContainerPath ?: @""]);
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"chosenDataUUID=%@", dataUUID ?: @""]);
+            PXDebugRun(runner, debugBefore, @"du data", [NSString stringWithFormat:@"du -sk %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]);
+            PXDebugRun(runner, debugBefore, @"du library", [NSString stringWithFormat:@"du -sk %@ 2>/dev/null || true", PXShellQuote([dataContainerPath stringByAppendingPathComponent:@"Library"]) ]);
+            PXDebugRun(runner, debugBefore, @"ls root", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]);
+            PXDebugRun(runner, debugBefore, @"ls library", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote([dataContainerPath stringByAppendingPathComponent:@"Library"]) ]);
+            PXDebugRun(runner, debugBefore, @"ls prefs", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote([dataContainerPath stringByAppendingPathComponent:@"Library/Preferences"]) ]);
+            PXDebugRun(runner, debugBefore, @"ls cookies", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote([dataContainerPath stringByAppendingPathComponent:@"Library/Cookies"]) ]);
+            PXDebugRun(runner, debugBefore, @"ls webkit", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote([dataContainerPath stringByAppendingPathComponent:@"Library/WebKit"]) ]);
+
+            // Snapshot-only (system-wide) paths for debugging (restore does NOT touch these by default)
+            PXDebugHeader(debugBefore, @"System Snapshot (Debug Only)");
+            PXDebugRun(runner, debugBefore, @"ls Accounts3", @"ls -lh /var/mobile/Library/Accounts/Accounts3.sqlite 2>/dev/null || true");
+            PXDebugRun(runner, debugBefore, @"ls Cookies", @"ls -la /var/mobile/Library/Cookies 2>/dev/null || true");
+            PXDebugRun(runner, debugBefore, @"ls WebKit WebsiteData", @"ls -la /var/mobile/Library/WebKit/WebsiteData 2>/dev/null || true");
+        }
 
         NSString *dataArchivePath = [backupDir stringByAppendingPathComponent:@"data.tar.gz"];
         CommandResult *tarRes = [self _tarCreate:tarPath fromDir:dataContainerPath toArchive:dataArchivePath];
@@ -593,6 +721,19 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                     [warnings addObject:@"No App Group containers matched entitlements"];
                 }
             }
+        }
+
+        // Debug snapshot: groups resolution
+        {
+            PXDebugHeader(debugBefore, @"App Groups Resolve");
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"groupIDs=%@", groupIDs ?: @[]]);
+            NSMutableArray *paths = [NSMutableArray array];
+            for (AppGroupContainerInfo *info in groupContainers) {
+                [paths addObject:[NSString stringWithFormat:@"%@ => %@ (%@)", info.groupID ?: @"", info.path ?: @"", info.uuid ?: @""]];
+                PXDebugRun(runner, debugBefore, [NSString stringWithFormat:@"du group %@", info.groupID ?: @""], [NSString stringWithFormat:@"du -sk %@ 2>/dev/null || true", PXShellQuote(info.path)]);
+                PXDebugRun(runner, debugBefore, [NSString stringWithFormat:@"ls group %@", info.groupID ?: @""], [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(info.path)]);
+            }
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"groupPaths=%@", paths]);
         }
 
         for (AppGroupContainerInfo *info in groupContainers) {
@@ -687,6 +828,19 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                 }
             }
 
+            // Debug: list keychain items before backup
+            {
+                PXDebugHeader(debugAfter, @"Keychain Before Backup");
+                PXDebugAppendLine(debugAfter, [NSString stringWithFormat:@"selectedGroups=%@", selectedKeychainGroups ?: @[]]);
+                NSString *scriptPath = [runner firstExistingPath:@[@"/Library/WeaponX/keychain_backup.sh",
+                                                                  @"/var/jb/Library/WeaponX/keychain_backup.sh",
+                                                                  @"/private/var/jb/Library/WeaponX/keychain_backup.sh"]];
+                if (scriptPath.length && selectedKeychainGroups.count) {
+                    NSString *csv = [selectedKeychainGroups componentsJoinedByString:@","];
+                    PXDebugRun(runner, debugAfter, @"list", [NSString stringWithFormat:@"%@ list %@ --groups %@", PXShellQuote(scriptPath), PXShellQuote(bundleID), PXShellQuote(csv)]);
+                }
+            }
+
             BOOL keychainSuccess = [self _backupKeychainForBundleID:bundleID
                                                             groups:selectedKeychainGroups
                                                             toFile:keychainBackupPath
@@ -700,7 +854,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
 
         UIDevice *device = [UIDevice currentDevice];
         NSString *iosVersion = device.systemVersion ?: @"";
-        NSString *profileId = [self _activeProfileId] ?: @"";
+        // profileId already computed above
 
         NSMutableArray *artifacts = [NSMutableArray array];
         NSDictionary *dataArtifact = PXArtifactInfo(dataArchivePath, @"data.tar.gz");
@@ -770,6 +924,20 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                 @"includeKeychain": @(keychainIncluded)
             }
         };
+
+        // Debug snapshot: after backup artifacts
+        {
+            PXDebugHeader(debugAfter, @"Backup Artifacts");
+            PXDebugAppendLine(debugAfter, [NSString stringWithFormat:@"backupDir=%@", backupDir]);
+            PXDebugRun(runner, debugAfter, @"ls backupDir", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(backupDir)]);
+            PXDebugRun(runner, debugAfter, @"ls groupsDir", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(groupsDir)]);
+            PXDebugRun(runner, debugAfter, @"ls prefsDir", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(prefsDir)]);
+            PXDebugRun(runner, debugAfter, @"ls data.tar.gz", [NSString stringWithFormat:@"ls -lh %@ 2>/dev/null || true", PXShellQuote(dataArchivePath)]);
+            if (keychainBackupPath) {
+                PXDebugRun(runner, debugAfter, @"ls keychain.plist", [NSString stringWithFormat:@"ls -lh %@ 2>/dev/null || true", PXShellQuote(keychainBackupPath)]);
+            }
+            PXDebugRun(runner, debugAfter, @"cat manifest.plist", [NSString stringWithFormat:@"ls -lh %@ 2>/dev/null || true", PXShellQuote([backupDir stringByAppendingPathComponent:@"manifest.plist"]) ]);
+        }
 
         NSString *manifestPath = [backupDir stringByAppendingPathComponent:@"manifest.plist"];
         if (![manifest writeToFile:manifestPath atomically:YES]) {
@@ -845,17 +1013,13 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             [warnings addObject:[NSString stringWithFormat:@"Backup was created under profile %@ but current profile is %@", manifestProfileId, activeProfileId]];
         }
 
-        AppDataCleaner *cleaner = [AppDataCleaner sharedManager];
-
         // Data container lookup:
-        // IMPORTANT: don't trust manifest containerPath, because old (orphaned) containers can still exist
-        // after reinstall, and restoring into them won't affect the live app.
+        // Prefer active container path (LaunchServices). Fall back to metadata scan.
         NSString *manifestDataUUID = nil;
         if ([manifest[@"data"] isKindOfClass:[NSDictionary class]] && [manifest[@"data"][@"uuid"] isKindOfClass:[NSString class]]) {
             manifestDataUUID = manifest[@"data"][@"uuid"];
         }
-
-        NSString *currentDataUUID = [cleaner findDataContainerUUIDForBundleID:bundleID];
+ 
         NSString *dataUUID = nil;
         NSString *dataContainerPath = nil;
 
@@ -876,18 +1040,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             @"/private/var/containers/Data/Application"
         ];
 
-        // 1) If we have a current UUID, only accept it if metadata matches bundleID.
-        if (!dataContainerPath && currentDataUUID.length) {
-            for (NSString *base in bases) {
-                if (PXContainerUUIDMatchesBundleID(fm, base, currentDataUUID, bundleID)) {
-                    dataUUID = currentDataUUID;
-                    dataContainerPath = [base stringByAppendingPathComponent:currentDataUUID];
-                    break;
-                }
-            }
-        }
-
-        // 2) Otherwise scan bases for a container with matching metadata.
+        // Scan bases for a container with matching metadata.
         if (!dataContainerPath) {
             for (NSString *base in bases) {
                 NSString *found = PXFindDataContainerUUIDByMetadata(fm, base, bundleID);
@@ -899,13 +1052,27 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             }
         }
 
-        // 3) Last resort: try manifest UUID, but only if metadata matches.
+        // Fallback: use manifest containerPath/UUID if directory exists (useful after aggressive clears).
+        if (!dataContainerPath) {
+            NSString *p = nil;
+            if ([manifest[@"data"] isKindOfClass:[NSDictionary class]] && [manifest[@"data"][@"containerPath"] isKindOfClass:[NSString class]]) {
+                p = manifest[@"data"][@"containerPath"];
+            }
+            BOOL isDir = NO;
+            if (p.length && [fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
+                dataContainerPath = p;
+                dataUUID = p.lastPathComponent;
+                [warnings addObject:@"Using manifest containerPath for restore (fallback)" ];
+            }
+        }
         if (!dataContainerPath && manifestDataUUID.length) {
             for (NSString *base in bases) {
-                if (PXContainerUUIDMatchesBundleID(fm, base, manifestDataUUID, bundleID)) {
+                NSString *p = [base stringByAppendingPathComponent:manifestDataUUID];
+                BOOL isDir = NO;
+                if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
+                    dataContainerPath = p;
                     dataUUID = manifestDataUUID;
-                    dataContainerPath = [base stringByAppendingPathComponent:manifestDataUUID];
-                    [warnings addObject:@"Using manifest container UUID for restore"]; 
+                    [warnings addObject:@"Using manifest UUID for restore (fallback)" ];
                     break;
                 }
             }
@@ -914,13 +1081,19 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
         if (!dataUUID.length || !dataContainerPath.length) {
             NSString *hint = @"Data container not found. Ensure the app is installed and launched at least once (to create its data container).";
             NSString *lsPath = PXDataContainerPathFromLaunchServices(bundleID) ?: @"";
-            NSString *detail = [NSString stringWithFormat:@"%@ (bundleID=%@ lsPath=%@ currentUUID=%@ manifestUUID=%@)", hint, bundleID, lsPath, currentDataUUID ?: @"", manifestDataUUID ?: @""];
+            NSString *detail = [NSString stringWithFormat:@"%@ (bundleID=%@ lsPath=%@ manifestUUID=%@)", hint, bundleID, lsPath, manifestDataUUID ?: @""];
             NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
                                                code:303
                                            userInfo:@{NSLocalizedDescriptionKey: detail}];
             dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
             return;
         }
+
+        PXDebugHeader(debugPre, @"Chosen Container");
+        PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"chosenDataContainerPath=%@", dataContainerPath ?: @""]);
+        PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"chosenDataUUID=%@", dataUUID ?: @""]);
+        PXDebugRun(runner, debugPre, @"du data", [NSString stringWithFormat:@"du -sk %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]);
+        PXDebugRun(runner, debugPre, @"ls prefs", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote([dataContainerPath stringByAppendingPathComponent:@"Library/Preferences"]) ]);
 
         // App Groups via entitlements (Option B)
         NSArray<AppGroupContainerInfo *> *groupContainers = @[];
@@ -1179,6 +1352,36 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                                               warnings:warnings];
             if (!ok) {
                 [warnings addObject:@"Keychain restore failed (continuing)" ];
+            }
+
+            // Debug keychain list after restore
+            PXDebugHeader(debugKeychain, @"Keychain After Restore");
+            PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"groups=%@", groups ?: @[]]);
+            NSString *scriptPath = [runner firstExistingPath:@[@"/Library/WeaponX/keychain_backup.sh",
+                                                              @"/var/jb/Library/WeaponX/keychain_backup.sh",
+                                                              @"/private/var/jb/Library/WeaponX/keychain_backup.sh"]];
+            if (scriptPath.length && groups.count) {
+                NSString *csv = [groups componentsJoinedByString:@","];
+                PXDebugRun(runner, debugKeychain, @"list", [NSString stringWithFormat:@"%@ list %@ --groups %@", PXShellQuote(scriptPath), PXShellQuote(bundleID), PXShellQuote(csv)]);
+            }
+        }
+
+        // Debug snapshot: after restore
+        {
+            PXDebugHeader(debugPost, @"Restore Done");
+            NSDictionary *rp = PXResolvePathsForBundleID(bundleID);
+            NSString *lsDataPath = rp[@"lsDataContainerPath"];
+            PXDebugAppendLine(debugPost, [NSString stringWithFormat:@"lsDataContainerPath=%@", lsDataPath ?: @""]);
+            PXDebugAppendLine(debugPost, [NSString stringWithFormat:@"chosenDataContainerPath=%@", dataContainerPath ?: @""]);
+            PXDebugRun(runner, debugPost, @"du data", [NSString stringWithFormat:@"du -sk %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]);
+            PXDebugRun(runner, debugPost, @"ls prefs", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote([dataContainerPath stringByAppendingPathComponent:@"Library/Preferences"]) ]);
+            NSString *prefDest = [self _preferencesPlistPathForBundleID:bundleID];
+            PXDebugRun(runner, debugPost, @"ls global prefs", [NSString stringWithFormat:@"ls -lh %@ 2>/dev/null || true", PXShellQuote(prefDest)]);
+
+            if ([lsDataPath isKindOfClass:[NSString class]] && lsDataPath.length && ![lsDataPath isEqualToString:dataContainerPath]) {
+                PXDebugHeader(debugPost, @"WARNING: Active Container Differs");
+                PXDebugRun(runner, debugPost, @"du lsDataContainerPath", [NSString stringWithFormat:@"du -sk %@ 2>/dev/null || true", PXShellQuote(lsDataPath)]);
+                PXDebugRun(runner, debugPost, @"ls lsDataContainerPath/Library/Preferences", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote([lsDataPath stringByAppendingPathComponent:@"Library/Preferences"]) ]);
             }
         }
 

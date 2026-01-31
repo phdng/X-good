@@ -3860,11 +3860,11 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         }
     }
     
-    // Remove all non-system files first
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -type f -not -name '.com.apple*' -exec rm -f {} \\;", containerPath]];
+    // Remove all non-system files first (preserve .com.apple.mobile_container_manager* and .com.apple.containermanagerd*)
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -type f -not -name '.com.apple.mobile_container_manager*' -not -name '.com.apple.containermanagerd*' -exec rm -f {} \\;", containerPath]];
     
     // Then remove empty non-system directories from bottom up
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -depth -type d -not -name '.com.apple*' -empty -delete", containerPath]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -depth -type d -not -name '.com.apple.mobile_container_manager*' -not -name '.com.apple.containermanagerd*' -empty -delete", containerPath]];
     
     // Create minimal structure to avoid iOS crashes
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"mkdir -p '%@/Documents' '%@/Library/Caches' '%@/Library/Preferences' '%@/tmp'", 
