@@ -2,6 +2,7 @@
 
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
+#import <CoreFoundation/CoreFoundation.h>
 
 #import "AppDataCleaner.h"
 #import "FreezeManager.h"
@@ -402,6 +403,27 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     return NO;
 }
 
+static NSString *PXSafeBundleString(NSString *bundleID) {
+    if (!bundleID.length) return @"unknown";
+    NSCharacterSet *allowed = [NSCharacterSet alphanumericCharacterSet];
+    NSMutableString *out = [NSMutableString stringWithCapacity:bundleID.length];
+    for (NSUInteger i = 0; i < bundleID.length; i++) {
+        unichar c = [bundleID characterAtIndex:i];
+        if ([allowed characterIsMember:c]) {
+            [out appendFormat:@"%C", c];
+        } else {
+            [out appendString:@"_"];
+        }
+    }
+    return out;
+}
+
+static void PXDarwinNotifyPost(NSString *name) {
+    if (!name.length) return;
+    CFNotificationCenterRef c = CFNotificationCenterGetDarwinNotifyCenter();
+    CFNotificationCenterPostNotification(c, (__bridge CFStringRef)name, NULL, NULL, true);
+}
+
 - (BOOL)_inAppKeychainBackupForBundleID:(NSString *)bundleID
                           containerPath:(NSString *)dataContainerPath
                                  groups:(NSArray<NSString *> *)groups
@@ -411,11 +433,13 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     if (!bundleID.length || !dataContainerPath.length || !destFile.length) return NO;
     if (!groups.count) return NO;
 
-    NSString *safeBundle = [[bundleID componentsSeparatedByCharactersInSet:[[NSCharacterSet alphanumericCharacterSet] invertedSet]] componentsJoinedByString:@"_"];
+    NSString *safeBundle = PXSafeBundleString(bundleID);
     NSString *reqPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_request_%@.plist", safeBundle];
     NSString *respPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_response_%@.plist", safeBundle];
     NSString *outPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_export_%@.plist", safeBundle];
     NSString *logPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_bridge_%@.log", safeBundle];
+
+    NSString *nonce = [[NSUUID UUID] UUIDString];
 
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm removeItemAtPath:reqPath error:nil];
@@ -426,9 +450,11 @@ static BOOL PXOpenApplication(NSString *bundleID) {
         @"action": @"backup",
         @"bundleID": bundleID,
         @"groups": groups,
+        @"nonce": nonce,
         @"outPath": outPath,
         @"respPath": respPath,
         @"logPath": logPath,
+        @"bridgeOnly": @YES,
     };
     if (![req writeToFile:reqPath atomically:YES]) {
         [warnings addObject:@"In-app keychain backup: failed to write request" ];
@@ -438,6 +464,10 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     PXDebugHeader(debugKeychain, @"In-App Keychain Backup");
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"request=%@", reqPath]);
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"tmpOut=%@", outPath]);
+    PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"nonce=%@", nonce]);
+
+    // Notify bridge (best-effort)
+    PXDarwinNotifyPost([NSString stringWithFormat:@"com.hydra.weaponx.keychain.req.%@", safeBundle]);
 
     __block BOOL opened = NO;
     dispatch_sync(dispatch_get_main_queue(), ^{
@@ -445,9 +475,16 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     });
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"openApplication=%@", opened ? @"YES" : @"NO"]);
 
-    // Wait up to ~60s for response.
-    for (int i = 0; i < 240; i++) {
-        if ([fm fileExistsAtPath:respPath]) break;
+    // Wait up to ~20s for response (1 try).
+    NSDictionary *resp = nil;
+    for (int i = 0; i < 80; i++) {
+        if ([fm fileExistsAtPath:respPath]) {
+            NSDictionary *candidate = [NSDictionary dictionaryWithContentsOfFile:respPath];
+            if ([candidate isKindOfClass:[NSDictionary class]] && [candidate[@"nonce"] isKindOfClass:[NSString class]] && [candidate[@"nonce"] isEqualToString:nonce]) {
+                resp = candidate;
+                break;
+            }
+        }
         [NSThread sleepForTimeInterval:0.25];
     }
 
@@ -462,7 +499,6 @@ static BOOL PXOpenApplication(NSString *bundleID) {
                    @"ls -la /tmp 2>/dev/null || true");
     }
 
-    NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
     if (![resp isKindOfClass:[NSDictionary class]]) {
         [warnings addObject:@"In-app keychain backup: no response (timeout?)" ];
         [self _killRelatedProcessesForBundleID:bundleID];
@@ -512,11 +548,13 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     if (!bundleID.length || !dataContainerPath.length || !srcFile.length) return NO;
     if (!groups.count) return NO;
 
-    NSString *safeBundle = [[bundleID componentsSeparatedByCharactersInSet:[[NSCharacterSet alphanumericCharacterSet] invertedSet]] componentsJoinedByString:@"_"];
+    NSString *safeBundle = PXSafeBundleString(bundleID);
     NSString *reqPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_request_%@.plist", safeBundle];
     NSString *respPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_response_%@.plist", safeBundle];
     NSString *inPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_import_%@.plist", safeBundle];
     NSString *logPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_bridge_%@.log", safeBundle];
+
+    NSString *nonce = [[NSUUID UUID] UUIDString];
 
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm removeItemAtPath:reqPath error:nil];
@@ -536,6 +574,8 @@ static BOOL PXOpenApplication(NSString *bundleID) {
         @"overwrite": @(overwrite),
         @"respPath": respPath,
         @"logPath": logPath,
+        @"nonce": nonce,
+        @"bridgeOnly": @YES,
     };
     if (![req writeToFile:reqPath atomically:YES]) {
         [warnings addObject:@"In-app keychain restore: failed to write request" ];
@@ -545,6 +585,9 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     PXDebugHeader(debugKeychain, @"In-App Keychain Restore");
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"request=%@", reqPath]);
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"tmpIn=%@", inPath]);
+    PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"nonce=%@", nonce]);
+
+    PXDarwinNotifyPost([NSString stringWithFormat:@"com.hydra.weaponx.keychain.req.%@", safeBundle]);
 
     __block BOOL opened = NO;
     dispatch_sync(dispatch_get_main_queue(), ^{
@@ -552,8 +595,15 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     });
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"openApplication=%@", opened ? @"YES" : @"NO"]);
 
-    for (int i = 0; i < 240; i++) {
-        if ([fm fileExistsAtPath:respPath]) break;
+    NSDictionary *resp = nil;
+    for (int i = 0; i < 80; i++) {
+        if ([fm fileExistsAtPath:respPath]) {
+            NSDictionary *candidate = [NSDictionary dictionaryWithContentsOfFile:respPath];
+            if ([candidate isKindOfClass:[NSDictionary class]] && [candidate[@"nonce"] isKindOfClass:[NSString class]] && [candidate[@"nonce"] isEqualToString:nonce]) {
+                resp = candidate;
+                break;
+            }
+        }
         [NSThread sleepForTimeInterval:0.25];
     }
 
@@ -568,7 +618,6 @@ static BOOL PXOpenApplication(NSString *bundleID) {
                    @"ls -la /tmp 2>/dev/null || true");
     }
 
-    NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
     if (![resp isKindOfClass:[NSDictionary class]]) {
         [warnings addObject:@"In-app keychain restore: no response (timeout?)" ];
         [self _killRelatedProcessesForBundleID:bundleID];

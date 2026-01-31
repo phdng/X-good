@@ -53,7 +53,7 @@ all::
 	@echo "Building tweak, application, and daemon..."
 
 # Tweak Configuration (Moved from ProjectXTweak/Makefile)
-TWEAK_NAME = ProjectXTweak
+TWEAK_NAME = ProjectXTweak WeaponXKeychainBridge
 
 # Files - Adjusted paths for root compilation
 ProjectXTweak_FILES = $(wildcard ProjectXTweak/*.x) $(wildcard ProjectXTweak/*.m) $(wildcard common/*.m)
@@ -72,6 +72,13 @@ ProjectXTweak_LIBRARIES = MobileGestalt
 # -Wl,-no_fixup_chains: DISABLE chained fixups (Xcode 15+ default) which break iOS 12/13 compatibility
 # -Wl,-undefined,dynamic_lookup: standard for tweaks
 ProjectXTweak_LDFLAGS = -lobjc -Wl,-ObjC -Wl,-no_fixup_chains -Wl,-undefined,dynamic_lookup
+
+# Keychain Bridge Tweak (minimal, in-app keychain export/import)
+WeaponXKeychainBridge_FILES = WeaponXKeychainBridge/Tweak.m
+WeaponXKeychainBridge_PLIST = WeaponXKeychainBridge/WeaponXKeychainBridge.plist
+WeaponXKeychainBridge_CFLAGS = -fobjc-arc -Wno-error=unused-variable -Wno-error=unused-function
+WeaponXKeychainBridge_FRAMEWORKS = Foundation Security CoreFoundation
+WeaponXKeychainBridge_LDFLAGS = -lobjc -Wl,-ObjC -Wl,-no_fixup_chains -Wl,-undefined,dynamic_lookup
 
 # Include makefiles
 include $(THEOS_MAKE_PATH)/application.mk
@@ -95,6 +102,7 @@ internal-stage::
 	@echo "Creating MobileSubstrate directories for compatibility..."
 	@mkdir -p $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/
 	@cp -a $(THEOS_OBJ_DIR)/ProjectXTweak.* $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/
+	@cp -a $(THEOS_OBJ_DIR)/WeaponXKeychainBridge.* $(THEOS_STAGING_DIR)/Library/MobileSubstrate/DynamicLibraries/
 	@echo "Ensuring LaunchScreen.storyboard is properly compiled..."
 	@if [ -f "LaunchScreen.storyboard" ]; then \
 		mkdir -p $(THEOS_STAGING_DIR)/Applications/ProjectX.app/; \
