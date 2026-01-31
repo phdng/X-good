@@ -579,10 +579,19 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
 
         NSString *profileId = [self _activeProfileId];
 
+        // Prefer jailbreak/Procursus tar first (often has xattrs/acl support); /usr/bin/tar on iOS may not.
         NSString *tarPath = [runner firstExistingPath:@[
-            @"/usr/bin/tar",
+            @"/var/jb/usr/bin/gtar",
+            @"/private/preboot/jb/usr/bin/gtar",
+            @"/usr/local/bin/gtar",
+            @"/usr/bin/gtar",
+            @"/var/jb/usr/bin/bsdtar",
+            @"/private/preboot/jb/usr/bin/bsdtar",
+            @"/usr/local/bin/bsdtar",
+            @"/usr/bin/bsdtar",
             @"/var/jb/usr/bin/tar",
             @"/private/preboot/jb/usr/bin/tar",
+            @"/usr/bin/tar",
             @"/bin/tar"
         ]];
         if (!tarPath) {
@@ -667,6 +676,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"bundleID=%@", bundleID]);
             PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"profileId=%@", profileId ?: @""]);
             PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"timestamp=%@", timestamp]);
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"tarPath=%@", tarPath ?: @""]);
             PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"lsDataContainerPath=%@", rp[@"lsDataContainerPath"] ?: @""]);
             PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"lsContainerURLPath=%@", rp[@"lsContainerURLPath"] ?: @""]);
             PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"chosenDataContainerPath=%@", dataContainerPath ?: @""]);
@@ -1026,10 +1036,19 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"backupDir=%@", backupDir]);
         }
 
+        // Prefer jailbreak/Procursus tar first (often has xattrs/acl support); /usr/bin/tar on iOS may not.
         NSString *tarPath = [runner firstExistingPath:@[
-            @"/usr/bin/tar",
+            @"/var/jb/usr/bin/gtar",
+            @"/private/preboot/jb/usr/bin/gtar",
+            @"/usr/local/bin/gtar",
+            @"/usr/bin/gtar",
+            @"/var/jb/usr/bin/bsdtar",
+            @"/private/preboot/jb/usr/bin/bsdtar",
+            @"/usr/local/bin/bsdtar",
+            @"/usr/bin/bsdtar",
             @"/var/jb/usr/bin/tar",
             @"/private/preboot/jb/usr/bin/tar",
+            @"/usr/bin/tar",
             @"/bin/tar"
         ]];
         if (!tarPath) {
@@ -1039,6 +1058,8 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
             return;
         }
+
+        PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"tarPath=%@", tarPath]);
 
         NSString *manifestPath = [backupDir stringByAppendingPathComponent:@"manifest.plist"];
         NSDictionary *manifest = [NSDictionary dictionaryWithContentsOfFile:manifestPath];
@@ -1235,17 +1256,36 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
         PXDebugRun(runner, debugPre, @"ls container (before wipe)", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]);
         [self _wipeDirectoryContents:dataContainerPath];
         PXDebugRun(runner, debugPre, @"ls container (after wipe)", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]);
-        NSString *cloneCmd = [NSString stringWithFormat:@"%@ --xattrs --acls -cf - -C %@ . | %@ --xattrs --acls -xf - -C %@",
-                              PXShellQuote(tarPath),
-                              PXShellQuote(stagingData),
-                              PXShellQuote(tarPath),
-                              PXShellQuote(dataContainerPath)];
-        CommandResult *cloneRes = [runner runAndCapture:cloneCmd];
-        PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"tarPipeCloneExit=%d", (int)cloneRes.exitCode]);
-        if (cloneRes.stderrString.length) {
-            PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"tarPipeCloneStderr=%@", cloneRes.stderrString]);
+        BOOL shouldPreferCpClone = NO;
+        if ([tarPath isEqualToString:@"/usr/bin/tar"] || [tarPath isEqualToString:@"/bin/tar"]) {
+            // iOS system tar commonly lacks xattrs/acl support.
+            shouldPreferCpClone = YES;
         }
-        if (cloneRes.exitCode != 0) {
+
+        CommandResult *cloneRes = nil;
+        if (!shouldPreferCpClone) {
+            NSString *cloneCmd = [NSString stringWithFormat:@"%@ --xattrs --acls -cf - -C %@ . | %@ --xattrs --acls -xf - -C %@",
+                                  PXShellQuote(tarPath),
+                                  PXShellQuote(stagingData),
+                                  PXShellQuote(tarPath),
+                                  PXShellQuote(dataContainerPath)];
+            cloneRes = [runner runAndCapture:cloneCmd];
+            PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"tarPipeCloneExit=%d", (int)cloneRes.exitCode]);
+            if (cloneRes.stderrString.length) {
+                PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"tarPipeCloneStderr=%@", cloneRes.stderrString]);
+            }
+            if (cloneRes.exitCode != 0) {
+                shouldPreferCpClone = YES;
+            }
+            if (cloneRes.stderrString.length && [cloneRes.stderrString containsString:@"XATTR support is not available"]) {
+                // Even if tar returns exit=0, we will not get correct metadata.
+                shouldPreferCpClone = YES;
+            }
+        } else {
+            PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"tarPipeCloneSkipped=1 tarPath=%@", tarPath]);
+        }
+
+        if (shouldPreferCpClone) {
             NSString *fallbackCmd = [NSString stringWithFormat:@"cp -a %@/. %@/ 2>/dev/null",
                                      PXShellQuote(stagingData),
                                      PXShellQuote(dataContainerPath)];
@@ -1255,7 +1295,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                 PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"cpCloneStderr=%@", cpRes.stderrString]);
             }
             if (cpRes.exitCode != 0) {
-                NSString *msg = cloneRes.stderrString.length ? cloneRes.stderrString : @"tar pipe clone failed";
+                NSString *msg = (cloneRes && cloneRes.stderrString.length) ? cloneRes.stderrString : @"tar pipe clone failed";
                 if (cpRes.stderrString.length) {
                     msg = [msg stringByAppendingFormat:@"; cp: %@", cpRes.stderrString];
                 }
@@ -1266,6 +1306,9 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                 return;
             }
         }
+
+        // Ensure ownership is correct (some extraction/copy paths may produce root-owned files).
+        [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]];
 
         // Post-restore hygiene: refresh preferences daemon caches.
         // Some apps read state via cfprefsd and may not notice external file writes immediately.
