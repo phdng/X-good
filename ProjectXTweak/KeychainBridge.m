@@ -7,21 +7,16 @@ static NSString *PXKBSecError(OSStatus status) {
     return out;
 }
 
-static NSString *PXKBRequestPath(void) {
-    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"weaponx_keychain_request.plist"];
-}
-
-static NSString *PXKBResponsePath(void) {
-    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"weaponx_keychain_response.plist"];
-}
-
-static NSString *PXKBLogPath(void) {
-    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"weaponx_keychain_bridge.log"];
+static NSString *PXKBDefaultLogPath(void) {
+    // Use a global tmp path so ProjectX (and sandboxed apps) can coordinate without knowing container UUIDs.
+    NSString *bundle = [[NSBundle mainBundle] bundleIdentifier] ?: @"unknown";
+    NSString *safe = [[bundle componentsSeparatedByCharactersInSet:[[NSCharacterSet alphanumericCharacterSet] invertedSet]] componentsJoinedByString:@"_"];
+    return [NSString stringWithFormat:@"/tmp/weaponx_keychain_bridge_%@.log", safe];
 }
 
 static void PXKBLog(NSString *line) {
     if (!line.length) return;
-    NSString *path = PXKBLogPath();
+    NSString *path = PXKBDefaultLogPath();
     NSString *out = [line stringByAppendingString:@"\n"];
     NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
     if (!fh) {
@@ -272,7 +267,12 @@ static NSDictionary *PXKBImportItemsFromPlist(NSDictionary *backup, BOOL overwri
 }
 
 static void PXKBProcessRequestOnce(void) {
-    NSString *reqPath = PXKBRequestPath();
+    // Default request path. ProjectX can also drop requests elsewhere by specifying absolute paths.
+    // We poll only this well-known location per app.
+    NSString *bundle = [[NSBundle mainBundle] bundleIdentifier] ?: @"unknown";
+    NSString *safe = [[bundle componentsSeparatedByCharactersInSet:[[NSCharacterSet alphanumericCharacterSet] invertedSet]] componentsJoinedByString:@"_"];
+    NSString *reqPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_request_%@.plist", safe];
+
     NSDictionary *req = PXKBReadPlist(reqPath);
     if (![req isKindOfClass:[NSDictionary class]]) return;
 
@@ -291,17 +291,22 @@ static void PXKBProcessRequestOnce(void) {
         groups = @[];
     }
 
+    NSString *respPath = [req[@"respPath"] isKindOfClass:[NSString class]] ? req[@"respPath"] : [NSString stringWithFormat:@"/tmp/weaponx_keychain_response_%@.plist", safe];
+    NSString *logPath = [req[@"logPath"] isKindOfClass:[NSString class]] ? req[@"logPath"] : PXKBDefaultLogPath();
+
+    // If caller specified a log path, also mirror logs there.
+    if (logPath.length && ![logPath isEqualToString:PXKBDefaultLogPath()]) {
+        NSString *out = [[NSString stringWithFormat:@"mirror log to %@", logPath] stringByAppendingString:@"\n"];
+        [out writeToFile:logPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    }
+
     NSMutableDictionary *resp = [NSMutableDictionary dictionary];
     resp[@"bundleID"] = curBundle;
     resp[@"action"] = action ?: @"";
     resp[@"timestamp"] = @([[NSDate date] timeIntervalSince1970]);
 
     if ([action isEqualToString:@"backup"]) {
-        NSString *outName = req[@"outFileName"];
-        if (![outName isKindOfClass:[NSString class]] || !outName.length) {
-            outName = @"weaponx_keychain_export.plist";
-        }
-        NSString *outPath = [NSTemporaryDirectory() stringByAppendingPathComponent:outName];
+        NSString *outPath = [req[@"outPath"] isKindOfClass:[NSString class]] ? req[@"outPath"] : [NSString stringWithFormat:@"/tmp/weaponx_keychain_export_%@.plist", safe];
         NSError *exportErr = nil;
         NSArray *items = PXKBExportItems((NSArray *)groups, &exportErr);
         PXKBLog([NSString stringWithFormat:@"backup export items=%lu err=%@", (unsigned long)[(NSArray *)items count], exportErr.localizedDescription ?: @"" ]);
@@ -336,14 +341,15 @@ static void PXKBProcessRequestOnce(void) {
         resp[@"error"] = @"unknown action";
     }
 
-    PXKBWritePlist(resp, PXKBResponsePath());
-    PXKBLog([NSString stringWithFormat:@"wrote response: %@", PXKBResponsePath()]);
+    PXKBWritePlist(resp, respPath);
+    PXKBLog([NSString stringWithFormat:@"wrote response: %@", respPath]);
     [[NSFileManager defaultManager] removeItemAtPath:reqPath error:nil];
 }
 
 __attribute__((constructor)) static void PXKBInit(void) {
     @autoreleasepool {
-        PXKBLog(@"init");
+        NSString *bundle = [[NSBundle mainBundle] bundleIdentifier] ?: @"";
+        PXKBLog([NSString stringWithFormat:@"init bundle=%@ tmp=%@", bundle, NSTemporaryDirectory() ?: @"" ]);
         // Poll briefly for a request after launch.
         dispatch_async(dispatch_get_main_queue(), ^{
             __block int ticks = 0;

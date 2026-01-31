@@ -411,23 +411,24 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     if (!bundleID.length || !dataContainerPath.length || !destFile.length) return NO;
     if (!groups.count) return NO;
 
-    NSString *tmpDir = [dataContainerPath stringByAppendingPathComponent:@"tmp"];
-    NSString *reqPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_request.plist"];
-    NSString *respPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_response.plist"];
+    NSString *safeBundle = [[bundleID componentsSeparatedByCharactersInSet:[[NSCharacterSet alphanumericCharacterSet] invertedSet]] componentsJoinedByString:@"_"];
+    NSString *reqPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_request_%@.plist", safeBundle];
+    NSString *respPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_response_%@.plist", safeBundle];
+    NSString *outPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_export_%@.plist", safeBundle];
+    NSString *logPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_bridge_%@.log", safeBundle];
 
     NSFileManager *fm = [NSFileManager defaultManager];
-    [fm createDirectoryAtPath:tmpDir withIntermediateDirectories:YES attributes:nil error:nil];
     [fm removeItemAtPath:reqPath error:nil];
     [fm removeItemAtPath:respPath error:nil];
-    NSString *outName = @"weaponx_keychain_export.plist";
-    NSString *outPath = [tmpDir stringByAppendingPathComponent:outName];
     [fm removeItemAtPath:outPath error:nil];
 
     NSDictionary *req = @{
         @"action": @"backup",
         @"bundleID": bundleID,
         @"groups": groups,
-        @"outFileName": outName,
+        @"outPath": outPath,
+        @"respPath": respPath,
+        @"logPath": logPath,
     };
     if (![req writeToFile:reqPath atomically:YES]) {
         [warnings addObject:@"In-app keychain backup: failed to write request" ];
@@ -444,8 +445,6 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     });
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"openApplication=%@", opened ? @"YES" : @"NO"]);
 
-    NSString *logPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_bridge.log"];
-
     // Wait up to ~60s for response.
     for (int i = 0; i < 240; i++) {
         if ([fm fileExistsAtPath:respPath]) break;
@@ -459,8 +458,8 @@ static BOOL PXOpenApplication(NSString *bundleID) {
             PXDebugHeader(debugKeychain, @"In-App Bridge Log");
             PXDebugAppendLine(debugKeychain, bridgeLog);
         }
-        PXDebugRun([CommandRunner shared], debugKeychain, @"ls tmp (keychain bridge)",
-                   [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(tmpDir)]);
+        PXDebugRun([CommandRunner shared], debugKeychain, @"ls /tmp (keychain bridge)",
+                   @"ls -la /tmp 2>/dev/null || true");
     }
 
     NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
@@ -498,6 +497,8 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     [fm removeItemAtPath:respPath error:nil];
     [fm removeItemAtPath:outPath error:nil];
 
+    // Keep bridge log for debugging.
+
     return YES;
 }
 
@@ -511,14 +512,13 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     if (!bundleID.length || !dataContainerPath.length || !srcFile.length) return NO;
     if (!groups.count) return NO;
 
-    NSString *tmpDir = [dataContainerPath stringByAppendingPathComponent:@"tmp"];
-    NSString *reqPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_request.plist"];
-    NSString *respPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_response.plist"];
-    NSString *inPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_import.plist"];
-    NSString *logPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_bridge.log"];
+    NSString *safeBundle = [[bundleID componentsSeparatedByCharactersInSet:[[NSCharacterSet alphanumericCharacterSet] invertedSet]] componentsJoinedByString:@"_"];
+    NSString *reqPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_request_%@.plist", safeBundle];
+    NSString *respPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_response_%@.plist", safeBundle];
+    NSString *inPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_import_%@.plist", safeBundle];
+    NSString *logPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_bridge_%@.log", safeBundle];
 
     NSFileManager *fm = [NSFileManager defaultManager];
-    [fm createDirectoryAtPath:tmpDir withIntermediateDirectories:YES attributes:nil error:nil];
     [fm removeItemAtPath:reqPath error:nil];
     [fm removeItemAtPath:respPath error:nil];
     [fm removeItemAtPath:inPath error:nil];
@@ -534,6 +534,8 @@ static BOOL PXOpenApplication(NSString *bundleID) {
         @"groups": groups,
         @"inPath": inPath,
         @"overwrite": @(overwrite),
+        @"respPath": respPath,
+        @"logPath": logPath,
     };
     if (![req writeToFile:reqPath atomically:YES]) {
         [warnings addObject:@"In-app keychain restore: failed to write request" ];
@@ -562,8 +564,8 @@ static BOOL PXOpenApplication(NSString *bundleID) {
             PXDebugHeader(debugKeychain, @"In-App Bridge Log");
             PXDebugAppendLine(debugKeychain, bridgeLog);
         }
-        PXDebugRun([CommandRunner shared], debugKeychain, @"ls tmp (keychain bridge)",
-                   [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(tmpDir)]);
+        PXDebugRun([CommandRunner shared], debugKeychain, @"ls /tmp (keychain bridge)",
+                   @"ls -la /tmp 2>/dev/null || true");
     }
 
     NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
