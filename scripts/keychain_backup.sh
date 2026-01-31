@@ -296,6 +296,30 @@ parse_app_identifier() {
     echo "$identifier"
 }
 
+# === Ensure a group exists in a CSV list ===
+ensure_group_in_csv() {
+    local csv="$1"
+    local group="$2"
+    if [ -z "$group" ]; then
+        echo "$csv"
+        return 0
+    fi
+    # Normalize: remove any surrounding whitespace
+    group="$(echo "$group" | sed 's/^ *//;s/ *$//')"
+    if [ -z "$group" ]; then
+        echo "$csv"
+        return 0
+    fi
+    if [ -z "$csv" ]; then
+        echo "$group"
+        return 0
+    fi
+    case ",$csv," in
+        *",$group,"*) echo "$csv" ;;
+        *) echo "$csv,$group" ;;
+    esac
+}
+
 # === Generate entitlements plist for helper tool ===
 # For system apps, we copy the full entitlements and add our extras
 # For App Store apps, we generate minimal entitlements
@@ -548,6 +572,11 @@ do_backup() {
         log_warn "No application-identifier found, using bundle ID"
         app_identifier="$bundle_id"
     fi
+
+    # Include the app's default keychain access group (application-identifier).
+    # Many apps store keychain items under this group even if it is not listed in keychain-access-groups.
+    keychain_groups=$(ensure_group_in_csv "$keychain_groups" "$app_identifier")
+    log_info "Final keychain groups: $keychain_groups"
     
     # Detect if this is a system/Apple app that needs full entitlements
     # Check: 1) In /Applications, OR 2) Bundle ID starts with com.apple.
@@ -639,6 +668,9 @@ do_restore() {
     local app_identifier
     app_identifier=$(parse_app_identifier "$ent_file")
     [ -z "$app_identifier" ] && app_identifier="$bundle_id"
+
+    # Always include the default app keychain group.
+    keychain_groups=$(ensure_group_in_csv "$keychain_groups" "$app_identifier")
     
     # Detect system/Apple app
     local source_ent_for_system=""
@@ -720,6 +752,9 @@ do_wipe() {
     local app_identifier
     app_identifier=$(parse_app_identifier "$ent_file")
     [ -z "$app_identifier" ] && app_identifier="$bundle_id"
+
+    # Always include the default app keychain group.
+    keychain_groups=$(ensure_group_in_csv "$keychain_groups" "$app_identifier")
     
     # Detect system/Apple app
     local source_ent_for_system=""
@@ -782,6 +817,9 @@ do_list() {
     local app_identifier
     app_identifier=$(parse_app_identifier "$ent_file")
     [ -z "$app_identifier" ] && app_identifier="$bundle_id"
+
+    # Always include the default app keychain group.
+    keychain_groups=$(ensure_group_in_csv "$keychain_groups" "$app_identifier")
     
     # Detect system/Apple app
     local source_ent_for_system=""

@@ -101,24 +101,32 @@ static NSString *PXShellQuote(NSString *s) {
 }
 
 - (NSArray<NSString *> *)keychainAccessGroupsForBundleID:(NSString *)bundleID
-                                                   error:(NSError **)error {
+                                                    error:(NSError **)error {
     NSDictionary *entitlements = [self fullEntitlementsForBundleID:bundleID error:error];
     if (!entitlements) {
         return @[];
     }
 
-    id groups = entitlements[@"keychain-access-groups"];
-    if (![groups isKindOfClass:[NSArray class]]) {
-        return @[];
-    }
+    NSMutableOrderedSet<NSString *> *out = [NSMutableOrderedSet orderedSet];
 
-    NSMutableArray<NSString *> *out = [NSMutableArray array];
-    for (id g in (NSArray *)groups) {
-        if ([g isKindOfClass:[NSString class]] && [(NSString *)g length] > 0) {
-            [out addObject:g];
+    // Explicit keychain-access-groups
+    id groups = entitlements[@"keychain-access-groups"];
+    if ([groups isKindOfClass:[NSArray class]]) {
+        for (id g in (NSArray *)groups) {
+            if ([g isKindOfClass:[NSString class]] && [(NSString *)g length] > 0) {
+                [out addObject:(NSString *)g];
+            }
         }
     }
-    return out;
+
+    // Also include the app's default keychain group (application-identifier) if present.
+    // Many apps store keychain items under this group even when it is not listed in keychain-access-groups.
+    id appIdent = entitlements[@"application-identifier"];
+    if ([appIdent isKindOfClass:[NSString class]] && [(NSString *)appIdent length] > 0) {
+        [out addObject:(NSString *)appIdent];
+    }
+
+    return out.array;
 }
 
 - (NSString *)mainExecutablePathForBundleID:(NSString *)bundleID

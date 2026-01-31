@@ -834,6 +834,20 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                 }
             }
 
+            // Ensure default keychain group (application-identifier) is included even when the user has a saved subset.
+            // Many apps store keychain items under this group even when it is not listed in keychain-access-groups.
+            {
+                NSError *entErr = nil;
+                AppEntitlementsReader *reader = [[AppEntitlementsReader alloc] init];
+                NSDictionary *ent = [reader fullEntitlementsForBundleID:bundleID error:&entErr];
+                id appIdent = [ent isKindOfClass:[NSDictionary class]] ? ent[@"application-identifier"] : nil;
+                if ([appIdent isKindOfClass:[NSString class]] && [(NSString *)appIdent length] > 0) {
+                    NSMutableOrderedSet<NSString *> *set = [NSMutableOrderedSet orderedSetWithArray:selectedKeychainGroups ?: @[]];
+                    [set addObject:(NSString *)appIdent];
+                    selectedKeychainGroups = set.array;
+                }
+            }
+
             // Debug: list keychain items before backup
             {
                 PXDebugHeader(debugKeychain, @"Keychain Before Backup");
