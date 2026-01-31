@@ -97,8 +97,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *key = PXKeychainWipeEnabledKey(bundleID);
     if ([defaults objectForKey:key] == nil) {
-        // Default ON
-        return YES;
+        // Default OFF (safer): keychain wipe can log you out and may not be restorable for some apps.
+        return NO;
     }
     return [defaults boolForKey:key];
 }
@@ -124,7 +124,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     NSArray<NSString *> *groups = [reader keychainAccessGroupsForBundleID:bundleID error:&entErr];
     if (groups.count > 0) {
         [defaults setObject:groups forKey:PXKeychainWipeGroupsKey(bundleID)];
-        [defaults setBool:YES forKey:PXKeychainWipeEnabledKey(bundleID)];
+        // Keep wipe disabled by default; user can enable explicitly in UI.
+        [defaults setBool:NO forKey:PXKeychainWipeEnabledKey(bundleID)];
         [defaults synchronize];
         return groups;
     }

@@ -2810,7 +2810,8 @@ static UIImage *PXRemoveFromScopeIcon(void) {
     NSString *enabledKey = PXKeychainWipeEnabledKey(bundleID);
     NSString *groupsKey = PXKeychainWipeGroupsKey(bundleID);
 
-    BOOL keychainEnabled = YES;
+    // Default OFF (safer): wiping keychain will log out many apps.
+    BOOL keychainEnabled = NO;
     if ([defaults objectForKey:enabledKey] != nil) {
         keychainEnabled = [defaults boolForKey:enabledKey];
     }
@@ -2829,9 +2830,10 @@ static UIImage *PXRemoveFromScopeIcon(void) {
         if (entGroups.count > 0) {
             selectedGroups = entGroups;
             [defaults setObject:entGroups forKey:groupsKey];
-            [defaults setBool:YES forKey:enabledKey];
+            // Do not auto-enable keychain wipe.
+            [defaults setBool:NO forKey:enabledKey];
             [defaults synchronize];
-            keychainEnabled = YES;
+            keychainEnabled = NO;
         } else {
             selectedGroups = @[];
         }
@@ -2840,7 +2842,7 @@ static UIImage *PXRemoveFromScopeIcon(void) {
     NSString *keychainState = keychainEnabled ? @"ON" : @"OFF";
     NSString *groupsLine = selectedGroups.count > 0 ? [NSString stringWithFormat:@"%lu", (unsigned long)selectedGroups.count] : @"Unavailable";
 
-    NSString *msg = [NSString stringWithFormat:@"Are you sure you want to clear all data for this app? This will remove %@.%@\n\nKeychain Wipe: %@\nKeychain Groups: %@\n\nThis action cannot be undone.",
+    NSString *msg = [NSString stringWithFormat:@"Are you sure you want to clear all data for this app? This will remove %@.%@\n\nKeychain Wipe: %@ (may log you out)\nKeychain Groups: %@\n\nThis action cannot be undone.",
                      dataSizeStr ?: @"", dataDetailsStr ?: @"", keychainState, groupsLine];
 
     UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Clear App Data"

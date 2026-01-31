@@ -153,7 +153,6 @@ static NSString * const PXKeychainGroupsSavedNotification = @"com.hydra.projectx
 
 - (void)saveTapped {
     NSArray<NSString *> *sorted = [[self.selected allObjects] sortedArrayUsingSelector:@selector(compare:)];
-    [self.defaults setBool:YES forKey:PXKeychainWipeEnabledKey(self.bundleID)];
     [self.defaults setObject:sorted forKey:PXKeychainWipeGroupsKey(self.bundleID)];
     [self.defaults synchronize];
 
