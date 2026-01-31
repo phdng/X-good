@@ -452,14 +452,19 @@ static BOOL PXOpenApplication(NSString *bundleID) {
         [NSThread sleepForTimeInterval:0.25];
     }
 
-    NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
-    if (![resp isKindOfClass:[NSDictionary class]]) {
-        // Best-effort: include bridge log if present.
+    // Always capture bridge log + tmp dir state (best-effort)
+    {
         NSString *bridgeLog = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
         if (bridgeLog.length) {
             PXDebugHeader(debugKeychain, @"In-App Bridge Log");
             PXDebugAppendLine(debugKeychain, bridgeLog);
         }
+        PXDebugRun([CommandRunner shared], debugKeychain, @"ls tmp (keychain bridge)",
+                   [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(tmpDir)]);
+    }
+
+    NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
+    if (![resp isKindOfClass:[NSDictionary class]]) {
         [warnings addObject:@"In-app keychain backup: no response (timeout?)" ];
         [self _killRelatedProcessesForBundleID:bundleID];
         return NO;
@@ -550,13 +555,19 @@ static BOOL PXOpenApplication(NSString *bundleID) {
         [NSThread sleepForTimeInterval:0.25];
     }
 
-    NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
-    if (![resp isKindOfClass:[NSDictionary class]]) {
+    // Always capture bridge log + tmp dir state (best-effort)
+    {
         NSString *bridgeLog = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
         if (bridgeLog.length) {
             PXDebugHeader(debugKeychain, @"In-App Bridge Log");
             PXDebugAppendLine(debugKeychain, bridgeLog);
         }
+        PXDebugRun([CommandRunner shared], debugKeychain, @"ls tmp (keychain bridge)",
+                   [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(tmpDir)]);
+    }
+
+    NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
+    if (![resp isKindOfClass:[NSDictionary class]]) {
         [warnings addObject:@"In-app keychain restore: no response (timeout?)" ];
         [self _killRelatedProcessesForBundleID:bundleID];
         return NO;
