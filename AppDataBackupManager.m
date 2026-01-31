@@ -364,8 +364,204 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
     CommandRunner *runner = [CommandRunner shared];
     return [runner firstExistingPath:@[
         @"/Library/WeaponX/keychain_backup.sh",
-        @"/var/jb/Library/WeaponX/keychain_backup.sh"
+        @"/var/jb/Library/WeaponX/keychain_backup.sh",
+        @"/private/var/jb/Library/WeaponX/keychain_backup.sh"
     ]];
+}
+
+static BOOL PXGroupsContainPlatformFamily(NSArray<NSString *> *groups) {
+    for (NSString *g in groups) {
+        if (![g isKindOfClass:[NSString class]]) continue;
+        if ([g hasSuffix:@".platformFamily"] || [g containsString:@"platformFamily"]) {
+            return YES;
+        }
+    }
+    return NO;
+}
+
+static NSUInteger PXKeychainPlistItemCount(NSString *plistPath) {
+    NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+    if (![d isKindOfClass:[NSDictionary class]]) return 0;
+    id items = d[@"items"];
+    if ([items isKindOfClass:[NSArray class]]) {
+        return [(NSArray *)items count];
+    }
+    return 0;
+}
+
+static BOOL PXOpenApplication(NSString *bundleID) {
+    if (!bundleID.length) return NO;
+    Class wsCls = NSClassFromString(@"LSApplicationWorkspace");
+    if (!wsCls) return NO;
+    id ws = [wsCls performSelector:@selector(defaultWorkspace)];
+    if (!ws) return NO;
+    if ([ws respondsToSelector:@selector(openApplicationWithBundleID:)]) {
+        BOOL (*msgSend)(id, SEL, id) = (BOOL (*)(id, SEL, id))objc_msgSend;
+        return msgSend(ws, @selector(openApplicationWithBundleID:), bundleID);
+    }
+    return NO;
+}
+
+- (BOOL)_inAppKeychainBackupForBundleID:(NSString *)bundleID
+                          containerPath:(NSString *)dataContainerPath
+                                 groups:(NSArray<NSString *> *)groups
+                                 toFile:(NSString *)destFile
+                              debugPath:(NSString *)debugKeychain
+                               warnings:(NSMutableArray<NSString *> *)warnings {
+    if (!bundleID.length || !dataContainerPath.length || !destFile.length) return NO;
+    if (!groups.count) return NO;
+
+    NSString *tmpDir = [dataContainerPath stringByAppendingPathComponent:@"tmp"];
+    NSString *reqPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_request.plist"];
+    NSString *respPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_response.plist"];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm createDirectoryAtPath:tmpDir withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm removeItemAtPath:reqPath error:nil];
+    [fm removeItemAtPath:respPath error:nil];
+    NSString *outName = @"weaponx_keychain_export.plist";
+    NSString *outPath = [tmpDir stringByAppendingPathComponent:outName];
+    [fm removeItemAtPath:outPath error:nil];
+
+    NSDictionary *req = @{
+        @"action": @"backup",
+        @"bundleID": bundleID,
+        @"groups": groups,
+        @"outFileName": outName,
+    };
+    if (![req writeToFile:reqPath atomically:YES]) {
+        [warnings addObject:@"In-app keychain backup: failed to write request" ];
+        return NO;
+    }
+
+    PXDebugHeader(debugKeychain, @"In-App Keychain Backup");
+    PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"request=%@", reqPath]);
+    PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"tmpOut=%@", outPath]);
+
+    __block BOOL opened = NO;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        opened = PXOpenApplication(bundleID);
+    });
+    PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"openApplication=%@", opened ? @"YES" : @"NO"]);
+
+    // Wait up to ~12s for response.
+    for (int i = 0; i < 48; i++) {
+        if ([fm fileExistsAtPath:respPath]) break;
+        [NSThread sleepForTimeInterval:0.25];
+    }
+
+    NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
+    if (![resp isKindOfClass:[NSDictionary class]]) {
+        [warnings addObject:@"In-app keychain backup: no response (timeout?)" ];
+        [self _killRelatedProcessesForBundleID:bundleID];
+        return NO;
+    }
+
+    PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"resp=%@", resp]);
+
+    BOOL ok = [resp[@"ok"] respondsToSelector:@selector(boolValue)] ? [resp[@"ok"] boolValue] : NO;
+    if (!ok) {
+        NSString *err = [resp[@"error"] isKindOfClass:[NSString class]] ? resp[@"error"] : @"";
+        if (err.length) [warnings addObject:[NSString stringWithFormat:@"In-app keychain backup failed: %@", err]];
+        [self _killRelatedProcessesForBundleID:bundleID];
+        return NO;
+    }
+
+    if (![fm fileExistsAtPath:outPath]) {
+        [warnings addObject:@"In-app keychain backup: export file missing" ];
+        [self _killRelatedProcessesForBundleID:bundleID];
+        return NO;
+    }
+
+    [fm removeItemAtPath:destFile error:nil];
+    if (![fm copyItemAtPath:outPath toPath:destFile error:nil]) {
+        [warnings addObject:@"In-app keychain backup: failed to copy export to destination" ];
+        [self _killRelatedProcessesForBundleID:bundleID];
+        return NO;
+    }
+
+    [self _killRelatedProcessesForBundleID:bundleID];
+    [fm removeItemAtPath:reqPath error:nil];
+    [fm removeItemAtPath:respPath error:nil];
+    [fm removeItemAtPath:outPath error:nil];
+
+    return YES;
+}
+
+- (BOOL)_inAppKeychainRestoreForBundleID:(NSString *)bundleID
+                           containerPath:(NSString *)dataContainerPath
+                                  groups:(NSArray<NSString *> *)groups
+                                fromFile:(NSString *)srcFile
+                               overwrite:(BOOL)overwrite
+                               debugPath:(NSString *)debugKeychain
+                                warnings:(NSMutableArray<NSString *> *)warnings {
+    if (!bundleID.length || !dataContainerPath.length || !srcFile.length) return NO;
+    if (!groups.count) return NO;
+
+    NSString *tmpDir = [dataContainerPath stringByAppendingPathComponent:@"tmp"];
+    NSString *reqPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_request.plist"];
+    NSString *respPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_response.plist"];
+    NSString *inPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_import.plist"];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    [fm createDirectoryAtPath:tmpDir withIntermediateDirectories:YES attributes:nil error:nil];
+    [fm removeItemAtPath:reqPath error:nil];
+    [fm removeItemAtPath:respPath error:nil];
+    [fm removeItemAtPath:inPath error:nil];
+
+    if (![fm copyItemAtPath:srcFile toPath:inPath error:nil]) {
+        [warnings addObject:@"In-app keychain restore: failed to stage import file" ];
+        return NO;
+    }
+
+    NSDictionary *req = @{
+        @"action": @"restore",
+        @"bundleID": bundleID,
+        @"groups": groups,
+        @"inPath": inPath,
+        @"overwrite": @(overwrite),
+    };
+    if (![req writeToFile:reqPath atomically:YES]) {
+        [warnings addObject:@"In-app keychain restore: failed to write request" ];
+        return NO;
+    }
+
+    PXDebugHeader(debugKeychain, @"In-App Keychain Restore");
+    PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"request=%@", reqPath]);
+    PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"tmpIn=%@", inPath]);
+
+    __block BOOL opened = NO;
+    dispatch_sync(dispatch_get_main_queue(), ^{
+        opened = PXOpenApplication(bundleID);
+    });
+    PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"openApplication=%@", opened ? @"YES" : @"NO"]);
+
+    for (int i = 0; i < 48; i++) {
+        if ([fm fileExistsAtPath:respPath]) break;
+        [NSThread sleepForTimeInterval:0.25];
+    }
+
+    NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
+    if (![resp isKindOfClass:[NSDictionary class]]) {
+        [warnings addObject:@"In-app keychain restore: no response (timeout?)" ];
+        [self _killRelatedProcessesForBundleID:bundleID];
+        return NO;
+    }
+
+    PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"resp=%@", resp]);
+    BOOL ok = [resp[@"ok"] respondsToSelector:@selector(boolValue)] ? [resp[@"ok"] boolValue] : NO;
+    if (!ok) {
+        NSString *err = [resp[@"error"] isKindOfClass:[NSString class]] ? resp[@"error"] : @"";
+        if (err.length) [warnings addObject:[NSString stringWithFormat:@"In-app keychain restore failed: %@", err]];
+        [self _killRelatedProcessesForBundleID:bundleID];
+        return NO;
+    }
+
+    [self _killRelatedProcessesForBundleID:bundleID];
+    [fm removeItemAtPath:reqPath error:nil];
+    [fm removeItemAtPath:respPath error:nil];
+    [fm removeItemAtPath:inPath error:nil];
+    return YES;
 }
 
 - (BOOL)_backupKeychainForBundleID:(NSString *)bundleID
@@ -818,6 +1014,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
         // Keychain backup
         BOOL keychainIncluded = (options & PXBackupOptionIncludeKeychain) != 0;
         NSString *keychainBackupPath = nil;
+        NSString *keychainMethod = nil;
         NSArray<NSString *> *selectedKeychainGroups = @[];
         if (keychainIncluded) {
             keychainBackupPath = [backupDir stringByAppendingPathComponent:@"keychain.plist"];
@@ -878,11 +1075,33 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             if (!keychainSuccess) {
                 keychainBackupPath = nil; // Mark as not included if failed
             } else {
+                keychainMethod = @"helper";
                 [runner run:[NSString stringWithFormat:@"chmod 600 %@ 2>/dev/null || true", PXShellQuote(keychainBackupPath)]];
                 PXDebugHeader(debugKeychain, @"Keychain Backup Result");
                 PXDebugAppendLine(debugKeychain, @"status=ok");
                 PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"archive=%@", keychainBackupPath]);
                 PXDebugRun(runner, debugKeychain, @"ls keychain.plist", [NSString stringWithFormat:@"ls -lh %@ 2>/dev/null || true", PXShellQuote(keychainBackupPath)]);
+
+                // If helper cannot access restricted groups (e.g. *.platformFamily), fallback to in-app export.
+                NSUInteger count = PXKeychainPlistItemCount(keychainBackupPath);
+                PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"plistItems=%lu", (unsigned long)count]);
+                if (count == 0 && PXGroupsContainPlatformFamily(selectedKeychainGroups)) {
+                    PXDebugAppendLine(debugKeychain, @"helper returned 0 items; trying in-app export");
+                    BOOL inAppOK = [self _inAppKeychainBackupForBundleID:bundleID
+                                                           containerPath:dataContainerPath
+                                                                  groups:selectedKeychainGroups
+                                                                  toFile:keychainBackupPath
+                                                               debugPath:debugKeychain
+                                                                warnings:warnings];
+                    if (inAppOK) {
+                        keychainMethod = @"in_app";
+                        [runner run:[NSString stringWithFormat:@"chmod 600 %@ 2>/dev/null || true", PXShellQuote(keychainBackupPath)]];
+                        PXDebugRun(runner, debugKeychain, @"ls keychain.plist (after in-app)", [NSString stringWithFormat:@"ls -lh %@ 2>/dev/null || true", PXShellQuote(keychainBackupPath)]);
+                        PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"plistItemsAfterInApp=%lu", (unsigned long)PXKeychainPlistItemCount(keychainBackupPath)]);
+                    } else {
+                        PXDebugAppendLine(debugKeychain, @"in-app export failed");
+                    }
+                }
             }
         }
 
@@ -939,7 +1158,8 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             @"keychain": @{
                 @"included": @(keychainBackupPath != nil),
                 @"archive": keychainBackupPath ? @"keychain.plist" : @"",
-                @"groupsSelected": selectedKeychainGroups ?: @[]
+                @"groupsSelected": selectedKeychainGroups ?: @[],
+                @"method": keychainMethod ?: @""
             },
             @"profileAppData": @{
                 @"included": @(profileAppDataArchivePath != nil),
@@ -1458,11 +1678,27 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             if ([keychainInfo isKindOfClass:[NSDictionary class]] && [keychainInfo[@"groupsSelected"] isKindOfClass:[NSArray class]]) {
                 groups = keychainInfo[@"groupsSelected"];
             }
-            BOOL ok = [self _restoreKeychainForBundleID:bundleID
-                                                groups:groups
-                                              fromFile:keychainBackupPath
-                                             overwrite:YES
-                                              warnings:warnings];
+            NSString *method = ([keychainInfo isKindOfClass:[NSDictionary class]] && [keychainInfo[@"method"] isKindOfClass:[NSString class]]) ? keychainInfo[@"method"] : @"";
+            BOOL shouldUseInApp = PXGroupsContainPlatformFamily(groups) || [method isEqualToString:@"in_app"];
+
+            BOOL ok = NO;
+            if (shouldUseInApp) {
+                // Use app context so keychain access uses the app's original entitlements.
+                ok = [self _inAppKeychainRestoreForBundleID:bundleID
+                                              containerPath:dataContainerPath
+                                                     groups:groups
+                                                   fromFile:keychainBackupPath
+                                                  overwrite:YES
+                                                  debugPath:debugKeychain
+                                                   warnings:warnings];
+            } else {
+                ok = [self _restoreKeychainForBundleID:bundleID
+                                              groups:groups
+                                            fromFile:keychainBackupPath
+                                           overwrite:YES
+                                            warnings:warnings];
+            }
+
             if (!ok) {
                 [warnings addObject:@"Keychain restore failed (continuing)" ];
             }
@@ -1470,12 +1706,16 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             // Debug keychain list after restore
             PXDebugHeader(debugKeychain, @"Keychain After Restore");
             PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"groups=%@", groups ?: @[]]);
-            NSString *scriptPath = [runner firstExistingPath:@[@"/Library/WeaponX/keychain_backup.sh",
-                                                              @"/var/jb/Library/WeaponX/keychain_backup.sh",
-                                                              @"/private/var/jb/Library/WeaponX/keychain_backup.sh"]];
-            if (scriptPath.length && groups.count) {
-                NSString *csv = [groups componentsJoinedByString:@","];
-                PXDebugRun(runner, debugKeychain, @"list", [NSString stringWithFormat:@"%@ list %@ --groups %@", PXShellQuote(scriptPath), PXShellQuote(bundleID), PXShellQuote(csv)]);
+            if (!shouldUseInApp) {
+                NSString *scriptPath = [runner firstExistingPath:@[@"/Library/WeaponX/keychain_backup.sh",
+                                                                  @"/var/jb/Library/WeaponX/keychain_backup.sh",
+                                                                  @"/private/var/jb/Library/WeaponX/keychain_backup.sh"]];
+                if (scriptPath.length && groups.count) {
+                    NSString *csv = [groups componentsJoinedByString:@","];
+                    PXDebugRun(runner, debugKeychain, @"list", [NSString stringWithFormat:@"%@ list %@ --groups %@", PXShellQuote(scriptPath), PXShellQuote(bundleID), PXShellQuote(csv)]);
+                }
+            } else {
+                PXDebugAppendLine(debugKeychain, @"post-restore list skipped (used in-app keychain method)" );
             }
         }
 
