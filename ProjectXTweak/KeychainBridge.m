@@ -15,6 +15,24 @@ static NSString *PXKBResponsePath(void) {
     return [NSTemporaryDirectory() stringByAppendingPathComponent:@"weaponx_keychain_response.plist"];
 }
 
+static NSString *PXKBLogPath(void) {
+    return [NSTemporaryDirectory() stringByAppendingPathComponent:@"weaponx_keychain_bridge.log"];
+}
+
+static void PXKBLog(NSString *line) {
+    if (!line.length) return;
+    NSString *path = PXKBLogPath();
+    NSString *out = [line stringByAppendingString:@"\n"];
+    NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:path];
+    if (!fh) {
+        [out writeToFile:path atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+    [fh seekToEndOfFile];
+    [fh writeData:[out dataUsingEncoding:NSUTF8StringEncoding]];
+    [fh closeFile];
+}
+
 static NSDictionary *PXKBReadPlist(NSString *path) {
     if (!path.length) return nil;
     return [NSDictionary dictionaryWithContentsOfFile:path];
@@ -258,10 +276,13 @@ static void PXKBProcessRequestOnce(void) {
     NSDictionary *req = PXKBReadPlist(reqPath);
     if (![req isKindOfClass:[NSDictionary class]]) return;
 
+    PXKBLog([NSString stringWithFormat:@"saw request: %@", reqPath]);
+
     NSString *action = req[@"action"];
     NSString *bundleID = req[@"bundleID"];
     NSString *curBundle = [[NSBundle mainBundle] bundleIdentifier] ?: @"";
     if (bundleID.length && ![bundleID isEqualToString:curBundle]) {
+        PXKBLog([NSString stringWithFormat:@"bundle mismatch req=%@ cur=%@", bundleID ?: @"", curBundle]);
         return;
     }
 
@@ -283,6 +304,7 @@ static void PXKBProcessRequestOnce(void) {
         NSString *outPath = [NSTemporaryDirectory() stringByAppendingPathComponent:outName];
         NSError *exportErr = nil;
         NSArray *items = PXKBExportItems((NSArray *)groups, &exportErr);
+        PXKBLog([NSString stringWithFormat:@"backup export items=%lu err=%@", (unsigned long)[(NSArray *)items count], exportErr.localizedDescription ?: @"" ]);
         NSDictionary *backup = @{
             @"version": @1,
             @"created": @([[NSDate date] timeIntervalSince1970]),
@@ -290,6 +312,7 @@ static void PXKBProcessRequestOnce(void) {
             @"items": items ?: @[],
         };
         BOOL ok = PXKBWritePlist(backup, outPath);
+        PXKBLog([NSString stringWithFormat:@"wrote export plist ok=%d outPath=%@", ok, outPath]);
         resp[@"ok"] = @(ok);
         resp[@"items"] = @([(NSArray *)items count]);
         resp[@"outPath"] = outPath;
@@ -299,10 +322,12 @@ static void PXKBProcessRequestOnce(void) {
         NSNumber *overwrite = req[@"overwrite"];
         NSDictionary *backup = [NSDictionary dictionaryWithContentsOfFile:inPath ?: @""];
         NSDictionary *r = PXKBImportItemsFromPlist(backup, overwrite ? [overwrite boolValue] : YES);
+        PXKBLog([NSString stringWithFormat:@"restore result=%@", r]);
         [resp addEntriesFromDictionary:r];
     } else if ([action isEqualToString:@"list"]) {
         NSError *exportErr = nil;
         NSArray *items = PXKBExportItems((NSArray *)groups, &exportErr);
+        PXKBLog([NSString stringWithFormat:@"list items=%lu err=%@", (unsigned long)[(NSArray *)items count], exportErr.localizedDescription ?: @"" ]);
         resp[@"ok"] = @YES;
         resp[@"items"] = @([(NSArray *)items count]);
         if (exportErr) resp[@"error"] = exportErr.localizedDescription ?: @"";
@@ -312,11 +337,13 @@ static void PXKBProcessRequestOnce(void) {
     }
 
     PXKBWritePlist(resp, PXKBResponsePath());
+    PXKBLog([NSString stringWithFormat:@"wrote response: %@", PXKBResponsePath()]);
     [[NSFileManager defaultManager] removeItemAtPath:reqPath error:nil];
 }
 
 __attribute__((constructor)) static void PXKBInit(void) {
     @autoreleasepool {
+        PXKBLog(@"init");
         // Poll briefly for a request after launch.
         dispatch_async(dispatch_get_main_queue(), ^{
             __block int ticks = 0;
@@ -325,8 +352,8 @@ __attribute__((constructor)) static void PXKBInit(void) {
             dispatch_source_set_event_handler(t, ^{
                 ticks++;
                 PXKBProcessRequestOnce();
-                // Stop after ~10s.
-                if (ticks > 40) {
+                // Stop after ~60s.
+                if (ticks > 240) {
                     dispatch_source_cancel(t);
                 }
             });

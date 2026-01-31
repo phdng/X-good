@@ -444,14 +444,22 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     });
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"openApplication=%@", opened ? @"YES" : @"NO"]);
 
-    // Wait up to ~12s for response.
-    for (int i = 0; i < 48; i++) {
+    NSString *logPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_bridge.log"];
+
+    // Wait up to ~60s for response.
+    for (int i = 0; i < 240; i++) {
         if ([fm fileExistsAtPath:respPath]) break;
         [NSThread sleepForTimeInterval:0.25];
     }
 
     NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
     if (![resp isKindOfClass:[NSDictionary class]]) {
+        // Best-effort: include bridge log if present.
+        NSString *bridgeLog = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+        if (bridgeLog.length) {
+            PXDebugHeader(debugKeychain, @"In-App Bridge Log");
+            PXDebugAppendLine(debugKeychain, bridgeLog);
+        }
         [warnings addObject:@"In-app keychain backup: no response (timeout?)" ];
         [self _killRelatedProcessesForBundleID:bundleID];
         return NO;
@@ -536,13 +544,18 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     });
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"openApplication=%@", opened ? @"YES" : @"NO"]);
 
-    for (int i = 0; i < 48; i++) {
+    for (int i = 0; i < 240; i++) {
         if ([fm fileExistsAtPath:respPath]) break;
         [NSThread sleepForTimeInterval:0.25];
     }
 
     NSDictionary *resp = [NSDictionary dictionaryWithContentsOfFile:respPath];
     if (![resp isKindOfClass:[NSDictionary class]]) {
+        NSString *bridgeLog = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+        if (bridgeLog.length) {
+            PXDebugHeader(debugKeychain, @"In-App Bridge Log");
+            PXDebugAppendLine(debugKeychain, bridgeLog);
+        }
         [warnings addObject:@"In-app keychain restore: no response (timeout?)" ];
         [self _killRelatedProcessesForBundleID:bundleID];
         return NO;
@@ -1749,3 +1762,4 @@ static BOOL PXOpenApplication(NSString *bundleID) {
 }
 
 @end
+    NSString *logPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_bridge.log"];
