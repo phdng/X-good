@@ -331,12 +331,26 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
     if (!dirPath.length) {
         return;
     }
-    CommandRunner *runner = [CommandRunner shared];
-    // Only wipe contents, keep the directory itself (including dotfiles).
-    [runner run:[NSString stringWithFormat:@"rm -rf %@/* %@/.[!.]* %@/..?* 2>/dev/null || true",
-                 PXShellQuote(dirPath),
-                 PXShellQuote(dirPath),
-                 PXShellQuote(dirPath)]];
+    // Wipe everything inside the directory, but preserve container metadata files.
+    // Deleting these can break MCM/LaunchServices container mapping (especially for App Groups).
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSError *listErr = nil;
+    NSArray<NSString *> *items = [fm contentsOfDirectoryAtPath:dirPath error:&listErr];
+    if (!items.count) {
+        return;
+    }
+    NSSet<NSString *> *preserve = [NSSet setWithArray:@[
+        @".com.apple.mobile_container_manager.metadata.plist",
+        @".com.apple.containermanagerd.metadata.plist"
+    ]];
+    for (NSString *name in items) {
+        if (![name isKindOfClass:[NSString class]] || !name.length) continue;
+        if ([preserve containsObject:name]) {
+            continue;
+        }
+        NSString *p = [dirPath stringByAppendingPathComponent:name];
+        [fm removeItemAtPath:p error:nil];
+    }
 }
 
 - (NSString *)_preferencesPlistPathForBundleID:(NSString *)bundleID {
@@ -1313,7 +1327,12 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
 
         // Wipe and restore each group
         for (AppGroupContainerInfo *info in groupContainers) {
+            // Debug: group state before wipe
+            PXDebugHeader(debugPre, [NSString stringWithFormat:@"Group Restore: %@", info.groupID ?: @""]);
+            PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"groupPath=%@", info.path ?: @""]);
+            PXDebugRun(runner, debugPre, @"ls group (before)", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(info.path)]);
             [self _wipeDirectoryContents:info.path];
+            PXDebugRun(runner, debugPre, @"ls group (after wipe)", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(info.path)]);
 
             NSString *archiveName = [NSString stringWithFormat:@"%@.tar.gz", PXSanitizeFilenameComponent(info.groupID)];
             NSString *archivePath = [[backupDir stringByAppendingPathComponent:@"groups"] stringByAppendingPathComponent:archiveName];
@@ -1333,6 +1352,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             }
 
             [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(info.path)]];
+            PXDebugRun(runner, debugPost, @"ls group (after extract)", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(info.path)]);
         }
 
         // Preferences restore
