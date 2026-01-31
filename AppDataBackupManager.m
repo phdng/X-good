@@ -510,6 +510,7 @@ static BOOL PXOpenApplication(NSString *bundleID) {
     NSString *reqPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_request.plist"];
     NSString *respPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_response.plist"];
     NSString *inPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_import.plist"];
+    NSString *logPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_bridge.log"];
 
     NSFileManager *fm = [NSFileManager defaultManager];
     [fm createDirectoryAtPath:tmpDir withIntermediateDirectories:YES attributes:nil error:nil];
@@ -1762,4 +1763,3 @@ static BOOL PXOpenApplication(NSString *bundleID) {
 }
 
 @end
-    NSString *logPath = [tmpDir stringByAppendingPathComponent:@"weaponx_keychain_bridge.log"];
