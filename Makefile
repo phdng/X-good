@@ -75,7 +75,6 @@ ProjectXTweak_LDFLAGS = -lobjc -Wl,-ObjC -Wl,-no_fixup_chains -Wl,-undefined,dyn
 
 # Keychain Bridge Tweak (minimal, in-app keychain export/import)
 WeaponXKeychainBridge_FILES = WeaponXKeychainBridge/Tweak.m
-WeaponXKeychainBridge_PLIST = WeaponXKeychainBridge/WeaponXKeychainBridge.plist
 WeaponXKeychainBridge_CFLAGS = -fobjc-arc -Wno-error=unused-variable -Wno-error=unused-function
 WeaponXKeychainBridge_FRAMEWORKS = Foundation Security CoreFoundation
 WeaponXKeychainBridge_LDFLAGS = -lobjc -Wl,-ObjC -Wl,-no_fixup_chains -Wl,-undefined,dynamic_lookup
