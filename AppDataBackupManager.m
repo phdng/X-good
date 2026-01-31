@@ -1215,18 +1215,31 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
         }
 
         // Wipe data container contents and clone from staging via tar pipe.
+        PXDebugHeader(debugPre, @"Data Restore (Staging -> Container)");
+        PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"stagingData=%@", stagingData ?: @""]);
+        PXDebugRun(runner, debugPre, @"du stagingData", [NSString stringWithFormat:@"du -sk %@ 2>/dev/null || true", PXShellQuote(stagingData)]);
+        PXDebugRun(runner, debugPre, @"ls container (before wipe)", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]);
         [self _wipeDirectoryContents:dataContainerPath];
+        PXDebugRun(runner, debugPre, @"ls container (after wipe)", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]);
         NSString *cloneCmd = [NSString stringWithFormat:@"%@ --xattrs --acls -cf - -C %@ . | %@ --xattrs --acls -xf - -C %@",
                               PXShellQuote(tarPath),
                               PXShellQuote(stagingData),
                               PXShellQuote(tarPath),
                               PXShellQuote(dataContainerPath)];
         CommandResult *cloneRes = [runner runAndCapture:cloneCmd];
+        PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"tarPipeCloneExit=%d", (int)cloneRes.exitCode]);
+        if (cloneRes.stderrString.length) {
+            PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"tarPipeCloneStderr=%@", cloneRes.stderrString]);
+        }
         if (cloneRes.exitCode != 0) {
             NSString *fallbackCmd = [NSString stringWithFormat:@"cp -a %@/. %@/ 2>/dev/null",
                                      PXShellQuote(stagingData),
                                      PXShellQuote(dataContainerPath)];
             CommandResult *cpRes = [runner runAndCapture:fallbackCmd];
+            PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"cpCloneExit=%d", (int)cpRes.exitCode]);
+            if (cpRes.stderrString.length) {
+                PXDebugAppendLine(debugPre, [NSString stringWithFormat:@"cpCloneStderr=%@", cpRes.stderrString]);
+            }
             if (cpRes.exitCode != 0) {
                 NSString *msg = cloneRes.stderrString.length ? cloneRes.stderrString : @"tar pipe clone failed";
                 if (cpRes.stderrString.length) {
@@ -1240,7 +1253,9 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             }
         }
 
-        [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(dataContainerPath)]];
+        // Post-restore hygiene: refresh preferences daemon caches.
+        // Some apps read state via cfprefsd and may not notice external file writes immediately.
+        [runner run:@"killall -TERM cfprefsd 2>/dev/null || true"]; 
 
         // Cleanup staging best-effort
         [fm removeItemAtPath:stagingRoot error:nil];
