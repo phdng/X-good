@@ -72,7 +72,12 @@ typedef NS_OPTIONS(NSUInteger, PXKeychainItemClass) {
 /// @param itemClasses Bitmask of keychain item classes to list.
 /// @return Array of dictionaries describing each item.
 + (NSArray<NSDictionary *> *)listKeychainItemsForAccessGroups:(NSArray<NSString *> *)groups
-                                                  itemClasses:(PXKeychainItemClass)itemClasses;
+                                                   itemClasses:(PXKeychainItemClass)itemClasses;
+
+/// Diagnose keychain access for the specified groups/classes.
+/// Returns one entry per (group,class) with status and match count.
++ (NSArray<NSDictionary *> *)diagnoseKeychainAccessForGroups:(NSArray<NSString *> *)groups
+                                                 itemClasses:(PXKeychainItemClass)itemClasses;
 
 @end
 

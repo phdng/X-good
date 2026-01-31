@@ -233,10 +233,24 @@ int main(int argc, const char *argv[]) {
                     logError(@"--groups is required for list");
                     return 1;
                 }
-                
+
+                logVerbose(verbose, @"Diagnosing keychain access...");
+                if (verbose) {
+                    NSArray<NSDictionary *> *diag = [KeychainBackupHelper diagnoseKeychainAccessForGroups:groups
+                                                                                           itemClasses:PXKeychainItemClassAll];
+                    for (NSDictionary *d in diag) {
+                        fprintf(stdout, "[DIAG] group=%s class=%s status=%d (%s) count=%lu\n",
+                                [[d[@"accessGroup"] description] UTF8String] ?: "",
+                                [[d[@"class"] description] UTF8String] ?: "",
+                                [d[@"status"] intValue],
+                                [[d[@"statusDesc"] description] UTF8String] ?: "",
+                                (unsigned long)[d[@"count"] unsignedIntegerValue]);
+                    }
+                }
+
                 logVerbose(verbose, @"Listing keychain items...");
                 NSArray<NSDictionary *> *items = [KeychainBackupHelper listKeychainItemsForAccessGroups:groups
-                                                                                            itemClasses:PXKeychainItemClassAll];
+                                                                                             itemClasses:PXKeychainItemClassAll];
                 
                 fprintf(stdout, "Found %lu keychain items:\n", (unsigned long)items.count);
                 for (NSDictionary *item in items) {

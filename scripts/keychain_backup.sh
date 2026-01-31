@@ -617,7 +617,11 @@ do_backup() {
     
     # Execute backup using the resigned copy
     log_info "Executing backup..."
-    "$working_helper" --action backup --file "$backup_file" --groups "$keychain_groups"
+    local helper_args=("--action" "backup" "--file" "$backup_file" "--groups" "$keychain_groups")
+    if [ "$VERBOSE" -eq 1 ]; then
+        helper_args+=("--verbose")
+    fi
+    "$working_helper" "${helper_args[@]}"
     
     local exit_code=$?
     if [ $exit_code -eq 0 ]; then
@@ -702,7 +706,14 @@ do_restore() {
         extra_args="--overwrite"
     fi
     
-    "$working_helper" --action restore --file "$backup_file" $extra_args
+    local helper_args=("--action" "restore" "--file" "$backup_file")
+    if [ -n "$extra_args" ]; then
+        helper_args+=("$extra_args")
+    fi
+    if [ "$VERBOSE" -eq 1 ]; then
+        helper_args+=("--verbose")
+    fi
+    "$working_helper" "${helper_args[@]}"
     
     local exit_code=$?
     if [ $exit_code -eq 0 ]; then
@@ -777,7 +788,11 @@ do_wipe() {
     
     resign_helper "$helper_ent" "$working_helper" || return 1
     
-    "$working_helper" --action wipe --groups "$keychain_groups"
+    local helper_args=("--action" "wipe" "--groups" "$keychain_groups")
+    if [ "$VERBOSE" -eq 1 ]; then
+        helper_args+=("--verbose")
+    fi
+    "$working_helper" "${helper_args[@]}"
     
     return $?
 }
@@ -842,7 +857,11 @@ do_list() {
     
     resign_helper "$helper_ent" "$working_helper" || return 1
     
-    "$working_helper" --action list --groups "$keychain_groups"
+    local helper_args=("--action" "list" "--groups" "$keychain_groups")
+    if [ "$VERBOSE" -eq 1 ]; then
+        helper_args+=("--verbose")
+    fi
+    "$working_helper" "${helper_args[@]}"
     
     return $?
 }

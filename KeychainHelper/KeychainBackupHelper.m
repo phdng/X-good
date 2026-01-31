@@ -51,6 +51,16 @@ static NSString *PXSecurityErrorDescription(OSStatus status) {
     return desc;
 }
 
+// Optional query knobs to avoid UI prompts and to surface errors.
+static void PXAddAuthUIFlags(NSMutableDictionary *query) {
+    if (!query) return;
+    // iOS 9+: control whether SecItem may prompt.
+    // Using FAIL ensures we get a clear error instead of UI/blocks.
+    if (@available(iOS 9.0, *)) {
+        query[(__bridge id)kSecUseAuthenticationUI] = (__bridge id)kSecUseAuthenticationUIFail;
+    }
+}
+
 /// List of all keychain classes to iterate.
 static NSArray<NSNumber *> *PXAllKeychainClasses(void) {
     return @[
@@ -126,14 +136,15 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
         if (!secClass) continue;
         
         // Query for all items of this class with matching access groups.
-        NSDictionary *query = @{
+        NSMutableDictionary *query = [@{
             (__bridge id)kSecClass: (__bridge id)secClass,
             (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
             (__bridge id)kSecReturnAttributes: @YES,
             (__bridge id)kSecReturnData: @YES,
             (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
             (__bridge id)kSecAttrAccessGroup: groups.firstObject, // Primary group
-        };
+        } mutableCopy];
+        PXAddAuthUIFlags(query);
         
         CFTypeRef cfResult = NULL;
         OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &cfResult);
@@ -201,14 +212,15 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
             CFTypeRef secClass = PXSecItemClassFromType(classType);
             if (!secClass) continue;
             
-            NSDictionary *query = @{
+            NSMutableDictionary *query = [@{
                 (__bridge id)kSecClass: (__bridge id)secClass,
                 (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
                 (__bridge id)kSecReturnAttributes: @YES,
                 (__bridge id)kSecReturnData: @YES,
                 (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
                 (__bridge id)kSecAttrAccessGroup: group,
-            };
+            } mutableCopy];
+            PXAddAuthUIFlags(query);
             
             CFTypeRef cfResult = NULL;
             OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &cfResult);
@@ -482,18 +494,21 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
             CFTypeRef secClass = PXSecItemClassFromType(classType);
             if (!secClass) continue;
             
-            NSDictionary *query = @{
+            NSMutableDictionary *query = [@{
                 (__bridge id)kSecClass: (__bridge id)secClass,
                 (__bridge id)kSecAttrAccessGroup: group,
-            };
+            } mutableCopy];
+            PXAddAuthUIFlags(query);
             
             // First count items.
-            NSDictionary *countQuery = @{
+            NSMutableDictionary *countQuery = [@{
                 (__bridge id)kSecClass: (__bridge id)secClass,
                 (__bridge id)kSecAttrAccessGroup: group,
                 (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
                 (__bridge id)kSecReturnAttributes: @YES,
-            };
+                (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
+            } mutableCopy];
+            PXAddAuthUIFlags(countQuery);
             
             CFTypeRef countResult = NULL;
             OSStatus countStatus = SecItemCopyMatching((__bridge CFDictionaryRef)countQuery, &countResult);
@@ -530,7 +545,7 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
 #pragma mark - List
 
 + (NSArray<NSDictionary *> *)listKeychainItemsForAccessGroups:(NSArray<NSString *> *)groups
-                                                  itemClasses:(PXKeychainItemClass)itemClasses {
+                                                   itemClasses:(PXKeychainItemClass)itemClasses {
     NSMutableArray<NSDictionary *> *allItems = [NSMutableArray array];
     
     for (NSString *group in groups) {
@@ -541,12 +556,14 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
             CFTypeRef secClass = PXSecItemClassFromType(classType);
             if (!secClass) continue;
             
-            NSDictionary *query = @{
+            NSMutableDictionary *query = [@{
                 (__bridge id)kSecClass: (__bridge id)secClass,
                 (__bridge id)kSecAttrAccessGroup: group,
                 (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
                 (__bridge id)kSecReturnAttributes: @YES,
-            };
+                (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
+            } mutableCopy];
+            PXAddAuthUIFlags(query);
             
             CFTypeRef cfResult = NULL;
             OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &cfResult);
@@ -583,6 +600,50 @@ static NSSet<NSString *> *PXExcludedRestoreAttributes(void) {
     }
     
     return allItems;
+}
+
++ (NSArray<NSDictionary *> *)diagnoseKeychainAccessForGroups:(NSArray<NSString *> *)groups
+                                                 itemClasses:(PXKeychainItemClass)itemClasses {
+    NSMutableArray<NSDictionary *> *out = [NSMutableArray array];
+    for (NSString *group in groups) {
+        for (NSNumber *classNum in PXAllKeychainClasses()) {
+            PXKeychainItemClass classType = [classNum unsignedIntegerValue];
+            if (!(itemClasses & classType)) continue;
+
+            CFTypeRef secClass = PXSecItemClassFromType(classType);
+            if (!secClass) continue;
+
+            NSMutableDictionary *query = [@{
+                (__bridge id)kSecClass: (__bridge id)secClass,
+                (__bridge id)kSecAttrAccessGroup: group,
+                (__bridge id)kSecMatchLimit: (__bridge id)kSecMatchLimitAll,
+                (__bridge id)kSecReturnAttributes: @YES,
+                (__bridge id)kSecAttrSynchronizable: (__bridge id)kSecAttrSynchronizableAny,
+            } mutableCopy];
+            PXAddAuthUIFlags(query);
+
+            CFTypeRef cfResult = NULL;
+            OSStatus status = SecItemCopyMatching((__bridge CFDictionaryRef)query, &cfResult);
+            NSUInteger count = 0;
+            if (status == errSecSuccess && cfResult) {
+                id v = (__bridge_transfer id)cfResult;
+                if ([v isKindOfClass:[NSArray class]]) {
+                    count = [(NSArray *)v count];
+                } else {
+                    count = 1;
+                }
+            }
+
+            [out addObject:@{
+                @"accessGroup": group ?: @"",
+                @"class": PXKeychainClassName(secClass),
+                @"status": @((int)status),
+                @"statusDesc": PXSecurityErrorDescription(status) ?: @"",
+                @"count": @(count),
+            }];
+        }
+    }
+    return out;
 }
 
 @end
