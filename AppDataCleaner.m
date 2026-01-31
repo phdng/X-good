@@ -3823,40 +3823,16 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod -R 777 '%@'", containerPath]];
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -type d -exec chmod 777 {} \\;", containerPath]];
     
-    // First handle special iOS system files that need targeted cleaning
+    // Preserve iOS container metadata files (do not rewrite them).
+    // Modifying these can break MCM/LaunchServices container mapping and cause "Data container not found".
     NSArray *systemFiles = @[
         @".com.apple.containermanagerd.metadata.plist",
         @".com.apple.mobile_container_manager.metadata.plist"
     ];
-    
     for (NSString *systemFile in systemFiles) {
         NSString *fullPath = [containerPath stringByAppendingPathComponent:systemFile];
         if ([_fileManager fileExistsAtPath:fullPath]) {
-            NSLog(@"[AppDataCleaner] Preserving system file structure: %@", fullPath);
-            // For system files, preserve but clear non-essential data
-            if ([systemFile hasSuffix:@".plist"]) {
-                // Read the plist to keep only essential system keys
-                NSDictionary *plist = [NSDictionary dictionaryWithContentsOfFile:fullPath];
-                if (plist && [plist isKindOfClass:[NSDictionary class]]) {
-                    NSMutableDictionary *cleanPlist = [NSMutableDictionary dictionary];
-                    
-                    // Preserve only critical system keys
-                    NSArray *keysToPreserve = @[
-                        @"MCMMetadataIdentifier",
-                        @"MCMMetadataUUID",
-                        @"MCMMetadataPath"
-                    ];
-                    
-                    for (NSString *key in keysToPreserve) {
-                        if (plist[key]) {
-                            cleanPlist[key] = plist[key];
-                        }
-                    }
-                    
-                    // Write the cleaned plist back
-                    [cleanPlist writeToFile:fullPath atomically:YES];
-                }
-            }
+            NSLog(@"[AppDataCleaner] Preserving system file: %@", fullPath);
         }
     }
     
