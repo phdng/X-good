@@ -1079,11 +1079,11 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
         // Do not auto-restart maild; let launchd bring it back when needed.
 
-        // Now that maild is stopped and a fresh Mail dir exists, delete the quarantined old store.
+        // IMPORTANT: Do not delete the quarantined old store in the same run.
+        // maild can still have open sqlite connections or scheduled vacuum activities; deleting can cause SIGABRT
+        // (detached database IO error). Leaving it avoids crashes; user can delete later (e.g. after reboot).
         if ([trashPath hasPrefix:@"/var/mobile/Library/Mail.WeaponXTrash."]) {
-            PXStopMailDaemonsBestEffort(self);
-            (void)PXWaitForProcessExit(self, @"maild", 3.0);
-            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@' 2>/dev/null || true", trashPath]];
+            [self logMessage:@"[AppDataCleaner] MobileMail: kept old store at %@ (safe).", trashPath];
         }
     }
     
