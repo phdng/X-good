@@ -72,6 +72,11 @@
 @property (nonatomic, strong) UISwitch *fixVersionToggleSwitch;
 @property (nonatomic, strong) UIButton *fixVersionAppsButton;
 
+// Deep Clean control
+@property (nonatomic, strong) UILabel *deepCleanLabel;
+@property (nonatomic, strong) UISwitch *deepCleanToggleSwitch;
+@property (nonatomic, strong) UIButton *deepCleanInfoButton;
+
 // Canvas fingerprinting protection control
 @property (nonatomic, strong) UILabel *canvasFingerprintingLabel;
 @property (nonatomic, strong) UISwitch *canvasFingerprintingToggleSwitch;
@@ -101,6 +106,7 @@
 - (void)setupNetworkConnectionTypeControl:(UIView *)contentView;
 - (void)setupDeviceSpecificSpoofingControl:(UIView *)contentView;
 - (void)setupAppVersionSpoofingControl:(UIView *)contentView;
+- (void)setupDeepCleanControl:(UIView *)contentView;
 - (void)setupFixVersionControl:(UIView *)contentView;
 - (void)setupCanvasFingerprintingControl:(UIView *)contentView;
 - (void)setupAlertChecksSection:(UIView *)contentView;

@@ -668,7 +668,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:890],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1010],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -1241,6 +1241,9 @@
     
     // Add App Version Spoofing control
     [self setupAppVersionSpoofingControl:contentView];
+
+    // Deep Clean (global clear-data verify scan)
+    [self setupDeepCleanControl:contentView];
 
     // Fix Version (runtime-capped) control
     [self setupFixVersionControl:contentView];
@@ -2587,7 +2590,7 @@
 
     // Position above Setup Alert Checks (e.g., top: 790)
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1040],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1160],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:60],
@@ -2787,7 +2790,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1350],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1470],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:140],
@@ -2994,7 +2997,7 @@
     [NSLayoutConstraint activateConstraints:@[
         [self.copyrightLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
         [self.copyrightLabel.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
-        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1790], // Positioned after Canvas Fingerprinting
+        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1910], // Positioned after Canvas Fingerprinting
         [self.copyrightLabel.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-30] // More bottom padding
     ]];
     
@@ -3641,7 +3644,7 @@
     [bottomRowContainer addSubview:self.fixVersionToggleSwitch];
 
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:770],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:890],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:100],
@@ -3682,6 +3685,125 @@
     ]];
 
     [self refreshFixVersionAppsButtonTitle];
+}
+
+- (void)setupDeepCleanControl:(UIView *)contentView {
+    UIVisualEffectView *controlView = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialLight]];
+    controlView.layer.cornerRadius = 20;
+    controlView.clipsToBounds = YES;
+    controlView.alpha = 0.8;
+    controlView.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:controlView];
+
+    self.deepCleanLabel = [[UILabel alloc] init];
+    self.deepCleanLabel.text = @"Deep Clean";
+    self.deepCleanLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    self.deepCleanLabel.textColor = [UIColor labelColor];
+    self.deepCleanLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:self.deepCleanLabel];
+
+    UIView *infoBgView = [[UIView alloc] init];
+    infoBgView.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
+    infoBgView.layer.cornerRadius = 12;
+    infoBgView.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:infoBgView];
+
+    self.deepCleanInfoButton = [UIButton buttonWithType:UIButtonTypeInfoLight];
+    self.deepCleanInfoButton.tintColor = [UIColor systemBlueColor];
+    self.deepCleanInfoButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.deepCleanInfoButton addTarget:self action:@selector(showDeepCleanInfo) forControlEvents:UIControlEventTouchUpInside];
+    [infoBgView addSubview:self.deepCleanInfoButton];
+
+    UIView *bottomRowContainer = [[UIView alloc] init];
+    bottomRowContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:bottomRowContainer];
+
+    UIView *sparkBgView = [[UIView alloc] init];
+    sparkBgView.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.1];
+    sparkBgView.layer.cornerRadius = 12;
+    sparkBgView.translatesAutoresizingMaskIntoConstraints = NO;
+    [bottomRowContainer addSubview:sparkBgView];
+
+    UIImageView *sparkIconView = [[UIImageView alloc] init];
+    if (@available(iOS 13.0, *)) {
+        sparkIconView.image = [UIImage systemImageNamed:@"sparkles"];
+    }
+    sparkIconView.tintColor = [UIColor systemBlueColor];
+    sparkIconView.contentMode = UIViewContentModeScaleAspectFit;
+    sparkIconView.translatesAutoresizingMaskIntoConstraints = NO;
+    [sparkBgView addSubview:sparkIconView];
+
+    UILabel *modeLabel = [[UILabel alloc] init];
+    modeLabel.text = @"Deep verify scan";
+    modeLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    modeLabel.textColor = [UIColor labelColor];
+    modeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [bottomRowContainer addSubview:modeLabel];
+
+    self.deepCleanToggleSwitch = [[UISwitch alloc] init];
+    self.deepCleanToggleSwitch.onTintColor = [UIColor systemBlueColor];
+    self.deepCleanToggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    BOOL enabled = [self.securitySettings boolForKey:@"deepCleanEnabled"];
+    [self.deepCleanToggleSwitch setOn:enabled animated:NO];
+    [self.deepCleanToggleSwitch addTarget:self action:@selector(deepCleanToggleChanged:) forControlEvents:UIControlEventValueChanged];
+    [bottomRowContainer addSubview:self.deepCleanToggleSwitch];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:770],
+        [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
+        [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
+        [controlView.heightAnchor constraintEqualToConstant:100],
+
+        [self.deepCleanLabel.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
+        [self.deepCleanLabel.topAnchor constraintEqualToAnchor:controlView.contentView.topAnchor constant:15],
+
+        [infoBgView.leadingAnchor constraintEqualToAnchor:self.deepCleanLabel.trailingAnchor constant:10],
+        [infoBgView.centerYAnchor constraintEqualToAnchor:self.deepCleanLabel.centerYAnchor],
+        [infoBgView.widthAnchor constraintEqualToConstant:24],
+        [infoBgView.heightAnchor constraintEqualToConstant:24],
+
+        [self.deepCleanInfoButton.centerXAnchor constraintEqualToAnchor:infoBgView.centerXAnchor],
+        [self.deepCleanInfoButton.centerYAnchor constraintEqualToAnchor:infoBgView.centerYAnchor],
+
+        [bottomRowContainer.centerXAnchor constraintEqualToAnchor:controlView.contentView.centerXAnchor],
+        [bottomRowContainer.topAnchor constraintEqualToAnchor:self.deepCleanLabel.bottomAnchor constant:15],
+        [bottomRowContainer.heightAnchor constraintEqualToConstant:30],
+
+        [sparkBgView.leadingAnchor constraintEqualToAnchor:bottomRowContainer.leadingAnchor],
+        [sparkBgView.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
+        [sparkBgView.widthAnchor constraintEqualToConstant:24],
+        [sparkBgView.heightAnchor constraintEqualToConstant:24],
+
+        [sparkIconView.centerXAnchor constraintEqualToAnchor:sparkBgView.centerXAnchor],
+        [sparkIconView.centerYAnchor constraintEqualToAnchor:sparkBgView.centerYAnchor],
+        [sparkIconView.widthAnchor constraintEqualToConstant:16],
+        [sparkIconView.heightAnchor constraintEqualToConstant:16],
+
+        [modeLabel.leadingAnchor constraintEqualToAnchor:sparkBgView.trailingAnchor constant:10],
+        [modeLabel.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
+
+        [self.deepCleanToggleSwitch.leadingAnchor constraintEqualToAnchor:modeLabel.trailingAnchor constant:10],
+        [self.deepCleanToggleSwitch.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
+        [self.deepCleanToggleSwitch.trailingAnchor constraintEqualToAnchor:bottomRowContainer.trailingAnchor]
+    ]];
+}
+
+- (void)showDeepCleanInfo {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Deep Clean"
+                                                                   message:@"Global Clear Data mode.\n\nON: Deep verify scan (slow) - scans inside containers for token/encrypted leftovers after wipe.\n\nOFF: Fast mode - assumes wiped containers are clean."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)deepCleanToggleChanged:(UISwitch *)sender {
+    BOOL enabled = sender.isOn;
+    [self.securitySettings setBool:enabled forKey:@"deepCleanEnabled"];
+    [self.securitySettings synchronize];
+
+    UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [generator prepare];
+    [generator impactOccurred];
 }
 
 - (void)showFixVersionInfo {
@@ -4239,7 +4361,7 @@
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
         // Control view
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1510], // Position between App Version Spoofing and Canvas Fingerprinting
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1630], // Position between App Version Spoofing and Canvas Fingerprinting
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -4415,7 +4537,7 @@
     
     // Position control between Domain Blocking and Copyright label
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1650], // Moved down to be below Domain Blocking
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1770], // Moved down to be below Domain Blocking
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],

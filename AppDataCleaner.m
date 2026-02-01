@@ -28,6 +28,18 @@
     NSFileManager *_fileManager;
 }
 
+- (BOOL)_deepCleanEnabled {
+    NSUserDefaults *sec = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+    if (!sec) {
+        return NO;
+    }
+    // Default OFF
+    if (![sec objectForKey:@"deepCleanEnabled"]) {
+        return NO;
+    }
+    return [sec boolForKey:@"deepCleanEnabled"];
+}
+
 static NSString *PXShellQuote(NSString *s) {
     if (!s.length) return @"''";
     NSString *escaped = [s stringByReplacingOccurrencesOfString:@"'" withString:@"'\\''"]; 
@@ -357,6 +369,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             @try {
                 // Step 0: Force Kill Application to release file locks
                 [strongSelf logMessage:@"[AppDataCleaner] Step 0: Kill application..."];
+
+                [strongSelf logMessage:@"[AppDataCleaner] Deep Clean (verify scan) = %@", [strongSelf _deepCleanEnabled] ? @"ON" : @"OFF"];
                 
                 // 1. Kill by partial bundle ID matches (e.g. "Facebook" from "com.facebook.Facebook")
                 NSArray *comps = [bundleID componentsSeparatedByString:@"."];
@@ -3096,6 +3110,13 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     
     for (NSString *path in rootlessEncryptedPrefs) {
         [self securelyWipeFile:path];
+    }
+
+    // Deep Clean toggle: default OFF (fast mode assumes wiped containers are clean).
+    // When OFF, skip expensive recursive scans under app containers.
+    if (![self _deepCleanEnabled]) {
+        NSLog(@"[AppDataCleaner] Deep Clean OFF: skipping deep container encrypted/token scans");
+        return;
     }
     
     // 3. Find data container for more thorough search
