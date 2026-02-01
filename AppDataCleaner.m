@@ -249,6 +249,11 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             @"logPath": logPath,
             @"bridgeOnly": @YES,
         };
+
+        [self logMessage:@"[AppDataCleaner] System keychain wipe via bridge: nonce=%@", nonce];
+        [self logMessage:@"[AppDataCleaner] System keychain wipe via bridge: request=%@", reqPath];
+        [self logMessage:@"[AppDataCleaner] System keychain wipe via bridge: response=%@", respPath];
+        [self logMessage:@"[AppDataCleaner] System keychain wipe via bridge: log=%@", logPath];
         if (![req writeToFile:reqPath atomically:YES]) {
             if (error) {
                 *error = [NSError errorWithDomain:@"AppDataCleaner" code:105 userInfo:@{NSLocalizedDescriptionKey: @"Failed to write keychain bridge request"}];
@@ -302,6 +307,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             }
             return NO;
         }
+
+        [self logMessage:@"[AppDataCleaner] System keychain wipe succeeded for %@", bundleID];
 
         [[NSFileManager defaultManager] removeItemAtPath:reqPath error:nil];
         [[NSFileManager defaultManager] removeItemAtPath:respPath error:nil];
@@ -5071,6 +5078,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     for (NSString *iconPath in iconStatePaths) {
         if ([_fileManager fileExistsAtPath:iconPath]) {
             NSString *command = [NSString stringWithFormat:@"cat '%@' | grep -q '%@' && echo 'found' || echo 'not found'", iconPath, bundleID];
+            NSString *result = [self runCommandAndGetOutput:command];
+            it found'", iconPath, bundleID];
             NSString *result = [self runCommandAndGetOutput:command];
             if ([result containsString:@"found"]) {
                 NSLog(@"[AppDataCleaner] Found reference in IconState.plist: %@", bundleID);
