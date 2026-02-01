@@ -791,7 +791,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
             // Log counts before.
             NSString *beforeCount = [self runCommandAndGetOutput:[NSString stringWithFormat:@"sqlite3 '%@' \"SELECT count(*) FROM ZACCOUNT;\" 2>/dev/null || echo 'err'", accountsDB]];
-            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count before=%@", (beforeCount ?: @"").stringByTrimmingCharactersInSet([NSCharacterSet whitespaceAndNewlineCharacterSet])];
+            NSString *beforeTrim = [(beforeCount ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count before=%@", beforeTrim];
 
             // Delete account types commonly used by Mail.
             NSString *sql = @"PRAGMA busy_timeout=3000; BEGIN IMMEDIATE; "
@@ -803,7 +804,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Accounts/Accounts3.sqlite-wal' '/var/mobile/Library/Accounts/Accounts3.sqlite-shm' 2>/dev/null || true"]; 
 
             NSString *afterCount = [self runCommandAndGetOutput:[NSString stringWithFormat:@"sqlite3 '%@' \"SELECT count(*) FROM ZACCOUNT;\" 2>/dev/null || echo 'err'", accountsDB]];
-            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count after=%@", (afterCount ?: @"").stringByTrimmingCharactersInSet([NSCharacterSet whitespaceAndNewlineCharacterSet])];
+            NSString *afterTrim = [(afterCount ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count after=%@", afterTrim];
         }
 
         // Restart accounts daemons (best-effort) so UI reflects removal.
