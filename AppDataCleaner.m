@@ -960,7 +960,16 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         }
         (void)PXWaitForProcessExit(self, @"Mail", 2.0);
 
-        [self runCommandWithPrivileges:@"rm -rf '/var/mobile/Library/Mail' 2>/dev/null || true"]; 
+        // Avoid detaching an open sqlite DB: quarantine the Mail directory via rename.
+        // If any lingering maild instance still holds files open, rename is safe; rm -rf can trigger SIGABRT later.
+        NSString *mailPath = @"/var/mobile/Library/Mail";
+        NSString *trashPath = [NSString stringWithFormat:@"/var/mobile/Library/Mail.WeaponXTrash.%@", PXTimestampSuffix()];
+        if ([_fileManager fileExistsAtPath:mailPath]) {
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"mv '%@' '%@' 2>/dev/null || true", mailPath, trashPath]];
+        }
+        [self runCommandWithPrivileges:@"mkdir -p '/var/mobile/Library/Mail' 2>/dev/null || true"]; 
+        [self runCommandWithPrivileges:@"chown -R mobile:mobile '/var/mobile/Library/Mail' 2>/dev/null || true"]; 
+
         [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Preferences/com.apple.mail.plist' 2>/dev/null || true"]; 
         [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Preferences/com.apple.mobilemail.plist' 2>/dev/null || true"]; 
         [self runCommandWithPrivileges:@"rm -f '/private/var/mobile/Library/Preferences/com.apple.mail.plist' 2>/dev/null || true"]; 
@@ -1065,6 +1074,13 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         [self runCommandWithPrivileges:@"killall -9 Mail 2>/dev/null || true"]; 
 
         // Do not auto-restart maild; let launchd bring it back when needed.
+
+        // Now that maild is stopped and a fresh Mail dir exists, delete the quarantined old store.
+        if ([trashPath hasPrefix:@"/var/mobile/Library/Mail.WeaponXTrash."]) {
+            PXStopMailDaemonsBestEffort(self);
+            (void)PXWaitForProcessExit(self, @"maild", 3.0);
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@' 2>/dev/null || true", trashPath]];
+        }
     }
     
     // Process extension containers - simplified
@@ -5113,6 +5129,10 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             [self runCommandWithPrivileges:[NSString stringWithFormat:@"sqlite3 '%@' \"DELETE FROM apps WHERE data LIKE '%%%@%%';\" 2>/dev/null || true", dbPath, companyName]];
             [self runCommandWithPrivileges:[NSString stringWithFormat:@"sqlite3 '%@' \"DELETE FROM data WHERE data LIKE '%%%@%%';\" 2>/dev/null || true", dbPath, companyName]];
             [self runCommandWithPrivileges:[NSString stringWithFormat:@"sqlite3 '%@' \"DELETE FROM items WHERE data LIKE '%%%@%%';\" 2>/dev/null || true", dbPath, companyName]];
+        }
+        
+        // Try to vacuum the database
+        [self runCommandWithPrivileges:[| true", dbPath, companyName]];
         }
         
         // Try to vacuum the database
