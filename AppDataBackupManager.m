@@ -3,6 +3,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
 #import <CoreFoundation/CoreFoundation.h>
+#import <UserNotifications/UserNotifications.h>
 
 #import "AppDataCleaner.h"
 #import "FreezeManager.h"
@@ -22,6 +23,11 @@ static NSString * const PXBackupErrorDomain = @"com.hydra.projectx.backup";
 @end
 
 @implementation AppDataBackupManager
+
+@interface LSApplicationProxy : NSObject
++ (instancetype)applicationProxyForIdentifier:(NSString *)identifier;
+@property (nonatomic, readonly) NSString *bundleExecutable;
+@end
 
 static void PXDebugAppendLine(NSString *path, NSString *line) {
     if (!path.length || !line.length) return;
@@ -237,6 +243,19 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
     // Always kill the main app process via existing manager.
     [[FreezeManager sharedManager] killApplication:bundleID];
 
+    // Best-effort hard kill by executable name (helps when the app is SIGSTOP'd).
+    @try {
+        if (bundleID.length) {
+            LSApplicationProxy *proxy = [LSApplicationProxy applicationProxyForIdentifier:bundleID];
+            NSString *exe = [proxy respondsToSelector:@selector(bundleExecutable)] ? proxy.bundleExecutable : nil;
+            if ([exe isKindOfClass:[NSString class]] && exe.length) {
+                CommandRunner *runner = [CommandRunner shared];
+                [runner run:[NSString stringWithFormat:@"killall -9 %@ 2>/dev/null || true", PXShellQuote(exe)]];
+            }
+        }
+    } @catch (__unused NSException *e) {
+    }
+
     // Safari has multiple helper processes that can keep databases open.
     if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
         CommandRunner *runner = [CommandRunner shared];
@@ -281,6 +300,20 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                           PXShellQuote(archivePath),
                           PXShellQuote(sourceDir)];
     return [runner runAndCapture:fallback];
+}
+
+static void PXPostLocalResultNotification(NSString *title, NSString *body) {
+    if (![UNUserNotificationCenter class]) {
+        return;
+    }
+    UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
+    content.title = title ?: @"ProjectX";
+    content.body = body ?: @"";
+    content.sound = [UNNotificationSound defaultSound];
+
+    NSString *identifier = [NSString stringWithFormat:@"projectx.backuprestore.%@", [[NSUUID UUID] UUIDString]];
+    UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:identifier content:content trigger:nil];
+    [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:req withCompletionHandler:nil];
 }
 
 - (CommandResult *)_tarExtract:(NSString *)tarPath archive:(NSString *)archivePath toDir:(NSString *)destDir {

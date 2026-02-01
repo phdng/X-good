@@ -2,6 +2,13 @@
 #import "common/UIButton+SafeConfiguration.h"
 #import "AppDataBackupManager.h"
 #import "BackupKeychainGroupsViewController.h"
+#import <UserNotifications/UserNotifications.h>
+#import <objc/message.h>
+
+@interface LSApplicationWorkspace : NSObject
++ (instancetype)defaultWorkspace;
+- (BOOL)openApplicationWithBundleID:(NSString *)bundleID;
+@end
 
 static NSString *PXBackupKeychainGroupsKey(NSString *bundleID) {
     return [NSString stringWithFormat:@"dataBackupKeychainGroups_%@", bundleID ?: @""];
@@ -15,9 +22,66 @@ static NSString * const PXBackupKeychainGroupsSavedNotification = @"com.hydra.pr
 @property (nonatomic, strong) UISwitch *includePrefsSwitch;
 @property (nonatomic, strong) UISwitch *includeKeychainSwitch;
 @property (nonatomic, strong) UIButton *keychainGroupsButton;
+
+@property (nonatomic, copy) NSString *pendingAlertTitle;
+@property (nonatomic, copy) NSString *pendingAlertMessage;
+@property (nonatomic, copy) NSString *pendingCopyPath;
 @end
 
 @implementation AppDataBackupRestoreViewController
+
+static void PXAttemptBringProjectXToFront(void) {
+    NSString *selfBundle = [[NSBundle mainBundle] bundleIdentifier] ?: @"";
+    if (!selfBundle.length) return;
+    Class wsCls = NSClassFromString(@"LSApplicationWorkspace");
+    if (!wsCls) return;
+    id ws = [wsCls performSelector:@selector(defaultWorkspace)];
+    if (!ws) return;
+    if ([ws respondsToSelector:@selector(openApplicationWithBundleID:)]) {
+        BOOL (*msgSend)(id, SEL, id) = (BOOL (*)(id, SEL, id))objc_msgSend;
+        msgSend(ws, @selector(openApplicationWithBundleID:), selfBundle);
+    }
+}
+
+- (void)_postLocalResultNotificationWithTitle:(NSString *)title body:(NSString *)body {
+    if (![UNUserNotificationCenter class]) return;
+
+    UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
+    content.title = title ?: @"ProjectX";
+    content.body = body ?: @"";
+    content.sound = [UNNotificationSound defaultSound];
+
+    NSString *identifier = [NSString stringWithFormat:@"projectx.backuprestore.%@", [[NSUUID UUID] UUIDString]];
+    UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:identifier content:content trigger:nil];
+    [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:req withCompletionHandler:nil];
+}
+
+- (void)_showOrQueueAlertWithTitle:(NSString *)title message:(NSString *)message copyPath:(NSString *)copyPath {
+    self.pendingAlertTitle = title;
+    self.pendingAlertMessage = message;
+    self.pendingCopyPath = copyPath;
+
+    if ([UIApplication sharedApplication].applicationState != UIApplicationStateActive) {
+        return;
+    }
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                   message:message
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    if (copyPath.length) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"Copy Path"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(__unused UIAlertAction * _Nonnull action) {
+            [UIPasteboard generalPasteboard].string = copyPath;
+        }]];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+
+    self.pendingAlertTitle = nil;
+    self.pendingAlertMessage = nil;
+    self.pendingCopyPath = nil;
+}
 
 - (void)viewDidLoad {
     [super viewDidLoad];
@@ -238,6 +302,20 @@ static NSString * const PXBackupKeychainGroupsSavedNotification = @"com.hydra.pr
     ]];
 }
 
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+
+    if (self.pendingAlertTitle.length && self.pendingAlertMessage.length) {
+        NSString *t = self.pendingAlertTitle;
+        NSString *m = self.pendingAlertMessage;
+        NSString *p = self.pendingCopyPath;
+        self.pendingAlertTitle = nil;
+        self.pendingAlertMessage = nil;
+        self.pendingCopyPath = nil;
+        [self _showOrQueueAlertWithTitle:t message:m copyPath:p];
+    }
+}
+
 - (void)dealloc {
     [[NSNotificationCenter defaultCenter] removeObserver:self];
 }
@@ -324,19 +402,32 @@ static NSString * const PXBackupKeychainGroupsSavedNotification = @"com.hydra.pr
             options |= PXBackupOptionIncludeKeychain;
         }
 
-        [[AppDataBackupManager shared] createBackupForBundleID:self.bundleID
-                                                      appName:self.appName
-                                                      options:options
-                                                   completion:^(PXBackupResult *result, NSError *error) {
-            [processingAlert dismissViewControllerAnimated:YES completion:^{
-                if (error) {
-                    UIAlertController *errAlert = [UIAlertController alertControllerWithTitle:@"Backup Failed"
-                                                                                     message:error.localizedDescription ?: @"Unknown error"
-                                                                              preferredStyle:UIAlertControllerStyleAlert];
-                    [errAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                    [self presentViewController:errAlert animated:YES completion:nil];
-                    return;
-                }
+         [[AppDataBackupManager shared] createBackupForBundleID:self.bundleID
+                                                       appName:self.appName
+                                                       options:options
+                                                    completion:^(PXBackupResult *result, NSError *error) {
+             [processingAlert dismissViewControllerAnimated:YES completion:^{
+                 // We may have backgrounded ProjectX to run keychain bridge. Always notify + try to return.
+                 NSString *appIdentifierShort = self.appName ?: self.bundleID ?: @"this app";
+
+                 if (error) {
+                     [self _postLocalResultNotificationWithTitle:@"Backup Failed"
+                                                        body:[NSString stringWithFormat:@"%@\n%@", appIdentifierShort, error.localizedDescription ?: @"Unknown error"]];
+                     PXAttemptBringProjectXToFront();
+
+                     UIAlertController *errAlert = [UIAlertController alertControllerWithTitle:@"Backup Failed"
+                                                                                      message:error.localizedDescription ?: @"Unknown error"
+                                                                               preferredStyle:UIAlertControllerStyleAlert];
+                     [errAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                     if ([UIApplication sharedApplication].applicationState == UIApplicationStateActive) {
+                         [self presentViewController:errAlert animated:YES completion:nil];
+                     } else {
+                         self.pendingAlertTitle = @"Backup Failed";
+                         self.pendingAlertMessage = error.localizedDescription ?: @"Unknown error";
+                         self.pendingCopyPath = nil;
+                     }
+                     return;
+                 }
 
                 NSMutableString *msg = [NSMutableString stringWithFormat:@"Backup created for %@.\n\nPath:\n%@", appIdentifier, result.backupDirectory ?: @"(unknown)"];
                 if (result.warnings.count) {
@@ -346,21 +437,14 @@ static NSString * const PXBackupKeychainGroupsSavedNotification = @"com.hydra.pr
                     }
                 }
 
-                UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Backup Complete"
-                                                                                     message:msg
-                                                                              preferredStyle:UIAlertControllerStyleAlert];
-                [successAlert addAction:[UIAlertAction actionWithTitle:@"Copy Path"
-                                                                style:UIAlertActionStyleDefault
-                                                              handler:^(UIAlertAction * _Nonnull action) {
-                    if (result.backupDirectory.length) {
-                        [UIPasteboard generalPasteboard].string = result.backupDirectory;
-                    }
-                }]];
-                [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-                [self presentViewController:successAlert animated:YES completion:nil];
-            }];
-        }];
-     }]];
+                 NSString *notifBody = [NSString stringWithFormat:@"%@\nBackup complete%@", appIdentifierShort, (result.warnings.count ? [NSString stringWithFormat:@" (%lu warnings)", (unsigned long)result.warnings.count] : @"")];
+                 [self _postLocalResultNotificationWithTitle:@"Backup Complete" body:notifBody];
+                 PXAttemptBringProjectXToFront();
+
+                 [self _showOrQueueAlertWithTitle:@"Backup Complete" message:msg copyPath:result.backupDirectory];
+             }];
+         }];
+      }]];
     
     [self presentViewController:confirmAlert animated:YES completion:nil];
 }
@@ -410,19 +494,31 @@ static NSString * const PXBackupKeychainGroupsSavedNotification = @"com.hydra.pr
                                                                                   preferredStyle:UIAlertControllerStyleAlert];
                 [self presentViewController:processingAlert animated:YES completion:nil];
 
-                [[AppDataBackupManager shared] restoreBackupAtDirectory:dir
-                                                               bundleID:self.bundleID
-                                                                appName:self.appName
-                                                             completion:^(PXRestoreResult *result, NSError *error) {
-                    [processingAlert dismissViewControllerAnimated:YES completion:^{
-                        if (error) {
-                            UIAlertController *errAlert = [UIAlertController alertControllerWithTitle:@"Restore Failed"
-                                                                                             message:error.localizedDescription ?: @"Unknown error"
-                                                                                      preferredStyle:UIAlertControllerStyleAlert];
-                            [errAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                            [self presentViewController:errAlert animated:YES completion:nil];
-                            return;
-                        }
+                 [[AppDataBackupManager shared] restoreBackupAtDirectory:dir
+                                                                bundleID:self.bundleID
+                                                                 appName:self.appName
+                                                              completion:^(PXRestoreResult *result, NSError *error) {
+                     [processingAlert dismissViewControllerAnimated:YES completion:^{
+                         NSString *appIdentifierShort = self.appName ?: self.bundleID ?: @"this app";
+
+                         if (error) {
+                             [self _postLocalResultNotificationWithTitle:@"Restore Failed"
+                                                                body:[NSString stringWithFormat:@"%@\n%@", appIdentifierShort, error.localizedDescription ?: @"Unknown error"]];
+                             PXAttemptBringProjectXToFront();
+
+                             UIAlertController *errAlert = [UIAlertController alertControllerWithTitle:@"Restore Failed"
+                                                                                              message:error.localizedDescription ?: @"Unknown error"
+                                                                                       preferredStyle:UIAlertControllerStyleAlert];
+                             [errAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+                             if ([UIApplication sharedApplication].applicationState == UIApplicationStateActive) {
+                                 [self presentViewController:errAlert animated:YES completion:nil];
+                             } else {
+                                 self.pendingAlertTitle = @"Restore Failed";
+                                 self.pendingAlertMessage = error.localizedDescription ?: @"Unknown error";
+                                 self.pendingCopyPath = nil;
+                             }
+                             return;
+                         }
 
                         NSMutableString *msg = [NSMutableString stringWithFormat:@"Data for %@ has been restored.", appIdentifier];
                         if (result.warnings.count) {
@@ -432,14 +528,14 @@ static NSString * const PXBackupKeychainGroupsSavedNotification = @"com.hydra.pr
                             }
                         }
 
-                        UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Restore Complete"
-                                                                                             message:msg
-                                                                                      preferredStyle:UIAlertControllerStyleAlert];
-                        [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                        [self presentViewController:successAlert animated:YES completion:nil];
-                    }];
-                }];
-            }]];
+                         NSString *notifBody = [NSString stringWithFormat:@"%@\nRestore complete%@", appIdentifierShort, (result.warnings.count ? [NSString stringWithFormat:@" (%lu warnings)", (unsigned long)result.warnings.count] : @"")];
+                         [self _postLocalResultNotificationWithTitle:@"Restore Complete" body:notifBody];
+                         PXAttemptBringProjectXToFront();
+
+                         [self _showOrQueueAlertWithTitle:@"Restore Complete" message:msg copyPath:nil];
+                     }];
+                 }];
+             }]];
         }
 
         [picker addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
