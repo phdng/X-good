@@ -61,6 +61,38 @@
     return ok;
 }
 
+// Execute SQL on an already-open sqlite handle.
+static BOOL PXSQLiteExec(sqlite3 *db, NSString *sql, NSString **errorOut) {
+    if (!db || !sql.length) {
+        if (errorOut) *errorOut = @"invalid args";
+        return NO;
+    }
+    char *errMsg = NULL;
+    int rc = sqlite3_exec(db, sql.UTF8String, NULL, NULL, &errMsg);
+    BOOL ok = (rc == SQLITE_OK);
+    if (!ok && errorOut) {
+        NSString *e = errMsg ? [NSString stringWithUTF8String:errMsg] : @"sqlite exec failed";
+        *errorOut = [NSString stringWithFormat:@"sqlite exec rc=%d %@", rc, e ?: @""];
+    }
+    if (errMsg) sqlite3_free(errMsg);
+    return ok;
+}
+
+static NSString *PXSQLiteScalar(sqlite3 *db, NSString *sql) {
+    if (!db || !sql.length) return nil;
+    sqlite3_stmt *stmt = NULL;
+    int rc = sqlite3_prepare_v2(db, sql.UTF8String, -1, &stmt, NULL);
+    if (rc != SQLITE_OK || !stmt) return nil;
+    NSString *out = nil;
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        const unsigned char *txt = sqlite3_column_text(stmt, 0);
+        if (txt) out = [NSString stringWithUTF8String:(const char *)txt];
+    }
+    sqlite3_finalize(stmt);
+    return out;
+}
+
 - (NSString *)_sqliteScalarAtPath:(NSString *)dbPath sql:(NSString *)sql errorOut:(NSString **)errorOut {
     if (!dbPath.length || !sql.length) {
         if (errorOut) *errorOut = @"invalid args";
@@ -863,29 +895,58 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
             [NSThread sleepForTimeInterval:0.2];
 
-            // Log counts before.
-            NSString *err = nil;
-            NSString *beforeCount = [self _sqliteScalarAtPath:accountsDB sql:@"SELECT count(*) FROM ZACCOUNT;" errorOut:&err];
-            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count before=%@", beforeCount ?: [NSString stringWithFormat:@"err(%@)", err ?: @""]];
+            // Use one RW connection for before/delete/after to avoid transient CANTOPEN.
+            sqlite3 *db = NULL;
+            int rc = sqlite3_open_v2(accountsDB.UTF8String, &db, SQLITE_OPEN_READWRITE, NULL);
+            if (rc != SQLITE_OK || !db) {
+                NSString *msg = db ? [NSString stringWithUTF8String:sqlite3_errmsg(db)] : @"open failed";
+                [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 open failed rc=%d %@", rc, msg ?: @""];
+                if (db) sqlite3_close(db);
+            } else {
+                sqlite3_busy_timeout(db, 3000);
 
-            // Delete account types commonly used by Mail.
-            NSString *sql = @"PRAGMA busy_timeout=3000; BEGIN IMMEDIATE; "
-                            "DELETE FROM ZACCOUNT WHERE ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%'); "
-                            "COMMIT;";
-            NSString *execErr = nil;
-            BOOL ok = [self _sqliteExecAtPath:accountsDB sql:sql errorOut:&execErr];
-            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 delete ok=%d %@", ok, (execErr.length ? execErr : @"")];
+                NSString *beforeCount = PXSQLiteScalar(db, @"SELECT count(*) FROM ZACCOUNT;");
+                [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count before=%@", beforeCount ?: @"(nil)"];
 
-            // Try to checkpoint (if WAL mode)
-            NSString *ckErr = nil;
-            [self _sqliteExecAtPath:accountsDB sql:@"PRAGMA wal_checkpoint(TRUNCATE);" errorOut:&ckErr];
+                // Identify mail-related account types.
+                NSString *typeCount = PXSQLiteScalar(db,
+                    @"SELECT count(*) FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%';");
+                [self logMessage:@"[AppDataCleaner] MobileMail: mail-ish account types=%@", typeCount ?: @"(nil)"];
 
-            // Remove WAL files to force readers to see changes.
-            [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Accounts/Accounts3.sqlite-wal' '/var/mobile/Library/Accounts/Accounts3.sqlite-shm' 2>/dev/null || true"]; 
+                NSString *errMsg = nil;
+                PXSQLiteExec(db, @"PRAGMA busy_timeout=3000;", NULL);
+                PXSQLiteExec(db, @"BEGIN IMMEDIATE;", &errMsg);
+                if (errMsg.length) {
+                    [self logMessage:@"[AppDataCleaner] MobileMail: BEGIN IMMEDIATE failed %@", errMsg];
+                    errMsg = nil;
+                }
 
-            NSString *err2 = nil;
-            NSString *afterCount = [self _sqliteScalarAtPath:accountsDB sql:@"SELECT count(*) FROM ZACCOUNT;" errorOut:&err2];
-            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count after=%@", afterCount ?: [NSString stringWithFormat:@"err(%@)", err2 ?: @""]];
+                // Delete matching accounts and best-effort related rows.
+                // We intentionally ignore errors for tables that may not exist on some iOS versions.
+                NSString *deleteAccounts =
+                    @"DELETE FROM ZACCOUNT WHERE ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%');";
+                BOOL delOK = PXSQLiteExec(db, deleteAccounts, &errMsg);
+                int changes = sqlite3_changes(db);
+                [self logMessage:@"[AppDataCleaner] MobileMail: ZACCOUNT delete ok=%d changes=%d %@", delOK, changes, errMsg.length ? errMsg : @""];
+                errMsg = nil;
+
+                // Companion tables are schema-dependent. Try deletes if they exist; ignore failures.
+                // (We do not assume these tables exist on all iOS versions.)
+                PXSQLiteExec(db, @"DELETE FROM ZACCOUNTPROPERTY WHERE ZOWNER IN (SELECT Z_PK FROM ZACCOUNT);", NULL);
+                PXSQLiteExec(db, @"DELETE FROM ZCREDENTIALITEM WHERE ZOWNER IN (SELECT Z_PK FROM ZACCOUNT);", NULL);
+
+                PXSQLiteExec(db, @"COMMIT;", &errMsg);
+                if (errMsg.length) {
+                    [self logMessage:@"[AppDataCleaner] MobileMail: COMMIT failed %@", errMsg];
+                    errMsg = nil;
+                }
+                PXSQLiteExec(db, @"PRAGMA wal_checkpoint(TRUNCATE);", NULL);
+
+                NSString *afterCount = PXSQLiteScalar(db, @"SELECT count(*) FROM ZACCOUNT;");
+                [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count after=%@", afterCount ?: @"(nil)"];
+
+                sqlite3_close(db);
+            }
         }
 
         // Restart accounts daemons (best-effort) so UI reflects removal.
