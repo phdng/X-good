@@ -12,6 +12,7 @@
 
 #import "AppEntitlementsReader.h"
 #import "CommandRunner.h"
+#import "AppGroupContainerResolver.h"
 
 // Add SearchableIndex framework if available
 #import <CoreSpotlight/CoreSpotlight.h>
@@ -460,6 +461,9 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     
     // Capture self for logging in blocks
     __weak typeof(self) weakSelf = self;
+
+    // Cancelable watchdog (avoid false timeout after success)
+    __block dispatch_source_t watchdogTimer = nil;
     
     // Helper block to safely call completion only once
     void (^safeCompletion)(BOOL, NSError *) = ^(BOOL success, NSError *error) {
@@ -467,6 +471,12 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         if (!completionCalled) {
             completionCalled = YES;
             dispatch_semaphore_signal(completionLock);
+
+            if (watchdogTimer) {
+                dispatch_source_cancel(watchdogTimer);
+                watchdogTimer = nil;
+            }
+
             [weakSelf logMessage:@"[AppDataCleaner] Calling completion handler (success=%d)", success];
             dispatch_async(dispatch_get_main_queue(), ^{
                 if (completion) {
@@ -477,15 +487,23 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             dispatch_semaphore_signal(completionLock);
         }
     };
-    
-    // Set up a watchdog timer to force completion after 120 seconds max
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+
+    watchdogTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
+    dispatch_source_set_timer(watchdogTimer, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), DISPATCH_TIME_FOREVER, 1 * NSEC_PER_SEC);
+    dispatch_source_set_event_handler(watchdogTimer, ^{
+        dispatch_semaphore_wait(completionLock, DISPATCH_TIME_FOREVER);
+        BOOL alreadyCompleted = completionCalled;
+        dispatch_semaphore_signal(completionLock);
+        if (alreadyCompleted) {
+            return;
+        }
         [weakSelf logMessage:@"[AppDataCleaner] WATCHDOG: 120 second timeout reached"];
         NSError *timeoutError = [NSError errorWithDomain:@"AppDataCleaner"
                                                    code:-100
                                                userInfo:@{NSLocalizedDescriptionKey: @"Clear Data timed out"}];
         safeCompletion(NO, timeoutError);
     });
+    dispatch_resume(watchdogTimer);
     
     // Dispatch the cleaning process to background queue
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_HIGH, 0), ^{
@@ -1263,35 +1281,47 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 }
 
 - (NSArray *)findRootlessAppGroupUUIDs:(NSString *)bundleID {
-    if (![self directoryHasContent:@"/containers/Shared/AppGroup"]) {
-        return @[];
-    }
-    
-    NSMutableArray *groupUUIDs = [NSMutableArray array];
-    NSArray *groupDirs = [self listDirectoriesInPath:@"/containers/Shared/AppGroup"];
-    
-    for (NSString *uuid in groupDirs) {
-        NSString *metadataPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@/.com.apple.mobile_container_manager.metadata.plist", uuid];
-        NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
-        
-        // App groups may have different metadata structure
-        id groupIdentifier = metadata[@"MCMMetadataIdentifier"];
-        
-        if ([groupIdentifier isKindOfClass:[NSArray class]]) {
-            // Check if bundle ID is in the apps array
-            if ([(NSArray *)groupIdentifier containsObject:bundleID]) {
-                [groupUUIDs addObject:uuid];
-            }
-        } else if ([groupIdentifier isKindOfClass:[NSString class]]) {
-            // Some older iOS versions store just the group ID
-            // Check if bundle ID is part of the group ID
-            if ([(NSString *)groupIdentifier containsString:bundleID]) {
-                [groupUUIDs addObject:uuid];
+    if (!bundleID.length) return @[];
+
+    // Use entitlements + resolver; filter only /containers-based results.
+    AppEntitlementsReader *reader = [[AppEntitlementsReader alloc] init];
+    NSError *entErr = nil;
+    NSDictionary *ent = [reader fullEntitlementsForBundleID:bundleID error:&entErr];
+    NSArray *groups = nil;
+    if ([ent isKindOfClass:[NSDictionary class]]) {
+        id v = ent[@"com.apple.security.application-groups"];
+        if ([v isKindOfClass:[NSArray class]]) {
+            groups = (NSArray *)v;
+        } else {
+            v = ent[@"application-groups"];
+            if ([v isKindOfClass:[NSArray class]]) {
+                groups = (NSArray *)v;
             }
         }
     }
-    
-    return groupUUIDs;
+    if (!groups.count) {
+        return @[];
+    }
+
+    NSMutableArray<NSString *> *groupIDs = [NSMutableArray array];
+    for (id g in groups) {
+        if ([g isKindOfClass:[NSString class]] && [(NSString *)g length] > 0) {
+            [groupIDs addObject:(NSString *)g];
+        }
+    }
+    if (!groupIDs.count) {
+        return @[];
+    }
+
+    AppGroupContainerResolver *resolver = [[AppGroupContainerResolver alloc] init];
+    NSArray<AppGroupContainerInfo *> *infos = [resolver resolveGroupContainersForGroupIDs:groupIDs];
+    NSMutableArray<NSString *> *uuids = [NSMutableArray array];
+    for (AppGroupContainerInfo *info in infos) {
+        if (![info.path isKindOfClass:[NSString class]] || !info.path.length) continue;
+        if (![info.path hasPrefix:@"/containers/Shared/AppGroup/"]) continue;
+        [uuids addObject:[info.path lastPathComponent]];
+    }
+    return uuids;
 }
 
 #pragma mark - Cleaning Methods
@@ -4206,43 +4236,49 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 }
 
 - (NSArray *)findGroupContainerUUIDsForBundleID:(NSString *)bundleID {
-    NSFileManager *fileManager = [NSFileManager defaultManager];
-    NSString *containersPath = @"/var/mobile/Containers/Shared/AppGroup";
-    NSMutableArray *groupUUIDs = [NSMutableArray array];
-    NSError *error = nil;
-    
-    if (![fileManager fileExistsAtPath:containersPath]) {
-        NSLog(@"[AppDataCleaner] Directory does not exist: %@", containersPath);
-        return groupUUIDs;
-    }
-    
-    NSArray *containers = [fileManager contentsOfDirectoryAtPath:containersPath error:&error];
-    if (error) {
-        NSLog(@"[AppDataCleaner] Error listing group containers: %@", error);
-        return groupUUIDs;
-    }
-    
-    for (NSString *container in containers) {
-        if ([container hasPrefix:@"."]) continue;
-        
-        NSString *containerPath = [containersPath stringByAppendingPathComponent:container];
-        NSString *metadataPath = [containerPath stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
-        
-        if ([fileManager fileExistsAtPath:metadataPath]) {
-            NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
-            NSString *groupIdentifier = metadata[@"MCMMetadataIdentifier"];
-            
-            // Check if this group identifier corresponds to our app
-            NSString *groupPrefix = [NSString stringWithFormat:@"group.%@", [bundleID componentsSeparatedByString:@"."].firstObject];
-            if ([groupIdentifier hasPrefix:groupPrefix] || 
-                [groupIdentifier containsString:bundleID]) {
-                NSLog(@"[AppDataCleaner] Found app group container UUID: %@ for group %@", container, groupIdentifier);
-                [groupUUIDs addObject:container];
+    if (!bundleID.length) return @[];
+
+    // Resolve app groups from entitlements (authoritative), then map to UUID/path.
+    AppEntitlementsReader *reader = [[AppEntitlementsReader alloc] init];
+    NSError *entErr = nil;
+    NSDictionary *ent = [reader fullEntitlementsForBundleID:bundleID error:&entErr];
+    NSArray *groups = nil;
+    if ([ent isKindOfClass:[NSDictionary class]]) {
+        id v = ent[@"com.apple.security.application-groups"];
+        if ([v isKindOfClass:[NSArray class]]) {
+            groups = (NSArray *)v;
+        } else {
+            v = ent[@"application-groups"];
+            if ([v isKindOfClass:[NSArray class]]) {
+                groups = (NSArray *)v;
             }
         }
     }
-    
-    return groupUUIDs;
+    if (!groups.count) {
+        return @[];
+    }
+
+    NSMutableArray<NSString *> *groupIDs = [NSMutableArray array];
+    for (id g in groups) {
+        if ([g isKindOfClass:[NSString class]] && [(NSString *)g length] > 0) {
+            [groupIDs addObject:(NSString *)g];
+        }
+    }
+    if (!groupIDs.count) {
+        return @[];
+    }
+
+    AppGroupContainerResolver *resolver = [[AppGroupContainerResolver alloc] init];
+    NSArray<AppGroupContainerInfo *> *infos = [resolver resolveGroupContainersForGroupIDs:groupIDs];
+    NSMutableArray<NSString *> *uuids = [NSMutableArray array];
+    for (AppGroupContainerInfo *info in infos) {
+        if ([info.uuid isKindOfClass:[NSString class]] && info.uuid.length) {
+            [uuids addObject:info.uuid];
+        } else if ([info.path isKindOfClass:[NSString class]] && info.path.length) {
+            [uuids addObject:[info.path lastPathComponent]];
+        }
+    }
+    return uuids;
 }
 
 - (NSArray *)findExtensionDataContainersForBundleID:(NSString *)bundleID {
