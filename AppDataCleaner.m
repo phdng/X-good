@@ -938,8 +938,10 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
                 // Identify mail-related account types.
                 NSString *typeCount = PXSQLiteScalar(db,
-                    @"SELECT count(*) FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%';");
-                [self logMessage:@"[AppDataCleaner] MobileMail: mail-ish account types=%@", typeCount ?: @"(nil)"];
+                    @"SELECT count(*) FROM ZACCOUNTTYPE WHERE "
+                    "ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%' OR "
+                    "ZIDENTIFIER LIKE '%google%' OR ZIDENTIFIER LIKE '%gmail%';");
+                [self logMessage:@"[AppDataCleaner] MobileMail: mail-ish/google-ish account types=%@", typeCount ?: @"(nil)"];
 
                 NSString *errMsg = nil;
                 PXSQLiteExec(db, @"PRAGMA busy_timeout=3000;", NULL);
@@ -951,8 +953,12 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
                 // Delete matching accounts and best-effort related rows.
                 // We intentionally ignore errors for tables that may not exist on some iOS versions.
+                // For Gmail accounts configured in Mail, the underlying account type is often Google-based
+                // (e.g. com.apple.account.Google) and may not match mail/imap/smtp identifiers.
                 NSString *deleteAccounts =
-                    @"DELETE FROM ZACCOUNT WHERE ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%');";
+                    @"DELETE FROM ZACCOUNT WHERE ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE "
+                    "ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%' OR "
+                    "ZIDENTIFIER LIKE '%google%' OR ZIDENTIFIER LIKE '%gmail%');";
                 BOOL delOK = PXSQLiteExec(db, deleteAccounts, &errMsg);
                 int changes = sqlite3_changes(db);
                 [self logMessage:@"[AppDataCleaner] MobileMail: ZACCOUNT delete ok=%d changes=%d %@", delOK, changes, errMsg.length ? errMsg : @""];
@@ -972,6 +978,24 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
                 NSString *afterCount = PXSQLiteScalar(db, @"SELECT count(*) FROM ZACCOUNT;");
                 [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count after=%@", afterCount ?: @"(nil)"];
+
+                // If accounts remain, log a few account type identifiers for debugging.
+                NSString *sample = nil;
+                sqlite3_stmt *st = NULL;
+                if (sqlite3_prepare_v2(db, "SELECT ZIDENTIFIER FROM ZACCOUNTTYPE LIMIT 12;", -1, &st, NULL) == SQLITE_OK && st) {
+                    NSMutableArray *ids = [NSMutableArray array];
+                    while (sqlite3_step(st) == SQLITE_ROW) {
+                        const unsigned char *txt = sqlite3_column_text(st, 0);
+                        if (txt) [ids addObject:[NSString stringWithUTF8String:(const char *)txt]];
+                    }
+                    sqlite3_finalize(st);
+                    sample = [ids componentsJoinedByString:@", "];
+                } else if (st) {
+                    sqlite3_finalize(st);
+                }
+                if (sample.length) {
+                    [self logMessage:@"[AppDataCleaner] MobileMail: ZACCOUNTTYPE sample=%@", sample];
+                }
 
                 sqlite3_close(db);
             }
