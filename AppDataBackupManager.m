@@ -3,7 +3,6 @@
 #import <UIKit/UIKit.h>
 #import <objc/message.h>
 #import <CoreFoundation/CoreFoundation.h>
-#import <UserNotifications/UserNotifications.h>
 
 #import "AppDataCleaner.h"
 #import "FreezeManager.h"
@@ -24,10 +23,7 @@ static NSString * const PXBackupErrorDomain = @"com.hydra.projectx.backup";
 
 @implementation AppDataBackupManager
 
-@interface LSApplicationProxy : NSObject
-+ (instancetype)applicationProxyForIdentifier:(NSString *)identifier;
-@property (nonatomic, readonly) NSString *bundleExecutable;
-@end
+static NSString *PXDataContainerPathFromLaunchServices(NSString *bundleID);
 
 static void PXDebugAppendLine(NSString *path, NSString *line) {
     if (!path.length || !line.length) return;
@@ -246,8 +242,13 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
     // Best-effort hard kill by executable name (helps when the app is SIGSTOP'd).
     @try {
         if (bundleID.length) {
-            LSApplicationProxy *proxy = [LSApplicationProxy applicationProxyForIdentifier:bundleID];
-            NSString *exe = [proxy respondsToSelector:@selector(bundleExecutable)] ? proxy.bundleExecutable : nil;
+            Class proxyCls = NSClassFromString(@"LSApplicationProxy");
+            SEL sel = NSSelectorFromString(@"applicationProxyForIdentifier:");
+            id proxy = (proxyCls && [proxyCls respondsToSelector:sel]) ? ((id (*)(id, SEL, id))objc_msgSend)(proxyCls, sel, bundleID) : nil;
+            NSString *exe = nil;
+            if (proxy && [proxy respondsToSelector:@selector(bundleExecutable)]) {
+                exe = [proxy performSelector:@selector(bundleExecutable)];
+            }
             if ([exe isKindOfClass:[NSString class]] && exe.length) {
                 CommandRunner *runner = [CommandRunner shared];
                 [runner run:[NSString stringWithFormat:@"killall -9 %@ 2>/dev/null || true", PXShellQuote(exe)]];
@@ -300,20 +301,6 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                           PXShellQuote(archivePath),
                           PXShellQuote(sourceDir)];
     return [runner runAndCapture:fallback];
-}
-
-static void PXPostLocalResultNotification(NSString *title, NSString *body) {
-    if (![UNUserNotificationCenter class]) {
-        return;
-    }
-    UNMutableNotificationContent *content = [[UNMutableNotificationContent alloc] init];
-    content.title = title ?: @"ProjectX";
-    content.body = body ?: @"";
-    content.sound = [UNNotificationSound defaultSound];
-
-    NSString *identifier = [NSString stringWithFormat:@"projectx.backuprestore.%@", [[NSUUID UUID] UUIDString]];
-    UNNotificationRequest *req = [UNNotificationRequest requestWithIdentifier:identifier content:content trigger:nil];
-    [[UNUserNotificationCenter currentNotificationCenter] addNotificationRequest:req withCompletionHandler:nil];
 }
 
 - (CommandResult *)_tarExtract:(NSString *)tarPath archive:(NSString *)archivePath toDir:(NSString *)destDir {
