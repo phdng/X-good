@@ -372,6 +372,10 @@ static void WXProcessRequestForCurrentApp(void) {
                 ok = [r[@"ok"] respondsToSelector:@selector(boolValue)] ? [r[@"ok"] boolValue] : NO;
                 WXAppendLog(logPath, [NSString stringWithFormat:@"restore ok=%d", ok]);
             }
+        } else if ([action isEqualToString:@"wipe"]) {
+            // Keychain wipe in app context (group-scoped)
+            WXWipe((NSArray *)groups, logPath);
+            resp[@"ok"] = @YES;
         } else {
             resp[@"ok"] = @NO;
             resp[@"error"] = @"unknown action";

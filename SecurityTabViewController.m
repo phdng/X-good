@@ -668,7 +668,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1010],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1130],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -1244,6 +1244,9 @@
 
     // Deep Clean (global clear-data verify scan)
     [self setupDeepCleanControl:contentView];
+
+    // Allow system-app keychain wipe (dangerous)
+    [self setupSystemKeychainWipeControl:contentView];
 
     // Fix Version (runtime-capped) control
     [self setupFixVersionControl:contentView];
@@ -2590,7 +2593,7 @@
 
     // Position above Setup Alert Checks (e.g., top: 790)
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1160],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1280],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:60],
@@ -2790,7 +2793,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1470],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1590],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:140],
@@ -2997,7 +3000,7 @@
     [NSLayoutConstraint activateConstraints:@[
         [self.copyrightLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
         [self.copyrightLabel.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
-        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1910], // Positioned after Canvas Fingerprinting
+        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2030], // Positioned after Canvas Fingerprinting
         [self.copyrightLabel.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-30] // More bottom padding
     ]];
     
@@ -3644,7 +3647,7 @@
     [bottomRowContainer addSubview:self.fixVersionToggleSwitch];
 
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:890],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1010],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:100],
@@ -3786,6 +3789,100 @@
         [self.deepCleanToggleSwitch.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
         [self.deepCleanToggleSwitch.trailingAnchor constraintEqualToAnchor:bottomRowContainer.trailingAnchor]
     ]];
+}
+
+- (void)setupSystemKeychainWipeControl:(UIView *)contentView {
+    UIVisualEffectView *controlView = [[UIVisualEffectView alloc] initWithEffect:[UIBlurEffect effectWithStyle:UIBlurEffectStyleSystemThinMaterialLight]];
+    controlView.layer.cornerRadius = 20;
+    controlView.clipsToBounds = YES;
+    controlView.alpha = 0.8;
+    controlView.translatesAutoresizingMaskIntoConstraints = NO;
+    [contentView addSubview:controlView];
+
+    self.systemKeychainWipeLabel = [[UILabel alloc] init];
+    self.systemKeychainWipeLabel.text = @"System Keychain Wipe";
+    self.systemKeychainWipeLabel.font = [UIFont systemFontOfSize:17 weight:UIFontWeightSemibold];
+    self.systemKeychainWipeLabel.textColor = [UIColor labelColor];
+    self.systemKeychainWipeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:self.systemKeychainWipeLabel];
+
+    UIView *infoBgView = [[UIView alloc] init];
+    infoBgView.backgroundColor = [UIColor.systemRedColor colorWithAlphaComponent:0.12];
+    infoBgView.layer.cornerRadius = 12;
+    infoBgView.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:infoBgView];
+
+    self.systemKeychainWipeInfoButton = [UIButton buttonWithType:UIButtonTypeInfoLight];
+    self.systemKeychainWipeInfoButton.tintColor = [UIColor systemRedColor];
+    self.systemKeychainWipeInfoButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.systemKeychainWipeInfoButton addTarget:self action:@selector(showSystemKeychainWipeInfo) forControlEvents:UIControlEventTouchUpInside];
+    [infoBgView addSubview:self.systemKeychainWipeInfoButton];
+
+    UIView *bottomRowContainer = [[UIView alloc] init];
+    bottomRowContainer.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:bottomRowContainer];
+
+    UILabel *modeLabel = [[UILabel alloc] init];
+    modeLabel.text = @"Allow com.apple.*";
+    modeLabel.font = [UIFont systemFontOfSize:14 weight:UIFontWeightSemibold];
+    modeLabel.textColor = [UIColor labelColor];
+    modeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [bottomRowContainer addSubview:modeLabel];
+
+    self.systemKeychainWipeToggleSwitch = [[UISwitch alloc] init];
+    self.systemKeychainWipeToggleSwitch.onTintColor = [UIColor systemRedColor];
+    self.systemKeychainWipeToggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    BOOL enabled = [self.securitySettings boolForKey:@"allowSystemKeychainWipeEnabled"];
+    [self.systemKeychainWipeToggleSwitch setOn:enabled animated:NO];
+    [self.systemKeychainWipeToggleSwitch addTarget:self action:@selector(systemKeychainWipeToggleChanged:) forControlEvents:UIControlEventValueChanged];
+    [bottomRowContainer addSubview:self.systemKeychainWipeToggleSwitch];
+
+    [NSLayoutConstraint activateConstraints:@[
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:830],
+        [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
+        [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
+        [controlView.heightAnchor constraintEqualToConstant:100],
+
+        [self.systemKeychainWipeLabel.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
+        [self.systemKeychainWipeLabel.topAnchor constraintEqualToAnchor:controlView.contentView.topAnchor constant:15],
+
+        [infoBgView.leadingAnchor constraintEqualToAnchor:self.systemKeychainWipeLabel.trailingAnchor constant:10],
+        [infoBgView.centerYAnchor constraintEqualToAnchor:self.systemKeychainWipeLabel.centerYAnchor],
+        [infoBgView.widthAnchor constraintEqualToConstant:24],
+        [infoBgView.heightAnchor constraintEqualToConstant:24],
+
+        [self.systemKeychainWipeInfoButton.centerXAnchor constraintEqualToAnchor:infoBgView.centerXAnchor],
+        [self.systemKeychainWipeInfoButton.centerYAnchor constraintEqualToAnchor:infoBgView.centerYAnchor],
+
+        [bottomRowContainer.centerXAnchor constraintEqualToAnchor:controlView.contentView.centerXAnchor],
+        [bottomRowContainer.topAnchor constraintEqualToAnchor:self.systemKeychainWipeLabel.bottomAnchor constant:15],
+        [bottomRowContainer.heightAnchor constraintEqualToConstant:30],
+
+        [modeLabel.leadingAnchor constraintEqualToAnchor:bottomRowContainer.leadingAnchor],
+        [modeLabel.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
+
+        [self.systemKeychainWipeToggleSwitch.leadingAnchor constraintEqualToAnchor:modeLabel.trailingAnchor constant:10],
+        [self.systemKeychainWipeToggleSwitch.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
+        [self.systemKeychainWipeToggleSwitch.trailingAnchor constraintEqualToAnchor:bottomRowContainer.trailingAnchor]
+    ]];
+}
+
+- (void)showSystemKeychainWipeInfo {
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"System Keychain Wipe"
+                                                                   message:@"Dangerous. Enables Keychain Wipe for com.apple.* apps in Clear Data.\n\nThis may remove system accounts, credentials, Apple ID tokens, and can break system services. Use only if you know what you're doing."
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)systemKeychainWipeToggleChanged:(UISwitch *)sender {
+    BOOL enabled = sender.isOn;
+    [self.securitySettings setBool:enabled forKey:@"allowSystemKeychainWipeEnabled"];
+    [self.securitySettings synchronize];
+
+    UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [generator prepare];
+    [generator impactOccurred];
 }
 
 - (void)showDeepCleanInfo {
@@ -4361,7 +4458,7 @@
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
         // Control view
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1630], // Position between App Version Spoofing and Canvas Fingerprinting
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1750], // Position between App Version Spoofing and Canvas Fingerprinting
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -4537,7 +4634,7 @@
     
     // Position control between Domain Blocking and Copyright label
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1770], // Moved down to be below Domain Blocking
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1890], // Moved down to be below Domain Blocking
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],

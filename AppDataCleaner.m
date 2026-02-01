@@ -3,6 +3,8 @@
 #import <sys/wait.h>
 #import <Security/Security.h>
 #import <UIKit/UIKit.h>
+#import <CoreFoundation/CoreFoundation.h>
+#import <objc/message.h>
 #import <errno.h>
 #import <unistd.h>
 #import <sys/stat.h>
@@ -26,6 +28,34 @@
 
 @implementation AppDataCleaner {
     NSFileManager *_fileManager;
+}
+
+static void PXKillAppProcessBestEffort(AppDataCleaner *selfRef, NSString *bundleID) {
+    if (!bundleID.length || !selfRef) return;
+
+    // 1) Try kill by executable name from bundle container
+    NSString *bundleUUID = [selfRef findBundleContainerUUID:bundleID];
+    if (bundleUUID.length) {
+        NSString *bundleRoot = [NSString stringWithFormat:@"/var/mobile/Containers/Bundle/Application/%@", bundleUUID];
+        NSArray *items = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:bundleRoot error:nil];
+        for (NSString *item in items) {
+            if ([item hasSuffix:@".app"]) {
+                NSString *plistPath = [[bundleRoot stringByAppendingPathComponent:item] stringByAppendingPathComponent:@"Info.plist"]; 
+                NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:plistPath];
+                NSString *exeName = [info[@"CFBundleExecutable"] isKindOfClass:[NSString class]] ? info[@"CFBundleExecutable"] : nil;
+                if (exeName.length) {
+                    [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", exeName]];
+                }
+                break;
+            }
+        }
+    }
+
+    // 2) Fallback: kill by last bundle component (often matches process name)
+    NSString *name = [bundleID componentsSeparatedByString:@"."].lastObject;
+    if (name.length > 2) {
+        [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", name]];
+    }
 }
 
 - (BOOL)_deepCleanEnabled {
@@ -170,14 +200,84 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         return YES;
     }
 
-    // Refuse to operate on system apps by default (dangerous entitlements surface).
-    if ([bundleID hasPrefix:@"com.apple."]) {
-        if (error) {
-            *error = [NSError errorWithDomain:@"AppDataCleaner"
-                                         code:101
-                                     userInfo:@{NSLocalizedDescriptionKey: @"Keychain wipe for com.apple.* apps is not supported"}];
+    BOOL isSystemApp = [bundleID hasPrefix:@"com.apple."];
+    if (isSystemApp) {
+        NSUserDefaults *sec = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+        BOOL allow = [sec boolForKey:@"allowSystemKeychainWipeEnabled"];
+        if (!allow) {
+            if (error) {
+                *error = [NSError errorWithDomain:@"AppDataCleaner"
+                                             code:101
+                                         userInfo:@{NSLocalizedDescriptionKey: @"System keychain wipe is disabled (enable in Security tab)"}];
+            }
+            return NO;
         }
-        return NO;
+        [self logMessage:@"[AppDataCleaner] System keychain wipe enabled for %@", bundleID];
+
+        // Use in-app bridge to wipe keychain groups (helper resign is unreliable for system apps).
+        NSString *safeBundle = [[bundleID componentsSeparatedByCharactersInSet:[[NSCharacterSet alphanumericCharacterSet] invertedSet]] componentsJoinedByString:@"_"];
+        NSString *reqPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_request_%@.plist", safeBundle];
+        NSString *respPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_response_%@.plist", safeBundle];
+        NSString *logPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_bridge_%@.log", safeBundle];
+        NSString *nonce = [[NSUUID UUID] UUIDString];
+
+        [[NSFileManager defaultManager] removeItemAtPath:reqPath error:nil];
+        [[NSFileManager defaultManager] removeItemAtPath:respPath error:nil];
+
+        NSDictionary *req = @{
+            @"action": @"wipe",
+            @"bundleID": bundleID,
+            @"groups": groups,
+            @"nonce": nonce,
+            @"respPath": respPath,
+            @"logPath": logPath,
+            @"bridgeOnly": @YES,
+        };
+        if (![req writeToFile:reqPath atomically:YES]) {
+            if (error) {
+                *error = [NSError errorWithDomain:@"AppDataCleaner" code:105 userInfo:@{NSLocalizedDescriptionKey: @"Failed to write keychain bridge request"}];
+            }
+            return NO;
+        }
+
+        // Notify bridge and launch app
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                            (__bridge CFStringRef)[NSString stringWithFormat:@"com.hydra.weaponx.keychain.req.%@", safeBundle],
+                                            NULL, NULL, true);
+        Class wsCls = NSClassFromString(@"LSApplicationWorkspace");
+        if (wsCls) {
+            id ws = [wsCls performSelector:@selector(defaultWorkspace)];
+            if (ws && [ws respondsToSelector:@selector(openApplicationWithBundleID:)]) {
+                ((BOOL (*)(id, SEL, id))objc_msgSend)(ws, @selector(openApplicationWithBundleID:), bundleID);
+            }
+        }
+
+        NSDictionary *resp = nil;
+        for (int i = 0; i < 80; i++) {
+            if ([[NSFileManager defaultManager] fileExistsAtPath:respPath]) {
+                NSDictionary *candidate = [NSDictionary dictionaryWithContentsOfFile:respPath];
+                if ([candidate isKindOfClass:[NSDictionary class]] && [candidate[@"nonce"] isKindOfClass:[NSString class]] && [candidate[@"nonce"] isEqualToString:nonce]) {
+                    resp = candidate;
+                    break;
+                }
+            }
+            [NSThread sleepForTimeInterval:0.25];
+        }
+
+        // Kill app after bridge (may be SIGSTOP'd)
+        PXKillAppProcessBestEffort(self, bundleID);
+
+        if (![resp isKindOfClass:[NSDictionary class]] || ![resp[@"ok"] respondsToSelector:@selector(boolValue)] || ![resp[@"ok"] boolValue]) {
+            NSString *msg = [resp[@"error"] isKindOfClass:[NSString class]] ? resp[@"error"] : @"System keychain wipe timed out";
+            if (error) {
+                *error = [NSError errorWithDomain:@"AppDataCleaner" code:106 userInfo:@{NSLocalizedDescriptionKey: msg}];
+            }
+            return NO;
+        }
+
+        [[NSFileManager defaultManager] removeItemAtPath:reqPath error:nil];
+        [[NSFileManager defaultManager] removeItemAtPath:respPath error:nil];
+        return YES;
     }
 
     AppEntitlementsReader *reader = [[AppEntitlementsReader alloc] init];

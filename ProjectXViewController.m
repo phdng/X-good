@@ -2801,10 +2801,14 @@ static UIImage *PXRemoveFromScopeIcon(void) {
 }
 
 - (void)presentClearDataAlertForBundleID:(NSString *)bundleID
-                                 sender:(UIButton *)sender
-                             dataSizeStr:(NSString *)dataSizeStr
-                          dataDetailsStr:(NSString *)dataDetailsStr {
+                                  sender:(UIButton *)sender
+                              dataSizeStr:(NSString *)dataSizeStr
+                           dataDetailsStr:(NSString *)dataDetailsStr {
     if (!bundleID.length) return;
+
+     BOOL isSystemApp = [bundleID hasPrefix:@"com.apple."];
+     NSUserDefaults *sec = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+     BOOL allowSystemKeychainWipe = [sec boolForKey:@"allowSystemKeychainWipeEnabled"];
 
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     NSString *enabledKey = PXKeychainWipeEnabledKey(bundleID);
@@ -2839,8 +2843,15 @@ static UIImage *PXRemoveFromScopeIcon(void) {
         }
     }
 
-    NSString *keychainState = keychainEnabled ? @"ON" : @"OFF";
-    NSString *groupsLine = selectedGroups.count > 0 ? [NSString stringWithFormat:@"%lu", (unsigned long)selectedGroups.count] : @"Unavailable";
+     if (isSystemApp && !allowSystemKeychainWipe) {
+         // Force keychain wipe off for system apps unless explicitly enabled.
+         keychainEnabled = NO;
+         [defaults setBool:NO forKey:enabledKey];
+         [defaults synchronize];
+     }
+
+     NSString *keychainState = keychainEnabled ? @"ON" : ((isSystemApp && !allowSystemKeychainWipe) ? @"OFF (Not supported)" : @"OFF");
+     NSString *groupsLine = (isSystemApp && !allowSystemKeychainWipe) ? @"N/A" : (selectedGroups.count > 0 ? [NSString stringWithFormat:@"%lu", (unsigned long)selectedGroups.count] : @"Unavailable");
 
     NSString *msg = [NSString stringWithFormat:@"Are you sure you want to clear all data for this app? This will remove %@.%@\n\nKeychain Wipe: %@ (may log you out)\nKeychain Groups: %@\n\nThis action cannot be undone.",
                      dataSizeStr ?: @"", dataDetailsStr ?: @"", keychainState, groupsLine];
@@ -2850,31 +2861,33 @@ static UIImage *PXRemoveFromScopeIcon(void) {
                                                             preferredStyle:UIAlertControllerStyleAlert];
 
     __weak typeof(self) weakSelf = self;
-    NSString *toggleTitle = [NSString stringWithFormat:@"Keychain Wipe: %@", keychainState];
-    UIAlertAction *toggleAction = [UIAlertAction actionWithTitle:toggleTitle
-                                                         style:UIAlertActionStyleDefault
-                                                       handler:^(__unused UIAlertAction *action) {
-        BOOL newVal = !keychainEnabled;
-        [defaults setBool:newVal forKey:enabledKey];
-        [defaults synchronize];
-        dispatch_async(dispatch_get_main_queue(), ^{
-            [weakSelf presentClearDataAlertForBundleID:bundleID sender:sender dataSizeStr:dataSizeStr dataDetailsStr:dataDetailsStr];
-        });
-    }];
-    [alert addAction:toggleAction];
+     if (!isSystemApp || allowSystemKeychainWipe) {
+        NSString *toggleTitle = [NSString stringWithFormat:@"Keychain Wipe: %@", keychainState];
+        UIAlertAction *toggleAction = [UIAlertAction actionWithTitle:toggleTitle
+                                                             style:UIAlertActionStyleDefault
+                                                           handler:^(__unused UIAlertAction *action) {
+            BOOL newVal = !keychainEnabled;
+            [defaults setBool:newVal forKey:enabledKey];
+            [defaults synchronize];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [weakSelf presentClearDataAlertForBundleID:bundleID sender:sender dataSizeStr:dataSizeStr dataDetailsStr:dataDetailsStr];
+            });
+        }];
+        [alert addAction:toggleAction];
 
-    NSString *groupsTitle = selectedGroups.count > 0 ? [NSString stringWithFormat:@"Keychain Groups (%lu)…", (unsigned long)selectedGroups.count] : @"Keychain Groups…";
-    UIAlertAction *groupsAction = [UIAlertAction actionWithTitle:groupsTitle
-                                                         style:UIAlertActionStyleDefault
-                                                       handler:^(__unused UIAlertAction *action) {
-        KeychainGroupsViewController *vc = [[KeychainGroupsViewController alloc] initWithBundleID:bundleID];
-        weakSelf.pendingClearDataBundleID = bundleID;
-        weakSelf.pendingClearDataSender = sender;
-        weakSelf.pendingClearDataSizeStr = dataSizeStr;
-        weakSelf.pendingClearDataDetailsStr = dataDetailsStr;
-        [weakSelf.navigationController pushViewController:vc animated:YES];
-    }];
-    [alert addAction:groupsAction];
+        NSString *groupsTitle = selectedGroups.count > 0 ? [NSString stringWithFormat:@"Keychain Groups (%lu)…", (unsigned long)selectedGroups.count] : @"Keychain Groups…";
+        UIAlertAction *groupsAction = [UIAlertAction actionWithTitle:groupsTitle
+                                                             style:UIAlertActionStyleDefault
+                                                           handler:^(__unused UIAlertAction *action) {
+            KeychainGroupsViewController *vc = [[KeychainGroupsViewController alloc] initWithBundleID:bundleID];
+            weakSelf.pendingClearDataBundleID = bundleID;
+            weakSelf.pendingClearDataSender = sender;
+            weakSelf.pendingClearDataSizeStr = dataSizeStr;
+            weakSelf.pendingClearDataDetailsStr = dataDetailsStr;
+            [weakSelf.navigationController pushViewController:vc animated:YES];
+        }];
+        [alert addAction:groupsAction];
+    }
 
     UIAlertAction *cancelAction = [UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil];
     [alert addAction:cancelAction];
