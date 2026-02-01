@@ -198,6 +198,9 @@ static void PXKillAppProcessBestEffort(AppDataCleaner *selfRef, NSString *bundle
             exe = [proxy performSelector:@selector(bundleExecutable)];
         }
         if ([exe isKindOfClass:[NSString class]] && exe.length) {
+            // Try graceful terminate first to reduce crash reports.
+            [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -TERM '%@' 2>/dev/null || true", exe]];
+            [NSThread sleepForTimeInterval:0.15];
             [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", exe]];
         }
     } @catch (__unused NSException *e) {
@@ -214,6 +217,8 @@ static void PXKillAppProcessBestEffort(AppDataCleaner *selfRef, NSString *bundle
                 NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:plistPath];
                 NSString *exeName = [info[@"CFBundleExecutable"] isKindOfClass:[NSString class]] ? info[@"CFBundleExecutable"] : nil;
                 if (exeName.length) {
+                    [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -TERM '%@' 2>/dev/null || true", exeName]];
+                    [NSThread sleepForTimeInterval:0.15];
                     [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", exeName]];
                 }
                 break;
@@ -224,6 +229,8 @@ static void PXKillAppProcessBestEffort(AppDataCleaner *selfRef, NSString *bundle
     // 2) Fallback: kill by last bundle component (often matches process name)
     NSString *name = [bundleID componentsSeparatedByString:@"."].lastObject;
     if (name.length > 2) {
+        [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -TERM '%@' 2>/dev/null || true", name]];
+        [NSThread sleepForTimeInterval:0.15];
         [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", name]];
     }
 }
@@ -910,6 +917,10 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     // Extra cleanup for MobileMail: email/account display is primarily system-scoped (Accounts3 + /var/mobile/Library/Mail).
     if ([bundleID isEqualToString:@"com.apple.mobilemail"]) {
         [self logMessage:@"[AppDataCleaner] MobileMail: wiping /var/mobile/Library/Mail and mail prefs"]; 
+        // Stop mail-related daemons best-effort to avoid crashes while removing on-disk stores.
+        [self runCommandWithPrivileges:@"killall -TERM maild 2>/dev/null || true"]; 
+        [self runCommandWithPrivileges:@"killall -TERM Mail 2>/dev/null || true"]; 
+        [NSThread sleepForTimeInterval:0.15];
         [self runCommandWithPrivileges:@"rm -rf '/var/mobile/Library/Mail' 2>/dev/null || true"]; 
         [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Preferences/com.apple.mail.plist' 2>/dev/null || true"]; 
         [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Preferences/com.apple.mobilemail.plist' 2>/dev/null || true"]; 
@@ -920,6 +931,9 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         NSString *accountsDB = @"/var/mobile/Library/Accounts/Accounts3.sqlite";
         if ([_fileManager fileExistsAtPath:accountsDB]) {
             // Stop accountsd before touching DB (avoid "database is locked").
+            // Use TERM first to reduce crash reports.
+            [self runCommandWithPrivileges:@"killall -TERM accountsd 2>/dev/null || true"]; 
+            [NSThread sleepForTimeInterval:0.15];
             [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
             [NSThread sleepForTimeInterval:0.2];
 
@@ -1002,6 +1016,9 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         }
 
         // Restart accounts daemons (best-effort) so UI reflects removal.
+        [self runCommandWithPrivileges:@"killall -TERM accountsd 2>/dev/null || true"]; 
+        [self runCommandWithPrivileges:@"killall -TERM Mail 2>/dev/null || true"]; 
+        [NSThread sleepForTimeInterval:0.15];
         [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
         [self runCommandWithPrivileges:@"killall -9 Mail 2>/dev/null || true"]; 
     }
