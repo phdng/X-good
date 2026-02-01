@@ -669,8 +669,7 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     NSArray *cachedRootlessDataDirs = [self listDirectoriesInPath:@"/containers/Data/Application"];
     NSArray *cachedBundleDirs = [self listDirectoriesInPath:@"/var/containers/Bundle/Application"];
     NSArray *cachedRootlessBundleDirs = [self listDirectoriesInPath:@"/containers/Bundle/Application"];
-    NSArray *cachedGroupDirs = [self listDirectoriesInPath:@"/var/mobile/Containers/Shared/AppGroup"];
-    NSArray *cachedRootlessGroupDirs = [self listDirectoriesInPath:@"/containers/Shared/AppGroup"];
+    // App groups are resolved from entitlements + resolver; no need to list all group dirs here.
 
     [self logMessage:@"[AppDataCleaner] Found %lu data containers, %lu rootless containers", 
           (unsigned long)cachedDataDirs.count, (unsigned long)cachedRootlessDataDirs.count];
@@ -5088,37 +5087,30 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
 // Helper method to check if directory exists and has any content at all, ignoring system files
 - (BOOL)directoryExistsAndHasAnyContent:(NSString *)path {
+    if (!path.length) {
+        return NO;
+    }
     if (![_fileManager fileExistsAtPath:path]) {
         NSLog(@"[AppDataCleaner] Directory does not exist: %@", path);
         return NO;
     }
-    
-    // Use a more permissive find command to check for ANY files (including hidden)
-    NSString *command = [NSString stringWithFormat:@"find '%@' -type f -not -path '*/\\.*' -maxdepth 3 | head -n 1", path];
+
+    // Check for any regular file (ignore dotpaths) up to a shallow depth.
+    NSString *command = [NSString stringWithFormat:@"find '%@' -maxdepth 3 -type f -not -path '*/\\.*' -print | head -n 1", path];
     NSString *result = [self runCommandAndGetOutput:command];
-    
-    // If we found at least one file, return true
-    if (resul  return NO;
-    }
-    
-    // Use a more permissive find command to check for ANY files (including hidden)
-    NSString *command = [NSString stringWithFormat:@"find '%@' -type f -not -path '*/\\.*' -maxdepth 3 | head -n 1", path];
-    NSString *result = [self runCommandAndGetOutput:command];
-    
-    // If we found at least one file, return true
     if (result.length > 0 && ![result isEqualToString:@"error"]) {
         NSLog(@"[AppDataCleaner] Found at least one file in directory: %@", path);
         return YES;
     }
-    
-    // As a backup, check for any directories that might contain data
-    command = [NSString stringWithFormat:@"find '%@' -type d -not -path '*/\\.*' -mindepth 1 -maxdepth 2 | grep -v '\\.com\\.apple'", path];
+
+    // Backup: check for any non-system subdirectory (ignore .com.apple*).
+    command = [NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 2 -type d -not -path '*/\\.*' -print | grep -v '\\.?com\\.apple' | head -n 1", path];
     result = [self runCommandAndGetOutput:command];
     if (result.length > 0 && ![result isEqualToString:@"error"]) {
         NSLog(@"[AppDataCleaner] Found subdirectories in: %@", path);
         return YES;
     }
-    
+
     return NO;
 }
 
