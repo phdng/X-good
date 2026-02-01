@@ -424,6 +424,12 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             id ws = [wsCls performSelector:@selector(defaultWorkspace)];
             if (ws && [ws respondsToSelector:@selector(openApplicationWithBundleID:)]) {
                 ((BOOL (*)(id, SEL, id))objc_msgSend)(ws, @selector(openApplicationWithBundleID:), bundleID);
+
+                // Immediately bring ProjectX back to foreground (best-effort).
+                NSString *selfBundle = [[NSBundle mainBundle] bundleIdentifier] ?: @"";
+                if (selfBundle.length) {
+                    ((BOOL (*)(id, SEL, id))objc_msgSend)(ws, @selector(openApplicationWithBundleID:), selfBundle);
+                }
             }
         }
 
@@ -623,6 +629,14 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     // Capture self for logging in blocks
     __weak typeof(self) weakSelf = self;
 
+    // Keep ProjectX running even if another app is launched (e.g., system keychain wipe via bridge).
+    __block UIBackgroundTaskIdentifier bgTask = UIBackgroundTaskInvalid;
+    dispatch_async(dispatch_get_main_queue(), ^{
+        bgTask = [[UIApplication sharedApplication] beginBackgroundTaskWithName:@"AppDataCleaner" expirationHandler:^{
+            // Best-effort: allow watchdog to handle timeout.
+        }];
+    });
+
     // Cancelable watchdog (avoid false timeout after success)
     __block dispatch_source_t watchdogTimer = nil;
     
@@ -636,6 +650,14 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             if (watchdogTimer) {
                 dispatch_source_cancel(watchdogTimer);
                 watchdogTimer = nil;
+            }
+
+            if (bgTask != UIBackgroundTaskInvalid) {
+                UIBackgroundTaskIdentifier taskToEnd = bgTask;
+                bgTask = UIBackgroundTaskInvalid;
+                dispatch_async(dispatch_get_main_queue(), ^{
+                    [[UIApplication sharedApplication] endBackgroundTask:taskToEnd];
+                });
             }
 
             [weakSelf logMessage:@"[AppDataCleaner] Calling completion handler (success=%d)", success];
@@ -744,7 +766,13 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
                 // Step 6: Clear keychain AGAIN to catch any recreated items
                 [strongSelf logMessage:@"[AppDataCleaner] Step 6: Final keychain cleanup (selected groups)..."];
                 NSError *keychainError2 = nil;
-                BOOL keychainOK2 = [strongSelf _wipeSelectedKeychainForBundleID:bundleID error:&keychainError2];
+                BOOL keychainOK2 = YES;
+                // System keychain wipe requires launching the app; do it once per run to avoid long UX.
+                if ([bundleID hasPrefix:@"com.apple."]) {
+                    [strongSelf logMessage:@"[AppDataCleaner] Skipping second keychain wipe for system app %@", bundleID];
+                } else {
+                    keychainOK2 = [strongSelf _wipeSelectedKeychainForBundleID:bundleID error:&keychainError2];
+                }
                 
                 // Step 7: Sync filesystem
                 [strongSelf logMessage:@"[AppDataCleaner] Step 7: Syncing filesystem..."];
