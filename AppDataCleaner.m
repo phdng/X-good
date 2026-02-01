@@ -543,8 +543,15 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         }
     };
 
-    watchdogTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());
-    dispatch_source_set_timer(watchdogTimer, dispatch_time(DISPATCH_TIME_NOW, 120 * NSEC_PER_SEC), DISPATCH_TIME_FOREVER, 1 * NSEC_PER_SEC);
+    BOOL deepClean = [self _deepCleanEnabled];
+    BOOL isSystemApp = [bundleID hasPrefix:@"com.apple."];
+    // Deep Clean and system apps can legitimately take a long time.
+    // Avoid failing early while still making progress.
+    int timeoutSec = (deepClean || isSystemApp) ? (30 * 60) : 120;
+
+    // Run watchdog on a global queue so it isn't delayed by UI activity.
+    watchdogTimer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0));
+    dispatch_source_set_timer(watchdogTimer, dispatch_time(DISPATCH_TIME_NOW, (int64_t)timeoutSec * NSEC_PER_SEC), DISPATCH_TIME_FOREVER, 1 * NSEC_PER_SEC);
     dispatch_source_set_event_handler(watchdogTimer, ^{
         dispatch_semaphore_wait(completionLock, DISPATCH_TIME_FOREVER);
         BOOL alreadyCompleted = completionCalled;
@@ -552,7 +559,7 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         if (alreadyCompleted) {
             return;
         }
-        [weakSelf logMessage:@"[AppDataCleaner] WATCHDOG: 120 second timeout reached"];
+        [weakSelf logMessage:@"[AppDataCleaner] WATCHDOG: %d second timeout reached", timeoutSec];
         NSError *timeoutError = [NSError errorWithDomain:@"AppDataCleaner"
                                                    code:-100
                                                userInfo:@{NSLocalizedDescriptionKey: @"Clear Data timed out"}];
