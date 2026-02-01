@@ -5079,8 +5079,6 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         if ([_fileManager fileExistsAtPath:iconPath]) {
             NSString *command = [NSString stringWithFormat:@"cat '%@' | grep -q '%@' && echo 'found' || echo 'not found'", iconPath, bundleID];
             NSString *result = [self runCommandAndGetOutput:command];
-            it found'", iconPath, bundleID];
-            NSString *result = [self runCommandAndGetOutput:command];
             if ([result containsString:@"found"]) {
                 NSLog(@"[AppDataCleaner] Found reference in IconState.plist: %@", bundleID);
                 return YES;
