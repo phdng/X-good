@@ -286,6 +286,10 @@ static NSString *PXShellQuote(NSString *s) {
     return [NSString stringWithFormat:@"'%@'", escaped];
 }
 
+static NSString *PXTimestampSuffix(void) {
+    return [NSString stringWithFormat:@"%.0f", [[NSDate date] timeIntervalSince1970]];
+}
+
 static NSString *PXKeychainWipeEnabledKey(NSString *bundleID) {
     return [NSString stringWithFormat:@"dataCleanerKeychainWipeEnabled_%@", bundleID ?: @""];
 }
@@ -5129,10 +5133,6 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             [self runCommandWithPrivileges:[NSString stringWithFormat:@"sqlite3 '%@' \"DELETE FROM apps WHERE data LIKE '%%%@%%';\" 2>/dev/null || true", dbPath, companyName]];
             [self runCommandWithPrivileges:[NSString stringWithFormat:@"sqlite3 '%@' \"DELETE FROM data WHERE data LIKE '%%%@%%';\" 2>/dev/null || true", dbPath, companyName]];
             [self runCommandWithPrivileges:[NSString stringWithFormat:@"sqlite3 '%@' \"DELETE FROM items WHERE data LIKE '%%%@%%';\" 2>/dev/null || true", dbPath, companyName]];
-        }
-        
-        // Try to vacuum the database
-        [self runCommandWithPrivileges:[| true", dbPath, companyName]];
         }
         
         // Try to vacuum the database
