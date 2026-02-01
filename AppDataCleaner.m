@@ -498,22 +498,16 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         NSArray *beforeContents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[dataContainerPath stringByAppendingPathComponent:@"Library"] error:&err];
         [self logMessage:@"[AppDataCleaner] DEBUG: Library has %lu items before wipe", (unsigned long)beforeContents.count];
         
-        // Fix permissions first
-        [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod -R 0777 '%@' 2>/dev/null || true", dataContainerPath]];
-        
-        // FAST wipe using rm -rf for each key directory
-        NSArray *subDirs = @[
-            @"Documents",
-            @"Library",  // Wipe entire Library
-            @"tmp",
-            @"StoreKit",
-            @"SystemData"
-        ];
-        
+        // FAST wipe: remove top-level directories entirely (much faster than chmod -R + rm contents).
+        // Container metadata plists at root are preserved.
+        NSArray *subDirs = @[@"Documents", @"Library", @"tmp", @"StoreKit", @"SystemData"]; 
         for (NSString *dir in subDirs) {
             NSString *fullPath = [dataContainerPath stringByAppendingPathComponent:dir];
-            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", fullPath]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@' 2>/dev/null || true", fullPath]];
         }
+        // Recreate minimal structure to avoid app/iOS assumptions.
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"mkdir -p '%@/Documents' '%@/Library/Caches' '%@/Library/Preferences' '%@/tmp' 2>/dev/null || true",
+                                      dataContainerPath, dataContainerPath, dataContainerPath, dataContainerPath]];
         
         // Also wipe any hidden directories and files at root level
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -name '.*' ! -name '.com.apple*' -exec rm -rf {} \\; 2>/dev/null || true", dataContainerPath]];
@@ -553,15 +547,21 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     for (NSString *groupUUID in groupUUIDs) {
         NSString *groupPath = [NSString stringWithFormat:@"/var/mobile/Containers/Shared/AppGroup/%@", groupUUID];
         [self logMessage:@"[AppDataCleaner] Fast wiping group: %@", groupUUID];
-        // Use fast rm -rf instead of slow secure wipe
-        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", groupPath]];
+        // Wipe everything except container metadata (critical for stable mapping).
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -not -name '.com.apple.mobile_container_manager.metadata.plist' -not -name '.com.apple.containermanagerd.metadata.plist' -exec rm -rf {} + 2>/dev/null || true",
+                                      groupPath]];
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"mkdir -p '%@/Documents' '%@/Library/Caches' '%@/Library/Preferences' '%@/tmp' 2>/dev/null || true",
+                                      groupPath, groupPath, groupPath, groupPath]];
     }
     
     // Process rootless group containers
     for (NSString *groupUUID in rootlessGroupUUIDs) {
         NSString *groupPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", groupUUID];
         [self logMessage:@"[AppDataCleaner] Fast wiping rootless group: %@", groupUUID];
-        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", groupPath]];
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -not -name '.com.apple.mobile_container_manager.metadata.plist' -not -name '.com.apple.containermanagerd.metadata.plist' -exec rm -rf {} + 2>/dev/null || true",
+                                      groupPath]];
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"mkdir -p '%@/Documents' '%@/Library/Caches' '%@/Library/Preferences' '%@/tmp' 2>/dev/null || true",
+                                      groupPath, groupPath, groupPath, groupPath]];
     }
     
     [self logMessage:@"[AppDataCleaner] Group containers wiped successfully"];
@@ -599,8 +599,10 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf /private/var/mobile/Library/Preferences/%@.plist", bundleID]];
 
     // Clear iCloud-related data
-    NSLog(@"[AppDataCleaner] Clearing iCloud-related data for %@", bundleID);
+    [self logMessage:@"[AppDataCleaner] Clearing iCloud-related data"]; 
+    CFAbsoluteTime t0 = CFAbsoluteTimeGetCurrent();
     [self clearICloudData:bundleID];
+    [self logMessage:@"[AppDataCleaner] iCloud cleanup took %.2fs", CFAbsoluteTimeGetCurrent() - t0];
     
     // Clear app state data - SKIP second call to avoid respring
     // [self _internalClearAppStateData:bundleID];
@@ -1823,73 +1825,79 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 }
 
 - (void)clearICloudData:(NSString *)bundleID {
-    NSLog(@"[AppDataCleaner] Clearing iCloud-related data for %@", bundleID);
-    
-    // Target iCloud containers, which may contain auth tokens and sync data
-    NSArray *iCloudPaths = @[
-        @"/var/mobile/Library/Mobile Documents/",
-        @"/var/mobile/Library/Mobile Documents/",
-        @"/var/mobile/Library/Application Support/CloudDocs/",
-        @"/var/mobile/Library/Application Support/CloudDocs/",
-        @"/var/mobile/Library/Application Support/CloudKit/",
-        @"/var/mobile/Library/Application Support/CloudKit/",
-        @"/var/mobile/Library/Accounts/",
-        @"/var/mobile/Library/Accounts/"
-    ];
-    
-    // Parse out domain names from the bundle ID (like 'uber' from 'com.ubercab.UberClient')
+    [self logMessage:@"[AppDataCleaner] Clearing iCloud-related data for %@", bundleID];
+
+    // Keep the broad iCloud/CloudKit/CloudDocs/Accounts cleanup behavior, but optimize it:
+    // - avoid repeated deep "**" scans with many find calls
+    // - fast mode (Deep Clean OFF): shallow maxdepth scan (still wipes top-level app containers)
+    // - deep mode (Deep Clean ON): deeper scan
+
+    BOOL deep = [self _deepCleanEnabled];
+    int maxDepth = deep ? 8 : 2;
+
     NSArray *bundleComponents = [bundleID componentsSeparatedByString:@"."];
-    NSMutableArray *searchTerms = [NSMutableArray arrayWithObject:bundleID];
-    
-    // Add domain component variations to search for iCloud docs
+    NSString *tildeID = [[bundleID stringByReplacingOccurrencesOfString:@"." withString:@"~"] stringByReplacingOccurrencesOfString:@"-" withString:@"~"]; 
+    NSString *iCloudTilde = tildeID.length ? [NSString stringWithFormat:@"iCloud~%@", tildeID] : @"";
+
+    NSMutableOrderedSet<NSString *> *searchSet = [NSMutableOrderedSet orderedSet];
+    if (bundleID.length) [searchSet addObject:bundleID];
+    if (tildeID.length) [searchSet addObject:tildeID];
+    if (iCloudTilde.length) [searchSet addObject:iCloudTilde];
+
     for (NSString *component in bundleComponents) {
-        if (component.length > 3 && ![component isEqualToString:@"com"] && 
-            ![component isEqualToString:@"org"] && ![component isEqualToString:@"net"]) {
-            [searchTerms addObject:component];
-            [searchTerms addObject:[NSString stringWithFormat:@"iCloud.%@", component]];
-            [searchTerms addObject:[NSString stringWithFormat:@"%@.icloud", component]];
-            [searchTerms addObject:[NSString stringWithFormat:@"com.apple.CloudDocs.%@", component]];
+        if (component.length > 3 && ![component isEqualToString:@"com"] && ![component isEqualToString:@"org"] && ![component isEqualToString:@"net"]) {
+            [searchSet addObject:component];
+            [searchSet addObject:[NSString stringWithFormat:@"iCloud.%@", component]];
+            [searchSet addObject:[NSString stringWithFormat:@"%@.icloud", component]];
+            [searchSet addObject:[NSString stringWithFormat:@"com.apple.CloudDocs.%@", component]];
         }
     }
-    
-    // Look through iCloud paths for matches
-    for (NSString *basePath in iCloudPaths) {
-        if ([_fileManager fileExistsAtPath:basePath]) {
-            for (NSString *term in searchTerms) {
-                NSArray *matches = [self findPathsMatchingPattern:[NSString stringWithFormat:@"%@**/*%@*", basePath, term]];
-                for (NSString *path in matches) {
-                    NSLog(@"[AppDataCleaner] Wiping iCloud data: %@", path);
-                    
-                    if ([_fileManager fileExistsAtPath:path isDirectory:NULL]) {
-                        // Fix permissions before removal
-                        [self fixPermissionsAndRemovePath:path];
-                    }
-                }
-            }
-        }
+
+    // Dedupe lowercased variants
+    NSMutableOrderedSet<NSString *> *finalTerms = [NSMutableOrderedSet orderedSet];
+    for (NSString *t in searchSet) {
+        if (![t isKindOfClass:[NSString class]] || t.length < 3) continue;
+        [finalTerms addObject:t];
+        [finalTerms addObject:[t lowercaseString]];
     }
-    
-    // Clear iCloud accounts info 
+
+    NSArray<NSString *> *bases = @[
+        @"/var/mobile/Library/Mobile Documents",
+        @"/var/mobile/Library/Application Support/CloudDocs",
+        @"/var/mobile/Library/Application Support/CloudKit",
+        @"/var/mobile/Library/Accounts"
+    ];
+
+    // One find per base path.
+    for (NSString *basePath in bases) {
+        if (![_fileManager fileExistsAtPath:basePath]) continue;
+
+        NSMutableString *expr = [NSMutableString string];
+        for (NSString *t in finalTerms.array) {
+            if (expr.length) [expr appendString:@" -o "];
+            // Match common iCloud directory naming; keep broad for compatibility.
+            [expr appendFormat:@"-iname '*%@*'", t];
+        }
+        if (!expr.length) continue;
+
+        // Escape parentheses for /bin/sh
+        NSString *cmd = [NSString stringWithFormat:
+                         @"find '%@' -mindepth 1 -maxdepth %d \\( %@ \\) -exec rm -rf {} + 2>/dev/null || true",
+                         basePath, maxDepth, expr];
+        [self runCommandWithPrivileges:cmd];
+    }
+
+    // Clear iCloud accounts info (batch, single sqlite3 call)
     NSString *accountsDBPath = @"/var/mobile/Library/Accounts/Accounts3.sqlite";
-    if ([_fileManager fileExistsAtPath:accountsDBPath]) {
-        // We'll use sqlite3 command to delete records related to this app
-        for (NSString *term in searchTerms) {
-            NSString *sqlCommand = [NSString stringWithFormat:
-                                   @"sqlite3 '%@' \"DELETE FROM ZACCOUNT WHERE ZNAME LIKE '%%%@%%' OR ZIDENTIFIER LIKE '%%%@%%' OR ZOWNINGBUNDLEID LIKE '%%%@%%';\"",
-                                   accountsDBPath, term, term, term];
-            [self runCommandWithPrivileges:sqlCommand];
+    if ([_fileManager fileExistsAtPath:accountsDBPath] && finalTerms.count) {
+        NSMutableString *sql = [NSMutableString string];
+        for (NSString *term in finalTerms.array) {
+            NSString *t = [term stringByReplacingOccurrencesOfString:@"'" withString:@"''"]; 
+            [sql appendFormat:@"DELETE FROM ZACCOUNT WHERE ZNAME LIKE '%%%%%@%%%%' OR ZIDENTIFIER LIKE '%%%%%@%%%%' OR ZOWNINGBUNDLEID LIKE '%%%%%@%%%%'; ", t, t, t];
         }
-    }
-    
-    // Also check rootless path
-    NSString *rootlessAccountsDBPath = @"/var/mobile/Library/Accounts/Accounts3.sqlite";
-    if ([_fileManager fileExistsAtPath:rootlessAccountsDBPath]) {
-        for (NSString *term in searchTerms) {
-            NSString *sqlCommand = [NSString stringWithFormat:
-                                   @"sqlite3 '%@' \"DELETE FROM ZACCOUNT WHERE ZNAME LIKE '%%%@%%' OR ZIDENTIFIER LIKE '%%%@%%' OR ZOWNINGBUNDLEID LIKE '%%%@%%';\"",
-                                   rootlessAccountsDBPath, term, term, term];
-            [self runCommandWithPrivileges:sqlCommand];
-        }
+        [sql appendString:@"VACUUM;" ];
+        NSString *sqlCommand = [NSString stringWithFormat:@"sqlite3 '%@' \"%@\" 2>/dev/null || true", accountsDBPath, sql];
+        [self runCommandWithPrivileges:sqlCommand];
     }
 }
 
