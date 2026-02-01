@@ -21,6 +21,10 @@ static NSString * const PXBackupKeychainGroupsSavedNotification = @"com.hydra.pr
 @property (nonatomic, strong) UISwitch *includePrefsSwitch;
 @property (nonatomic, strong) UISwitch *includeKeychainSwitch;
 @property (nonatomic, strong) UIButton *keychainGroupsButton;
+
+@property (nonatomic, copy) NSString *pendingAlertTitle;
+@property (nonatomic, copy) NSString *pendingAlertMessage;
+@property (nonatomic, copy) NSString *pendingCopyPath;
 @end
 
 @implementation AppDataBackupRestoreViewController
@@ -41,6 +45,11 @@ static void PXAttemptBringProjectXToFront(void) {
 - (void)viewDidLoad {
     [super viewDidLoad];
     self.view.backgroundColor = [UIColor systemBackgroundColor];
+
+    [[NSNotificationCenter defaultCenter] addObserver:self
+                                             selector:@selector(_deliverPendingAlertIfPossible)
+                                                 name:UIApplicationDidBecomeActiveNotification
+                                               object:nil];
     
     // Set title based on whether we have a specific app
     if (self.appName) {
@@ -257,19 +266,65 @@ static void PXAttemptBringProjectXToFront(void) {
     ]];
 }
 
-- (void)_presentAlertBestEffort:(UIAlertController *)alert {
-    if (!alert) return;
-    if ([UIApplication sharedApplication].applicationState == UIApplicationStateActive) {
+- (void)viewDidAppear:(BOOL)animated {
+    [super viewDidAppear:animated];
+    [self _deliverPendingAlertIfPossible];
+}
+
+- (void)_deliverPendingAlertIfPossible {
+    if ([UIApplication sharedApplication].applicationState != UIApplicationStateActive) {
+        return;
+    }
+    if (!self.pendingAlertTitle.length || !self.pendingAlertMessage.length) {
+        return;
+    }
+    if (self.presentedViewController) {
+        return;
+    }
+    NSString *t = self.pendingAlertTitle;
+    NSString *m = self.pendingAlertMessage;
+    NSString *p = self.pendingCopyPath;
+    self.pendingAlertTitle = nil;
+    self.pendingAlertMessage = nil;
+    self.pendingCopyPath = nil;
+
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:t
+                                                                   message:m
+                                                            preferredStyle:UIAlertControllerStyleAlert];
+    if (p.length) {
+        [alert addAction:[UIAlertAction actionWithTitle:@"Copy Path"
+                                                  style:UIAlertActionStyleDefault
+                                                handler:^(__unused UIAlertAction * _Nonnull action) {
+            [UIPasteboard generalPasteboard].string = p;
+        }]];
+    }
+    [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
+- (void)_presentResultAlertBestEffortWithTitle:(NSString *)title message:(NSString *)message copyPath:(NSString *)copyPath {
+    if (!title.length || !message.length) return;
+    if ([UIApplication sharedApplication].applicationState == UIApplicationStateActive && !self.presentedViewController) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:title
+                                                                       message:message
+                                                                preferredStyle:UIAlertControllerStyleAlert];
+        if (copyPath.length) {
+            [alert addAction:[UIAlertAction actionWithTitle:@"Copy Path"
+                                                      style:UIAlertActionStyleDefault
+                                                    handler:^(__unused UIAlertAction * _Nonnull action) {
+                [UIPasteboard generalPasteboard].string = copyPath;
+            }]];
+        }
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
         [self presentViewController:alert animated:YES completion:nil];
         return;
     }
-    // Try to bring ProjectX back, then present shortly after.
+
+    // Queue and try to bring ProjectX back.
+    self.pendingAlertTitle = title;
+    self.pendingAlertMessage = message;
+    self.pendingCopyPath = copyPath;
     PXAttemptBringProjectXToFront();
-    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.3 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
-        if ([UIApplication sharedApplication].applicationState == UIApplicationStateActive) {
-            [self presentViewController:alert animated:YES completion:nil];
-        }
-    });
 }
 
 - (void)dealloc {
@@ -368,7 +423,9 @@ static void PXAttemptBringProjectXToFront(void) {
                                                                                       message:error.localizedDescription ?: @"Unknown error"
                                                                                preferredStyle:UIAlertControllerStyleAlert];
                      [errAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                     [self _presentAlertBestEffort:errAlert];
+                     [self _presentResultAlertBestEffortWithTitle:@"Backup Failed"
+                                                         message:error.localizedDescription ?: @"Unknown error"
+                                                        copyPath:nil];
                      return;
                  }
 
@@ -380,18 +437,7 @@ static void PXAttemptBringProjectXToFront(void) {
                     }
                 }
 
-                 UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Backup Complete"
-                                                                                       message:msg
-                                                                                preferredStyle:UIAlertControllerStyleAlert];
-                 [successAlert addAction:[UIAlertAction actionWithTitle:@"Copy Path"
-                                                                 style:UIAlertActionStyleDefault
-                                                               handler:^(UIAlertAction * _Nonnull action) {
-                     if (result.backupDirectory.length) {
-                         [UIPasteboard generalPasteboard].string = result.backupDirectory;
-                     }
-                 }]];
-                 [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleCancel handler:nil]];
-                 [self _presentAlertBestEffort:successAlert];
+                 [self _presentResultAlertBestEffortWithTitle:@"Backup Complete" message:msg copyPath:result.backupDirectory];
              }];
          }];
       }]];
@@ -454,7 +500,9 @@ static void PXAttemptBringProjectXToFront(void) {
                                                                                               message:error.localizedDescription ?: @"Unknown error"
                                                                                        preferredStyle:UIAlertControllerStyleAlert];
                              [errAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                             [self _presentAlertBestEffort:errAlert];
+                             [self _presentResultAlertBestEffortWithTitle:@"Restore Failed"
+                                                                 message:error.localizedDescription ?: @"Unknown error"
+                                                                copyPath:nil];
                              return;
                          }
 
@@ -466,11 +514,7 @@ static void PXAttemptBringProjectXToFront(void) {
                             }
                         }
 
-                         UIAlertController *successAlert = [UIAlertController alertControllerWithTitle:@"Restore Complete"
-                                                                                               message:msg
-                                                                                        preferredStyle:UIAlertControllerStyleAlert];
-                         [successAlert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
-                         [self _presentAlertBestEffort:successAlert];
+                         [self _presentResultAlertBestEffortWithTitle:@"Restore Complete" message:msg copyPath:nil];
                      }];
                  }];
              }]];
