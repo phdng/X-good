@@ -9,6 +9,7 @@
 #import <unistd.h>
 #import <sys/stat.h>
 #import <signal.h>
+#import <sqlite3.h>
 
 #import "AppEntitlementsReader.h"
 #import "CommandRunner.h"
@@ -29,6 +30,79 @@
 
 @implementation AppDataCleaner {
     NSFileManager *_fileManager;
+}
+
+- (BOOL)_sqliteExecAtPath:(NSString *)dbPath sql:(NSString *)sql errorOut:(NSString **)errorOut {
+    if (!dbPath.length || !sql.length) {
+        if (errorOut) *errorOut = @"invalid args";
+        return NO;
+    }
+    sqlite3 *db = NULL;
+    int rc = sqlite3_open_v2(dbPath.UTF8String, &db, SQLITE_OPEN_READWRITE, NULL);
+    if (rc != SQLITE_OK || !db) {
+        if (errorOut) {
+            const char *msg = db ? sqlite3_errmsg(db) : "open failed";
+            *errorOut = [NSString stringWithFormat:@"sqlite open rc=%d %s", rc, msg];
+        }
+        if (db) sqlite3_close(db);
+        return NO;
+    }
+    sqlite3_busy_timeout(db, 3000);
+
+    char *errMsg = NULL;
+    rc = sqlite3_exec(db, sql.UTF8String, NULL, NULL, &errMsg);
+    BOOL ok = (rc == SQLITE_OK);
+    if (!ok && errorOut) {
+        NSString *e = errMsg ? [NSString stringWithUTF8String:errMsg] : @"sqlite exec failed";
+        *errorOut = [NSString stringWithFormat:@"sqlite exec rc=%d %@", rc, e ?: @""];
+    }
+    if (errMsg) sqlite3_free(errMsg);
+    sqlite3_close(db);
+    return ok;
+}
+
+- (NSString *)_sqliteScalarAtPath:(NSString *)dbPath sql:(NSString *)sql errorOut:(NSString **)errorOut {
+    if (!dbPath.length || !sql.length) {
+        if (errorOut) *errorOut = @"invalid args";
+        return nil;
+    }
+    sqlite3 *db = NULL;
+    int rc = sqlite3_open_v2(dbPath.UTF8String, &db, SQLITE_OPEN_READONLY, NULL);
+    if (rc != SQLITE_OK || !db) {
+        if (errorOut) {
+            const char *msg = db ? sqlite3_errmsg(db) : "open failed";
+            *errorOut = [NSString stringWithFormat:@"sqlite open rc=%d %s", rc, msg];
+        }
+        if (db) sqlite3_close(db);
+        return nil;
+    }
+    sqlite3_busy_timeout(db, 3000);
+
+    sqlite3_stmt *stmt = NULL;
+    rc = sqlite3_prepare_v2(db, sql.UTF8String, -1, &stmt, NULL);
+    if (rc != SQLITE_OK || !stmt) {
+        if (errorOut) {
+            *errorOut = [NSString stringWithFormat:@"sqlite prepare rc=%d %s", rc, sqlite3_errmsg(db)];
+        }
+        if (stmt) sqlite3_finalize(stmt);
+        sqlite3_close(db);
+        return nil;
+    }
+
+    NSString *out = nil;
+    rc = sqlite3_step(stmt);
+    if (rc == SQLITE_ROW) {
+        const unsigned char *txt = sqlite3_column_text(stmt, 0);
+        if (txt) out = [NSString stringWithUTF8String:(const char *)txt];
+    } else if (rc != SQLITE_DONE) {
+        if (errorOut) {
+            *errorOut = [NSString stringWithFormat:@"sqlite step rc=%d %s", rc, sqlite3_errmsg(db)];
+        }
+    }
+
+    sqlite3_finalize(stmt);
+    sqlite3_close(db);
+    return out;
 }
 
 - (NSArray<NSString *> *)_resolvedAppGroupUUIDsFromEntitlements:(NSString *)bundleID rootless:(BOOL)rootless {
@@ -790,22 +864,28 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             [NSThread sleepForTimeInterval:0.2];
 
             // Log counts before.
-            NSString *beforeCount = [self runCommandAndGetOutput:[NSString stringWithFormat:@"sqlite3 '%@' \"SELECT count(*) FROM ZACCOUNT;\" 2>/dev/null || echo 'err'", accountsDB]];
-            NSString *beforeTrim = [(beforeCount ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count before=%@", beforeTrim];
+            NSString *err = nil;
+            NSString *beforeCount = [self _sqliteScalarAtPath:accountsDB sql:@"SELECT count(*) FROM ZACCOUNT;" errorOut:&err];
+            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count before=%@", beforeCount ?: [NSString stringWithFormat:@"err(%@)", err ?: @""]];
 
             // Delete account types commonly used by Mail.
             NSString *sql = @"PRAGMA busy_timeout=3000; BEGIN IMMEDIATE; "
                             "DELETE FROM ZACCOUNT WHERE ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%'); "
-                            "COMMIT; PRAGMA wal_checkpoint(TRUNCATE);";
-            [self runCommandWithPrivileges:[NSString stringWithFormat:@"sqlite3 '%@' \"%@\" 2>/dev/null || true", accountsDB, sql]];
+                            "COMMIT;";
+            NSString *execErr = nil;
+            BOOL ok = [self _sqliteExecAtPath:accountsDB sql:sql errorOut:&execErr];
+            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 delete ok=%d %@", ok, (execErr.length ? execErr : @"")];
+
+            // Try to checkpoint (if WAL mode)
+            NSString *ckErr = nil;
+            [self _sqliteExecAtPath:accountsDB sql:@"PRAGMA wal_checkpoint(TRUNCATE);" errorOut:&ckErr];
 
             // Remove WAL files to force readers to see changes.
             [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Accounts/Accounts3.sqlite-wal' '/var/mobile/Library/Accounts/Accounts3.sqlite-shm' 2>/dev/null || true"]; 
 
-            NSString *afterCount = [self runCommandAndGetOutput:[NSString stringWithFormat:@"sqlite3 '%@' \"SELECT count(*) FROM ZACCOUNT;\" 2>/dev/null || echo 'err'", accountsDB]];
-            NSString *afterTrim = [(afterCount ?: @"") stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count after=%@", afterTrim];
+            NSString *err2 = nil;
+            NSString *afterCount = [self _sqliteScalarAtPath:accountsDB sql:@"SELECT count(*) FROM ZACCOUNT;" errorOut:&err2];
+            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count after=%@", afterCount ?: [NSString stringWithFormat:@"err(%@)", err2 ?: @""]];
         }
 
         // Restart accounts daemons (best-effort) so UI reflects removal.
@@ -2146,17 +2226,18 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         [self runCommandWithPrivileges:cmd];
     }
 
-    // Clear iCloud accounts info (batch, single sqlite3 call)
+    // Clear iCloud accounts info (batch, in-process sqlite to avoid missing sqlite3 tool)
     NSString *accountsDBPath = @"/var/mobile/Library/Accounts/Accounts3.sqlite";
     if ([_fileManager fileExistsAtPath:accountsDBPath] && finalTerms.count) {
-        NSMutableString *sql = [NSMutableString string];
+        NSMutableString *sql = [NSMutableString stringWithString:@"PRAGMA busy_timeout=3000; BEGIN IMMEDIATE; "];
         for (NSString *term in finalTerms.array) {
             NSString *t = [term stringByReplacingOccurrencesOfString:@"'" withString:@"''"]; 
             [sql appendFormat:@"DELETE FROM ZACCOUNT WHERE ZNAME LIKE '%%%%%@%%%%' OR ZIDENTIFIER LIKE '%%%%%@%%%%' OR ZOWNINGBUNDLEID LIKE '%%%%%@%%%%'; ", t, t, t];
         }
-        [sql appendString:@"VACUUM;" ];
-        NSString *sqlCommand = [NSString stringWithFormat:@"sqlite3 '%@' \"%@\" 2>/dev/null || true", accountsDBPath, sql];
-        [self runCommandWithPrivileges:sqlCommand];
+        [sql appendString:@"COMMIT;" ];
+        NSString *execErr = nil;
+        [self _sqliteExecAtPath:accountsDBPath sql:sql errorOut:&execErr];
+        [self _sqliteExecAtPath:accountsDBPath sql:@"VACUUM;" errorOut:NULL];
     }
 }
 

@@ -25,7 +25,7 @@ ProjectX_PRIVATE_FRAMEWORKS = FrontBoardServices SpringBoardServices BackBoardSe
 ProjectX_FRAMEWORKS = Foundation MobileCoreServices CoreServices StoreKit IOKit CoreLocation
 # UIKit, Security and CoreLocationUI are weak-linked for iOS 12+ compatibility
 # UIButtonConfiguration and SecTrustCopyCertificateChain are iOS 15+ only
-ProjectX_LDFLAGS = -weak_framework UIKit -weak_framework CoreLocationUI -weak_framework Security
+ProjectX_LDFLAGS = -weak_framework UIKit -weak_framework CoreLocationUI -weak_framework Security -lsqlite3
 ProjectX_CODESIGN_FLAGS = -Sent.plist
 ProjectX_CFLAGS = -fobjc-arc -D SUPPORT_IPAD=1 -D ENABLE_STATE_RESTORATION=1 -I./common
 
