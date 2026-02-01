@@ -33,6 +33,21 @@
 static void PXKillAppProcessBestEffort(AppDataCleaner *selfRef, NSString *bundleID) {
     if (!bundleID.length || !selfRef) return;
 
+    // 0) Best-effort kill by LaunchServices executable name (works for system apps too)
+    @try {
+        Class proxyCls = NSClassFromString(@"LSApplicationProxy");
+        SEL sel = NSSelectorFromString(@"applicationProxyForIdentifier:");
+        id proxy = (proxyCls && [proxyCls respondsToSelector:sel]) ? ((id (*)(id, SEL, id))objc_msgSend)(proxyCls, sel, bundleID) : nil;
+        NSString *exe = nil;
+        if (proxy && [proxy respondsToSelector:@selector(bundleExecutable)]) {
+            exe = [proxy performSelector:@selector(bundleExecutable)];
+        }
+        if ([exe isKindOfClass:[NSString class]] && exe.length) {
+            [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", exe]];
+        }
+    } @catch (__unused NSException *e) {
+    }
+
     // 1) Try kill by executable name from bundle container
     NSString *bundleUUID = [selfRef findBundleContainerUUID:bundleID];
     if (bundleUUID.length) {
@@ -266,6 +281,18 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
         // Kill app after bridge (may be SIGSTOP'd)
         PXKillAppProcessBestEffort(self, bundleID);
+
+        // If it failed, include bridge log snippet for debugging.
+        if (![resp isKindOfClass:[NSDictionary class]] || ![resp[@"ok"] respondsToSelector:@selector(boolValue)] || ![resp[@"ok"] boolValue]) {
+            NSString *bridgeLog = [NSString stringWithContentsOfFile:logPath encoding:NSUTF8StringEncoding error:nil] ?: @"";
+            if (bridgeLog.length) {
+                NSString *snippet = bridgeLog;
+                if (snippet.length > 600) {
+                    snippet = [snippet substringFromIndex:(snippet.length - 600)];
+                }
+                [self logMessage:@"[AppDataCleaner] System keychain bridge log (tail): %@", snippet];
+            }
+        }
 
         if (![resp isKindOfClass:[NSDictionary class]] || ![resp[@"ok"] respondsToSelector:@selector(boolValue)] || ![resp[@"ok"] boolValue]) {
             NSString *msg = [resp[@"error"] isKindOfClass:[NSString class]] ? resp[@"error"] : @"System keychain wipe timed out";
