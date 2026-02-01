@@ -235,6 +235,39 @@ static void PXKillAppProcessBestEffort(AppDataCleaner *selfRef, NSString *bundle
     }
 }
 
+static void PXStopMailDaemonsBestEffort(AppDataCleaner *selfRef) {
+    if (!selfRef) return;
+    // Try to stop launchd jobs first to prevent immediate respawn.
+    NSArray<NSString *> *labels = @[
+        @"gui/501/com.apple.maild",
+        @"gui/501/com.apple.mobilemail.maild",
+        @"system/com.apple.maild",
+        @"system/com.apple.mobilemail.maild"
+    ];
+    for (NSString *label in labels) {
+        [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"launchctl kill SIGTERM %@ 2>/dev/null || true", label]];
+        [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"launchctl stop %@ 2>/dev/null || true", label]];
+    }
+
+    // Fallback to process kills.
+    [selfRef runCommandWithPrivileges:@"killall -TERM maild 2>/dev/null || true"]; 
+    [selfRef runCommandWithPrivileges:@"killall -TERM Mail 2>/dev/null || true"]; 
+}
+
+static BOOL PXWaitForProcessExit(AppDataCleaner *selfRef, NSString *procName, NSTimeInterval timeout) {
+    if (!selfRef || !procName.length) return YES;
+    CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
+    while ((CFAbsoluteTimeGetCurrent() - start) < timeout) {
+        NSString *cmd = [NSString stringWithFormat:@"pgrep -x '%@' 2>/dev/null | head -n 1", procName];
+        NSString *out = [selfRef runCommandAndGetOutput:cmd];
+        if (![out isKindOfClass:[NSString class]] || out.length == 0) {
+            return YES;
+        }
+        [NSThread sleepForTimeInterval:0.1];
+    }
+    return NO;
+}
+
 - (BOOL)_deepCleanEnabled {
     NSUserDefaults *sec = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
     if (!sec) {
@@ -917,15 +950,24 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     // Extra cleanup for MobileMail: email/account display is primarily system-scoped (Accounts3 + /var/mobile/Library/Mail).
     if ([bundleID isEqualToString:@"com.apple.mobilemail"]) {
         [self logMessage:@"[AppDataCleaner] MobileMail: wiping /var/mobile/Library/Mail and mail prefs"]; 
-        // Stop mail-related daemons best-effort to avoid crashes while removing on-disk stores.
-        [self runCommandWithPrivileges:@"killall -TERM maild 2>/dev/null || true"]; 
-        [self runCommandWithPrivileges:@"killall -TERM Mail 2>/dev/null || true"]; 
-        [NSThread sleepForTimeInterval:0.15];
+
+        // Stop mail-related daemons and wait for exit to avoid maild SIGABRT on detached DB.
+        PXStopMailDaemonsBestEffort(self);
+        if (!PXWaitForProcessExit(self, @"maild", 5.0)) {
+            [self logMessage:@"[AppDataCleaner] MobileMail: maild still running; forcing kill"]; 
+            [self runCommandWithPrivileges:@"killall -9 maild 2>/dev/null || true"]; 
+            (void)PXWaitForProcessExit(self, @"maild", 2.0);
+        }
+        (void)PXWaitForProcessExit(self, @"Mail", 2.0);
+
         [self runCommandWithPrivileges:@"rm -rf '/var/mobile/Library/Mail' 2>/dev/null || true"]; 
         [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Preferences/com.apple.mail.plist' 2>/dev/null || true"]; 
         [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Preferences/com.apple.mobilemail.plist' 2>/dev/null || true"]; 
         [self runCommandWithPrivileges:@"rm -f '/private/var/mobile/Library/Preferences/com.apple.mail.plist' 2>/dev/null || true"]; 
         [self runCommandWithPrivileges:@"rm -f '/private/var/mobile/Library/Preferences/com.apple.mobilemail.plist' 2>/dev/null || true"]; 
+
+        // Keep maild stopped while accounts cleanup runs.
+        PXStopMailDaemonsBestEffort(self);
 
         // Best-effort remove Mail account rows from Accounts3 (schema varies by iOS; keep scoped to mail-type identifiers).
         NSString *accountsDB = @"/var/mobile/Library/Accounts/Accounts3.sqlite";
@@ -1021,6 +1063,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         [NSThread sleepForTimeInterval:0.15];
         [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
         [self runCommandWithPrivileges:@"killall -9 Mail 2>/dev/null || true"]; 
+
+        // Do not auto-restart maild; let launchd bring it back when needed.
     }
     
     // Process extension containers - simplified
