@@ -785,10 +785,25 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         // Best-effort remove Mail account rows from Accounts3 (schema varies by iOS; keep scoped to mail-type identifiers).
         NSString *accountsDB = @"/var/mobile/Library/Accounts/Accounts3.sqlite";
         if ([_fileManager fileExistsAtPath:accountsDB]) {
-            NSString *sql = @""
-            "DELETE FROM ZACCOUNT WHERE ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%');"
-            "VACUUM;";
+            // Stop accountsd before touching DB (avoid "database is locked").
+            [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
+            [NSThread sleepForTimeInterval:0.2];
+
+            // Log counts before.
+            NSString *beforeCount = [self runCommandAndGetOutput:[NSString stringWithFormat:@"sqlite3 '%@' \"SELECT count(*) FROM ZACCOUNT;\" 2>/dev/null || echo 'err'", accountsDB]];
+            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count before=%@", (beforeCount ?: @"").stringByTrimmingCharactersInSet([NSCharacterSet whitespaceAndNewlineCharacterSet])];
+
+            // Delete account types commonly used by Mail.
+            NSString *sql = @"PRAGMA busy_timeout=3000; BEGIN IMMEDIATE; "
+                            "DELETE FROM ZACCOUNT WHERE ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%'); "
+                            "COMMIT; PRAGMA wal_checkpoint(TRUNCATE);";
             [self runCommandWithPrivileges:[NSString stringWithFormat:@"sqlite3 '%@' \"%@\" 2>/dev/null || true", accountsDB, sql]];
+
+            // Remove WAL files to force readers to see changes.
+            [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Accounts/Accounts3.sqlite-wal' '/var/mobile/Library/Accounts/Accounts3.sqlite-shm' 2>/dev/null || true"]; 
+
+            NSString *afterCount = [self runCommandAndGetOutput:[NSString stringWithFormat:@"sqlite3 '%@' \"SELECT count(*) FROM ZACCOUNT;\" 2>/dev/null || echo 'err'", accountsDB]];
+            [self logMessage:@"[AppDataCleaner] MobileMail: Accounts3 ZACCOUNT count after=%@", (afterCount ?: @"").stringByTrimmingCharactersInSet([NSCharacterSet whitespaceAndNewlineCharacterSet])];
         }
 
         // Restart accounts daemons (best-effort) so UI reflects removal.
