@@ -766,6 +766,29 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     }
     
     [self logMessage:@"[AppDataCleaner] Group containers wiped successfully"];
+
+    // Extra cleanup for MobileMail: email/account display is primarily system-scoped (Accounts3 + /var/mobile/Library/Mail).
+    if ([bundleID isEqualToString:@"com.apple.mobilemail"]) {
+        [self logMessage:@"[AppDataCleaner] MobileMail: wiping /var/mobile/Library/Mail and mail prefs"]; 
+        [self runCommandWithPrivileges:@"rm -rf '/var/mobile/Library/Mail' 2>/dev/null || true"]; 
+        [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Preferences/com.apple.mail.plist' 2>/dev/null || true"]; 
+        [self runCommandWithPrivileges:@"rm -f '/var/mobile/Library/Preferences/com.apple.mobilemail.plist' 2>/dev/null || true"]; 
+        [self runCommandWithPrivileges:@"rm -f '/private/var/mobile/Library/Preferences/com.apple.mail.plist' 2>/dev/null || true"]; 
+        [self runCommandWithPrivileges:@"rm -f '/private/var/mobile/Library/Preferences/com.apple.mobilemail.plist' 2>/dev/null || true"]; 
+
+        // Best-effort remove Mail account rows from Accounts3 (schema varies by iOS; keep scoped to mail-type identifiers).
+        NSString *accountsDB = @"/var/mobile/Library/Accounts/Accounts3.sqlite";
+        if ([_fileManager fileExistsAtPath:accountsDB]) {
+            NSString *sql = @""
+            "DELETE FROM ZACCOUNT WHERE ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%mail%' OR ZIDENTIFIER LIKE '%imap%' OR ZIDENTIFIER LIKE '%smtp%' OR ZIDENTIFIER LIKE '%exchange%');"
+            "VACUUM;";
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"sqlite3 '%@' \"%@\" 2>/dev/null || true", accountsDB, sql]];
+        }
+
+        // Restart accounts daemons (best-effort) so UI reflects removal.
+        [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
+        [self runCommandWithPrivileges:@"killall -9 Mail 2>/dev/null || true"]; 
+    }
     
     // Process extension containers - simplified
     if (extensionContainers.count > 0) {
@@ -5068,6 +5091,14 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     if (![_fileManager fileExistsAtPath:path]) {
         NSLog(@"[AppDataCleaner] Directory does not exist: %@", path);
         return NO;
+    }
+    
+    // Use a more permissive find command to check for ANY files (including hidden)
+    NSString *command = [NSString stringWithFormat:@"find '%@' -type f -not -path '*/\\.*' -maxdepth 3 | head -n 1", path];
+    NSString *result = [self runCommandAndGetOutput:command];
+    
+    // If we found at least one file, return true
+    if (resul  return NO;
     }
     
     // Use a more permissive find command to check for ANY files (including hidden)
