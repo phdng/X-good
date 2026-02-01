@@ -31,6 +31,54 @@
     NSFileManager *_fileManager;
 }
 
+- (NSArray<NSString *> *)_resolvedAppGroupUUIDsFromEntitlements:(NSString *)bundleID rootless:(BOOL)rootless {
+    if (!bundleID.length) return @[];
+
+    AppEntitlementsReader *reader = [[AppEntitlementsReader alloc] init];
+    NSError *entErr = nil;
+    NSDictionary *ent = [reader fullEntitlementsForBundleID:bundleID error:&entErr];
+
+    NSArray *groups = nil;
+    if ([ent isKindOfClass:[NSDictionary class]]) {
+        id v = ent[@"com.apple.security.application-groups"];
+        if ([v isKindOfClass:[NSArray class]]) {
+            groups = (NSArray *)v;
+        } else {
+            v = ent[@"application-groups"];
+            if ([v isKindOfClass:[NSArray class]]) {
+                groups = (NSArray *)v;
+            }
+        }
+    }
+    if (!groups.count) {
+        return @[];
+    }
+
+    NSMutableArray<NSString *> *groupIDs = [NSMutableArray array];
+    for (id g in groups) {
+        if ([g isKindOfClass:[NSString class]] && [(NSString *)g length] > 0) {
+            [groupIDs addObject:(NSString *)g];
+        }
+    }
+    if (!groupIDs.count) {
+        return @[];
+    }
+
+    AppGroupContainerResolver *resolver = [[AppGroupContainerResolver alloc] init];
+    NSArray<AppGroupContainerInfo *> *infos = [resolver resolveGroupContainersForGroupIDs:groupIDs];
+    NSMutableOrderedSet<NSString *> *uuids = [NSMutableOrderedSet orderedSet];
+    for (AppGroupContainerInfo *info in infos) {
+        if (![info.path isKindOfClass:[NSString class]] || !info.path.length) continue;
+        BOOL isRootless = [info.path hasPrefix:@"/containers/Shared/AppGroup/"];
+        if (rootless != isRootless) continue;
+        NSString *uuid = [info.path lastPathComponent];
+        if (uuid.length) {
+            [uuids addObject:uuid];
+        }
+    }
+    return uuids.array;
+}
+
 static void PXKillAppProcessBestEffort(AppDataCleaner *selfRef, NSString *bundleID) {
     if (!bundleID.length || !selfRef) return;
 
@@ -630,15 +678,16 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     // Optimized lookups using cached listings
     NSString *dataUUID = [self optimized_findDataContainerUUID:bundleID inDirectories:cachedDataDirs];
     NSString *rootlessDataUUID = [self optimized_findRootlessDataContainerUUID:bundleID inDirectories:cachedRootlessDataDirs];
-    NSArray *groupUUIDs = [self optimized_findAppGroupUUIDs:bundleID inDirectories:cachedGroupDirs];
-    NSArray *rootlessGroupUUIDs = [self optimized_findAppGroupUUIDs:bundleID inDirectories:cachedRootlessGroupDirs];
+    // Resolve app groups from entitlements (avoid overly broad heuristics, especially for com.apple.*).
+    NSArray *groupUUIDs = [self _resolvedAppGroupUUIDsFromEntitlements:bundleID rootless:NO];
+    NSArray *rootlessGroupUUIDs = [self _resolvedAppGroupUUIDsFromEntitlements:bundleID rootless:YES];
     NSString *bundleUUID = [self optimized_findBundleContainerUUID:bundleID inDirectories:cachedBundleDirs rootlessDirs:cachedRootlessBundleDirs];
 
     // Find extension containers (pass cached dirs for speed)
     NSArray *extensionContainers = [self optimized_findExtensionContainers:bundleID dataDirs:cachedDataDirs rootlessDataDirs:cachedRootlessDataDirs bundleDirs:cachedBundleDirs rootlessBundleDirs:cachedRootlessBundleDirs];
     
-    [self logMessage:@"[AppDataCleaner] Found UUIDs - Bundle: %@, Data: %@, RootlessData: %@, Groups: %@", 
-          bundleUUID ?: @"nil", dataUUID ?: @"nil", rootlessDataUUID ?: @"nil", groupUUIDs];
+    [self logMessage:@"[AppDataCleaner] Found UUIDs - Bundle: %@, Data: %@, RootlessData: %@, Groups=%lu RootlessGroups=%lu", 
+          bundleUUID ?: @"nil", dataUUID ?: @"nil", rootlessDataUUID ?: @"nil", (unsigned long)groupUUIDs.count, (unsigned long)rootlessGroupUUIDs.count];
     
     // Clear data container
     if (dataUUID) {
