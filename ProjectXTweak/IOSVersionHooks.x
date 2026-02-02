@@ -377,6 +377,26 @@ static NSOperatingSystemVersion getOperatingSystemVersion(NSString *versionStrin
     return (NSOperatingSystemVersion){majorVersion, minorVersion, patchVersion};
 }
 
+static BOOL PXHostMatchesSuffix(NSString *host, NSString *suffix) {
+    if (![host isKindOfClass:[NSString class]] || !host.length) return NO;
+    if (![suffix isKindOfClass:[NSString class]] || !suffix.length) return NO;
+    NSString *h = [host lowercaseString];
+    NSString *s = [suffix lowercaseString];
+    if ([h isEqualToString:s]) return YES;
+    return [h hasSuffix:[@"." stringByAppendingString:s]];
+}
+
+static BOOL PXIsSensitiveAuthHost(NSString *host) {
+    // Allow login flows to work even when Safari/Auth stack spoof is enabled.
+    // These domains are particularly sensitive to UA tampering.
+    if (!host.length) return NO;
+    return PXHostMatchesSuffix(host, @"google.com") ||
+           PXHostMatchesSuffix(host, @"accounts.google.com") ||
+           PXHostMatchesSuffix(host, @"gstatic.com") ||
+           PXHostMatchesSuffix(host, @"googleusercontent.com") ||
+           PXHostMatchesSuffix(host, @"recaptcha.net");
+}
+
 // Helper function to modify a user agent string with the spoofed iOS version
 static void modifyUserAgentString(NSString **userAgentString, NSString *originalVersion, NSString *spoofedVersion) {
     if (!userAgentString || !*userAgentString || !spoofedVersion || !originalVersion) {
@@ -582,6 +602,13 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                                   PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
         
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && resultWebView) {
+            // For Safari/Auth stack, avoid setting a global UA before we know the host.
+            if (forceSpoofForWebKit) {
+                NSString *host = resultWebView.URL.host;
+                if (!host.length || PXIsSensitiveAuthHost(host)) {
+                    return resultWebView;
+                }
+            }
             NSString *spoofedVersion = getSpoofedSystemVersion();
             NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
             
@@ -624,6 +651,13 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                                   PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
         
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && webView) {
+            // For Safari/Auth stack, avoid setting a global UA before we know the host.
+            if (forceSpoofForWebKit) {
+                NSString *host = webView.URL.host;
+                if (!host.length || PXIsSensitiveAuthHost(host)) {
+                    return webView;
+                }
+            }
             NSString *spoofedVersion = getSpoofedSystemVersion();
             NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
             
@@ -689,6 +723,13 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                                   PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
         
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && customUserAgent) {
+            if (forceSpoofForWebKit) {
+                NSString *host = self.URL.host;
+                if (!host.length || PXIsSensitiveAuthHost(host)) {
+                    %orig;
+                    return;
+                }
+            }
             NSString *spoofedVersion = getSpoofedSystemVersion();
             NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
             
@@ -727,6 +768,17 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                                   PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
         
         if (forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) {
+            // For Safari/Auth stack, only touch UA when host is known and not sensitive.
+            NSString *host = self.URL.host;
+            if (forceSpoofForWebKit) {
+                if (!host.length || PXIsSensitiveAuthHost(host)) {
+                    return;
+                }
+            } else {
+                if (PXIsSensitiveAuthHost(host)) {
+                    return;
+                }
+            }
             // Wait a short time to let the script execute
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(0.1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
                 NSString *spoofedVersion = getSpoofedSystemVersion();
@@ -758,6 +810,14 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 - (void)setApplicationNameForUserAgent:(NSString *)applicationNameForUserAgent {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        // Don't mutate UA at configuration time for Safari/Auth stack; host is unknown here.
+        BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
+                                  PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
+        if (forceSpoofForWebKit) {
+            %orig;
+            return;
+        }
+
         if (shouldSpoofForBundle(bundleID) && applicationNameForUserAgent) {
             NSString *spoofedVersion = getSpoofedSystemVersion();
             NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
@@ -790,6 +850,11 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
         if ([field isEqualToString:@"User-Agent"] && value) {
             NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
             if (shouldSpoofForBundle(bundleID)) {
+                NSString *host = self.URL.host;
+                if (PXIsSensitiveAuthHost(host)) {
+                    %orig;
+                    return;
+                }
                 NSString *spoofedVersion = getSpoofedSystemVersion();
                 NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
                 
@@ -824,6 +889,9 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
+            if (PXIsSensitiveAuthHost(domain)) {
+                return originalUA;
+            }
             NSString *spoofedVersion = getSpoofedSystemVersion();
             NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
             
@@ -850,6 +918,10 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
         if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
+            // Avoid global UA changes for Safari; per-request/domain hooks handle spoofing.
+            if (PXSafariStackSpoofEnabled()) {
+                return originalUA;
+            }
             NSString *spoofedVersion = getSpoofedSystemVersion();
             NSString *originalVersion = [[UIDevice currentDevice] systemVersion];
             
