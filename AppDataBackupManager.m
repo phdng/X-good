@@ -270,6 +270,36 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
             [runner run:[NSString stringWithFormat:@"killall -9 %@ 2>/dev/null || true", PXShellQuote(name)]];
         }
     }
+
+    // Generic extra stopping for system apps: many have an associated daemon named <exe> + "d".
+    @try {
+        Class proxyCls = NSClassFromString(@"LSApplicationProxy");
+        SEL sel = NSSelectorFromString(@"applicationProxyForIdentifier:");
+        id proxy = (proxyCls && [proxyCls respondsToSelector:sel]) ? ((id (*)(id, SEL, id))objc_msgSend)(proxyCls, sel, bundleID) : nil;
+        NSString *appType = nil;
+        NSString *exe = nil;
+        if (proxy) {
+            @try { appType = [proxy valueForKey:@"applicationType"]; } @catch (__unused NSException *e) {}
+            @try { exe = [proxy valueForKey:@"bundleExecutable"]; } @catch (__unused NSException *e) {}
+        }
+
+        BOOL isSystem = ([appType isKindOfClass:[NSString class]] && [(NSString *)appType isEqualToString:@"System"]);
+        if (isSystem && [exe isKindOfClass:[NSString class]] && exe.length) {
+            CommandRunner *runner = [CommandRunner shared];
+            NSString *daemon = [[(NSString *)exe lowercaseString] stringByAppendingString:@"d"]; 
+            NSArray<NSString *> *names = @[ (NSString *)exe, daemon ];
+            for (NSString *name in names) {
+                if (![name isKindOfClass:[NSString class]] || !name.length) continue;
+                [runner run:[NSString stringWithFormat:@"killall -TERM %@ 2>/dev/null || true", PXShellQuote(name)]];
+            }
+            [NSThread sleepForTimeInterval:0.15];
+            for (NSString *name in names) {
+                if (![name isKindOfClass:[NSString class]] || !name.length) continue;
+                [runner run:[NSString stringWithFormat:@"killall -9 %@ 2>/dev/null || true", PXShellQuote(name)]];
+            }
+        }
+    } @catch (__unused NSException *e) {
+    }
 }
 
 - (NSString *)_globalSafariLibraryPath {
@@ -301,6 +331,114 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                           PXShellQuote(archivePath),
                           PXShellQuote(sourceDir)];
     return [runner runAndCapture:fallback];
+}
+
+static NSString *PXTimestampSuffix(void) {
+    return [NSString stringWithFormat:@"%.0f", [[NSDate date] timeIntervalSince1970]];
+}
+
+- (NSString *)_mobileLibraryBasePath {
+    // Support rootful + common jailbreak layouts.
+    CommandRunner *runner = [CommandRunner shared];
+    NSString *dir = [runner firstExistingPath:@[
+        @"/var/mobile/Library",
+        @"/private/var/mobile/Library",
+        @"/var/jb/var/mobile/Library",
+        @"/private/var/jb/var/mobile/Library"
+    ]];
+    return dir ?: @"/var/mobile/Library";
+}
+
+- (BOOL)_isSystemAppBundleID:(NSString *)bundleID {
+    if (!bundleID.length) return NO;
+    @try {
+        Class proxyCls = NSClassFromString(@"LSApplicationProxy");
+        SEL sel = NSSelectorFromString(@"applicationProxyForIdentifier:");
+        id proxy = (proxyCls && [proxyCls respondsToSelector:sel]) ? ((id (*)(id, SEL, id))objc_msgSend)(proxyCls, sel, bundleID) : nil;
+        NSString *appType = nil;
+        if (proxy) {
+            @try { appType = [proxy valueForKey:@"applicationType"]; } @catch (__unused NSException *e) {}
+        }
+        return ([appType isKindOfClass:[NSString class]] && [(NSString *)appType isEqualToString:@"System"]);
+    } @catch (__unused NSException *e) {
+        return NO;
+    }
+}
+
+static NSArray<NSDictionary *> *PXSharedSystemDBSpecs(void) {
+    // Shared, system-scoped databases that are commonly used by multiple system apps.
+    // Paths are relative to /var/mobile/Library.
+    return @[
+        @{ @"libraryRel": @"Accounts/Accounts3.sqlite", @"backupName": @"Accounts3.sqlite" },
+        @{ @"libraryRel": @"SMS/sms.db", @"backupName": @"sms.db" },
+        @{ @"libraryRel": @"Calendar/Calendar.sqlitedb", @"backupName": @"Calendar.sqlitedb" },
+        @{ @"libraryRel": @"AddressBook/AddressBook.sqlitedb", @"backupName": @"AddressBook.sqlitedb" },
+
+        // Notes database name varies by iOS.
+        @{ @"libraryRel": @"Notes/NoteStore.sqlite", @"backupName": @"NoteStore.sqlite" },
+        @{ @"libraryRel": @"Notes/notes.sqlite", @"backupName": @"notes.sqlite" },
+    ];
+}
+
+static NSArray<NSDictionary *> *PXExpandSQLiteSidecars(NSDictionary *spec) {
+    // For sqlite DBs, also include -wal and -shm if they exist.
+    NSString *rel = [spec[@"libraryRel"] isKindOfClass:[NSString class]] ? spec[@"libraryRel"] : nil;
+    NSString *bn = [spec[@"backupName"] isKindOfClass:[NSString class]] ? spec[@"backupName"] : nil;
+    if (!rel.length || !bn.length) return @[];
+
+    return @[
+        @{ @"libraryRel": rel, @"backupName": bn },
+        @{ @"libraryRel": [rel stringByAppendingString:@"-wal"], @"backupName": [bn stringByAppendingString:@"-wal"] },
+        @{ @"libraryRel": [rel stringByAppendingString:@"-shm"], @"backupName": [bn stringByAppendingString:@"-shm"] },
+    ];
+}
+
+static NSString *PXCleanSubdirName(NSString *s) {
+    if (![s isKindOfClass:[NSString class]] || !s.length) return nil;
+    NSString *name = [s lastPathComponent];
+    if (!name.length) return nil;
+    if ([name containsString:@"/"] || [name containsString:@"\\"]) return nil;
+    if ([name isEqualToString:@"."] || [name isEqualToString:@".."]) return nil;
+    return name;
+}
+
+- (NSArray<NSDictionary *> *)_systemGlobalLibraryItemsForBundleID:(NSString *)bundleID {
+    if (!bundleID.length) return @[];
+
+    NSString *appType = nil;
+    NSString *exe = nil;
+    NSString *localized = nil;
+    @autoreleasepool {
+        Class proxyCls = NSClassFromString(@"LSApplicationProxy");
+        SEL sel = NSSelectorFromString(@"applicationProxyForIdentifier:");
+        id proxy = (proxyCls && [proxyCls respondsToSelector:sel]) ? ((id (*)(id, SEL, id))objc_msgSend)(proxyCls, sel, bundleID) : nil;
+        if (proxy) {
+            @try { appType = [proxy valueForKey:@"applicationType"]; } @catch (__unused NSException *e) {}
+            @try { exe = [proxy valueForKey:@"bundleExecutable"]; } @catch (__unused NSException *e) {}
+            @try { localized = [proxy valueForKey:@"localizedName"]; } @catch (__unused NSException *e) {}
+        }
+    }
+
+    BOOL isSystem = ([appType isKindOfClass:[NSString class]] && [(NSString *)appType isEqualToString:@"System"]);
+    if (!isSystem) return @[];
+
+    NSMutableOrderedSet<NSString *> *candidates = [NSMutableOrderedSet orderedSet];
+    NSString *a = PXCleanSubdirName(localized);
+    NSString *b = PXCleanSubdirName(exe);
+    if (a.length) [candidates addObject:a];
+    if (b.length) [candidates addObject:b];
+
+    NSString *base = [self _mobileLibraryBasePath];
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSMutableArray<NSDictionary *> *items = [NSMutableArray array];
+    for (NSString *subdir in candidates.array) {
+        NSString *p = [base stringByAppendingPathComponent:subdir];
+        BOOL isDir = NO;
+        if ([fm fileExistsAtPath:p isDirectory:&isDir] && isDir) {
+            [items addObject:@{ @"subdir": subdir, @"path": p }];
+        }
+    }
+    return items;
 }
 
 - (CommandResult *)_tarExtract:(NSString *)tarPath archive:(NSString *)archivePath toDir:(NSString *)destDir {
@@ -1201,6 +1339,84 @@ static void PXDarwinNotifyPost(NSString *name) {
             }
         }
 
+        // Generic system app global data: many system apps store most data under /var/mobile/Library/<AppName>.
+        NSArray<NSDictionary *> *systemGlobalItems = [self _systemGlobalLibraryItemsForBundleID:bundleID];
+        NSMutableArray<NSDictionary *> *systemGlobalManifests = [NSMutableArray array];
+        if (systemGlobalItems.count) {
+            PXDebugHeader(debugBefore, @"System App Global Library");
+        }
+        for (NSDictionary *it in systemGlobalItems) {
+            NSString *subdir = [it[@"subdir"] isKindOfClass:[NSString class]] ? it[@"subdir"] : nil;
+            NSString *srcPath = [it[@"path"] isKindOfClass:[NSString class]] ? it[@"path"] : nil;
+            if (!subdir.length || !srcPath.length) continue;
+
+            // Avoid double-archiving Safari which is handled explicitly.
+            if ([bundleID isEqualToString:@"com.apple.mobilesafari"] && [subdir isEqualToString:@"Safari"]) {
+                continue;
+            }
+
+            NSString *archiveName = [NSString stringWithFormat:@"global_library_%@.tar.gz", PXSanitizeFilenameComponent(subdir)];
+            NSString *archivePath = [backupDir stringByAppendingPathComponent:archiveName];
+
+            [self _killRelatedProcessesForBundleID:bundleID];
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"item=%@ path=%@", subdir, srcPath]);
+            CommandResult *r = [self _tarCreate:tarPath fromDir:srcPath toArchive:archivePath];
+            if (r.exitCode != 0 || ![fm fileExistsAtPath:archivePath]) {
+                [warnings addObject:[NSString stringWithFormat:@"Failed to archive system global library %@; continuing", subdir]];
+                continue;
+            }
+
+            [systemGlobalManifests addObject:@{ @"subdir": subdir, @"archive": archiveName }];
+        }
+
+        // Shared system DBs: back up for system apps (can impact multiple apps).
+        NSMutableArray<NSDictionary *> *sharedSystemDBFiles = [NSMutableArray array];
+        if ([self _isSystemAppBundleID:bundleID]) {
+            NSString *libBase = [self _mobileLibraryBasePath];
+            NSString *sharedDir = [backupDir stringByAppendingPathComponent:@"shared_db"];
+            [fm createDirectoryAtPath:sharedDir withIntermediateDirectories:YES attributes:nil error:nil];
+            [runner run:[NSString stringWithFormat:@"chmod 700 %@ 2>/dev/null || true", PXShellQuote(sharedDir)]];
+
+            PXDebugHeader(debugBefore, @"Shared System DBs");
+            PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"libraryBase=%@", libBase ?: @""]);
+
+            for (NSDictionary *spec in PXSharedSystemDBSpecs()) {
+                for (NSDictionary *entry in PXExpandSQLiteSidecars(spec)) {
+                    NSString *rel = [entry[@"libraryRel"] isKindOfClass:[NSString class]] ? entry[@"libraryRel"] : nil;
+                    NSString *bn = [entry[@"backupName"] isKindOfClass:[NSString class]] ? entry[@"backupName"] : nil;
+                    if (!rel.length || !bn.length) continue;
+
+                    NSString *src = [libBase stringByAppendingPathComponent:rel];
+                    if (![fm fileExistsAtPath:src]) {
+                        continue;
+                    }
+                    NSString *dstRel = [@"shared_db" stringByAppendingPathComponent:bn];
+                    NSString *dst = [backupDir stringByAppendingPathComponent:dstRel];
+
+                    // Best-effort stop associated daemons first.
+                    [self _killRelatedProcessesForBundleID:bundleID];
+                    [runner run:@"killall -TERM accountsd 2>/dev/null || true"]; 
+                    [runner run:@"killall -TERM calaccessd 2>/dev/null || true"]; 
+                    [runner run:@"killall -TERM imagent 2>/dev/null || true"]; 
+                    [runner run:@"killall -TERM MobileSMS 2>/dev/null || true"]; 
+                    [NSThread sleepForTimeInterval:0.15];
+
+                    PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"copy %@ -> %@", src, dstRel]);
+                    [runner run:[NSString stringWithFormat:@"cp -a %@ %@ 2>/dev/null || true", PXShellQuote(src), PXShellQuote(dst)]];
+                    [runner run:[NSString stringWithFormat:@"chmod 600 %@ 2>/dev/null || true", PXShellQuote(dst)]];
+                    if ([fm fileExistsAtPath:dst]) {
+                        [sharedSystemDBFiles addObject:@{ @"libraryRel": rel, @"archive": dstRel }];
+                    }
+                }
+            }
+
+            if (!sharedSystemDBFiles.count) {
+                [warnings addObject:@"System app: no shared system DBs were found to back up"];
+            } else {
+                [warnings addObject:@"System app: included shared system DBs (this may affect multiple apps)"];
+            }
+        }
+
         UIDevice *device = [UIDevice currentDevice];
         NSString *iosVersion = device.systemVersion ?: @"";
         // profileId already computed above
@@ -1223,6 +1439,21 @@ static void PXDarwinNotifyPost(NSString *name) {
         if (globalSafariArchivePath) {
             NSDictionary *a = PXArtifactInfo(globalSafariArchivePath, @"global_safari.tar.gz");
             if (a) [artifacts addObject:a];
+        }
+        for (NSDictionary *g in systemGlobalManifests) {
+            NSString *rel = g[@"archive"]; // global_library_*.tar.gz
+            if ([rel isKindOfClass:[NSString class]] && rel.length) {
+                NSString *abs = [backupDir stringByAppendingPathComponent:(NSString *)rel];
+                NSDictionary *gi = PXArtifactInfo(abs, rel);
+                if (gi) [artifacts addObject:gi];
+            }
+        }
+        for (NSDictionary *d in sharedSystemDBFiles) {
+            NSString *rel = [d[@"archive"] isKindOfClass:[NSString class]] ? d[@"archive"] : nil;
+            if (!rel.length) continue;
+            NSString *abs = [backupDir stringByAppendingPathComponent:rel];
+            NSDictionary *di = PXArtifactInfo(abs, rel);
+            if (di) [artifacts addObject:di];
         }
         if (prefDestPath && [[NSFileManager defaultManager] fileExistsAtPath:prefDestPath]) {
             NSDictionary *a = PXArtifactInfo(prefDestPath, [NSString stringWithFormat:@"preferences/%@.plist", bundleID]);
@@ -1266,6 +1497,14 @@ static void PXDarwinNotifyPost(NSString *name) {
                 @"included": @(globalSafariArchivePath != nil),
                 @"archive": globalSafariArchivePath ? @"global_safari.tar.gz" : @"",
                 @"path": globalSafariPath ?: @""
+            },
+            @"systemGlobalLibrary": @{
+                @"included": @(systemGlobalManifests.count > 0),
+                @"items": systemGlobalManifests
+            },
+            @"sharedSystemDB": @{
+                @"included": @(sharedSystemDBFiles.count > 0),
+                @"files": sharedSystemDBFiles
             },
             @"artifacts": artifacts,
             @"options": @{
@@ -1741,6 +1980,121 @@ static void PXDarwinNotifyPost(NSString *name) {
 
             [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(info.path)]];
             PXDebugRun(runner, debugPost, @"ls group (after extract)", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote(info.path)]);
+        }
+
+        // Restore generic system app global Library folders (if present)
+        NSDictionary *systemGlobal = manifest[@"systemGlobalLibrary"];
+        BOOL includeSystemGlobal = NO;
+        NSArray *items = nil;
+        if ([systemGlobal isKindOfClass:[NSDictionary class]]) {
+            if ([systemGlobal[@"included"] respondsToSelector:@selector(boolValue)]) {
+                includeSystemGlobal = [systemGlobal[@"included"] boolValue];
+            }
+            if ([systemGlobal[@"items"] isKindOfClass:[NSArray class]]) {
+                items = systemGlobal[@"items"];
+            }
+        }
+        if (includeSystemGlobal && items.count) {
+            NSString *libBase = [self _mobileLibraryBasePath];
+            for (NSDictionary *it in (NSArray *)items) {
+                if (![it isKindOfClass:[NSDictionary class]]) continue;
+                NSString *subdir = [it[@"subdir"] isKindOfClass:[NSString class]] ? it[@"subdir"] : nil;
+                NSString *archive = [it[@"archive"] isKindOfClass:[NSString class]] ? it[@"archive"] : nil;
+                if (!subdir.length || !archive.length) continue;
+
+                // Avoid double-restoring Safari which is handled explicitly.
+                if ([bundleID isEqualToString:@"com.apple.mobilesafari"] && [subdir isEqualToString:@"Safari"]) {
+                    continue;
+                }
+
+                NSString *archivePath = [backupDir stringByAppendingPathComponent:archive];
+                if (![fm fileExistsAtPath:archivePath]) {
+                    [warnings addObject:[NSString stringWithFormat:@"Missing system global archive for %@; skipping", subdir]];
+                    continue;
+                }
+
+                NSString *dest = [libBase stringByAppendingPathComponent:subdir];
+                [self _killRelatedProcessesForBundleID:bundleID];
+
+                // Quarantine existing directory to avoid detached DB crashes.
+                NSString *trash = [NSString stringWithFormat:@"%@.WeaponXTrash.%@", dest, PXTimestampSuffix()];
+                if ([fm fileExistsAtPath:dest]) {
+                    [runner run:[NSString stringWithFormat:@"mv %@ %@ 2>/dev/null || true", PXShellQuote(dest), PXShellQuote(trash)]];
+                }
+                [runner run:[NSString stringWithFormat:@"mkdir -p %@ 2>/dev/null || true", PXShellQuote(dest)]];
+
+                CommandResult *r = [self _tarExtract:tarPath archive:archivePath toDir:dest];
+                if (r.exitCode != 0) {
+                    NSString *msg = r.stderrString.length ? r.stderrString : [NSString stringWithFormat:@"Failed to restore system global library %@", subdir];
+                    NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
+                                                       code:318
+                                                   userInfo:@{NSLocalizedDescriptionKey: msg}];
+                    dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
+                    return;
+                }
+                [runner run:[NSString stringWithFormat:@"chown -R mobile:mobile %@ 2>/dev/null || true", PXShellQuote(dest)]];
+            }
+        }
+
+        // Restore shared system DBs (if present)
+        NSDictionary *sharedDB = manifest[@"sharedSystemDB"];
+        BOOL includeSharedDB = NO;
+        NSArray *dbFiles = nil;
+        if ([sharedDB isKindOfClass:[NSDictionary class]]) {
+            if ([sharedDB[@"included"] respondsToSelector:@selector(boolValue)]) {
+                includeSharedDB = [sharedDB[@"included"] boolValue];
+            }
+            if ([sharedDB[@"files"] isKindOfClass:[NSArray class]]) {
+                dbFiles = sharedDB[@"files"];
+            }
+        }
+        if (includeSharedDB && dbFiles.count) {
+            NSString *libBase = [self _mobileLibraryBasePath];
+
+            // Stop common daemons that may hold these DBs.
+            [runner run:@"killall -TERM accountsd 2>/dev/null || true"]; 
+            [runner run:@"killall -TERM calaccessd 2>/dev/null || true"]; 
+            [runner run:@"killall -TERM imagent 2>/dev/null || true"]; 
+            [runner run:@"killall -TERM MobileSMS 2>/dev/null || true"]; 
+            [NSThread sleepForTimeInterval:0.2];
+            [runner run:@"killall -9 accountsd 2>/dev/null || true"]; 
+            [runner run:@"killall -9 calaccessd 2>/dev/null || true"]; 
+            [runner run:@"killall -9 imagent 2>/dev/null || true"]; 
+            [runner run:@"killall -9 MobileSMS 2>/dev/null || true"]; 
+
+            for (NSDictionary *it in (NSArray *)dbFiles) {
+                if (![it isKindOfClass:[NSDictionary class]]) continue;
+                NSString *libraryRel = [it[@"libraryRel"] isKindOfClass:[NSString class]] ? it[@"libraryRel"] : nil;
+                NSString *archiveRel = [it[@"archive"] isKindOfClass:[NSString class]] ? it[@"archive"] : nil;
+                if (!libraryRel.length || !archiveRel.length) continue;
+
+                NSString *src = [backupDir stringByAppendingPathComponent:archiveRel];
+                if (![fm fileExistsAtPath:src]) {
+                    [warnings addObject:[NSString stringWithFormat:@"Missing shared DB archive %@; skipping", archiveRel]];
+                    continue;
+                }
+
+                NSString *dest = [libBase stringByAppendingPathComponent:libraryRel];
+                NSString *destDir = [dest stringByDeletingLastPathComponent];
+                [runner run:[NSString stringWithFormat:@"mkdir -p %@ 2>/dev/null || true", PXShellQuote(destDir)]];
+
+                NSString *trash = [NSString stringWithFormat:@"%@.WeaponXTrash.%@", dest, PXTimestampSuffix()];
+                if ([fm fileExistsAtPath:dest]) {
+                    [runner run:[NSString stringWithFormat:@"mv %@ %@ 2>/dev/null || true", PXShellQuote(dest), PXShellQuote(trash)]];
+                }
+
+                [runner run:[NSString stringWithFormat:@"cp -a %@ %@ 2>/dev/null || true", PXShellQuote(src), PXShellQuote(dest)]];
+                [runner run:[NSString stringWithFormat:@"chown mobile:mobile %@ 2>/dev/null || true", PXShellQuote(dest)]];
+                [runner run:[NSString stringWithFormat:@"chmod 600 %@ 2>/dev/null || true", PXShellQuote(dest)]];
+            }
+
+            [warnings addObject:@"Restored shared system DBs (this may affect multiple apps)"];
+
+            // Restart daemons best-effort.
+            [runner run:@"killall -TERM accountsd 2>/dev/null || true"]; 
+            [runner run:@"killall -TERM calaccessd 2>/dev/null || true"]; 
+            [runner run:@"killall -TERM imagent 2>/dev/null || true"]; 
+            [runner run:@"killall -TERM MobileSMS 2>/dev/null || true"]; 
         }
 
         // Preferences restore
