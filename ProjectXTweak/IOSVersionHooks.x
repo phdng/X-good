@@ -628,7 +628,11 @@ static BOOL PXUASyncHeaderAndJSEnabled(void) {
         return gUASyncEnabledCached;
     }
     gUASyncEnabledLastRead = now;
-    gUASyncEnabledCached = PXSecuritySettingBoolDefault(@"uaSyncHeaderAndJS", NO);
+    // uaSyncHeaderAndJS: sync both layers when UA is modified
+    // uaSyncJSOnlyFromRequests: allow syncing JS UA even if header UA modification is disabled via debug toggle
+    BOOL syncBoth = PXSecuritySettingBoolDefault(@"uaSyncHeaderAndJS", NO);
+    BOOL syncJSOnly = PXSecuritySettingBoolDefault(@"uaSyncJSOnlyFromRequests", NO);
+    gUASyncEnabledCached = (syncBoth || syncJSOnly);
     gUASyncEnabledValid = YES;
     return gUASyncEnabledCached;
 }
@@ -1301,7 +1305,9 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                 %orig;
                 return;
             }
-            if (PXUADebugMasterEnabled() && !gUADebug.hook_requestHeaderUA) {
+            BOOL headerModifyEnabled = !(PXUADebugMasterEnabled() && !gUADebug.hook_requestHeaderUA);
+            BOOL syncEnabled = PXUASyncHeaderAndJSEnabled();
+            if (!headerModifyEnabled && !syncEnabled) {
                 PXUADebugTrace(@"NSMutableURLRequest.setValue(User-Agent)", bundleID, proc, self.URL.host, @"skip", @"reason=toggle", value, nil);
                 %orig;
                 return;
@@ -1321,14 +1327,23 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                     modifyUserAgentString(&modifiedValue, originalVersion, spoofedVersion);
                     
                     if (![modifiedValue isEqualToString:value]) {
-                        // Sync test: keep JS UA aligned by setting WKWebView.customUserAgent for matching host.
-                        if (PXUASyncHeaderAndJSEnabled() && host.length) {
+                        // If syncing is enabled, always push the UA into JS layer (customUserAgent + optional JS patch)
+                        // even when header UA modification is disabled (for mismatch testing).
+                        if (syncEnabled && host.length) {
                             PXUASyncRememberHostUA(host, modifiedValue);
                             PXUASyncApplyToWebViewsForHost(host, modifiedValue);
-                            PXUADebugTrace(@"UASync.remember", bundleID, proc, host, @"modify", @"", value, modifiedValue);
+                            PXUADebugTrace(@"UASync.remember", bundleID, proc, host, @"modify", headerModifyEnabled ? @"" : @"reason=jsOnly", value, modifiedValue);
                         }
-                        PXUADebugTrace(@"NSMutableURLRequest.setValue(User-Agent)", bundleID, proc, host, @"modify", @"", value, modifiedValue);
-                        %orig(modifiedValue, field);
+
+                        if (headerModifyEnabled) {
+                            PXUADebugTrace(@"NSMutableURLRequest.setValue(User-Agent)", bundleID, proc, host, @"modify", @"", value, modifiedValue);
+                            %orig(modifiedValue, field);
+                            return;
+                        }
+
+                        // Header disabled: keep original header, only sync JS.
+                        PXUADebugTrace(@"NSMutableURLRequest.setValue(User-Agent)", bundleID, proc, host, @"skip", @"reason=jsOnly", value, modifiedValue);
+                        %orig;
                         return;
                     }
                 }
