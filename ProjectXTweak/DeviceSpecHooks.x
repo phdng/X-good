@@ -452,14 +452,26 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
         return cachedDecision;
     }
     
+    // IMPORTANT:
+    // Do NOT spoof UIScreen bounds/scale for Safari/Auth stack processes.
+    // In SafariViewService/WebKit services, spoofing UIScreen can desync touch hit-testing
+    // and break critical flows (e.g. Google login buttons not clickable).
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    NSString *procName = [[NSProcessInfo processInfo] processName];
+    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, procName)) {
+        hasCheckedProcess = YES;
+        cachedDecision = NO;
+        return NO;
+    }
+
     // Only spoof resolution for web views, not for native apps
-    NSString *processName = [[NSProcessInfo processInfo] processName];
+    NSString *processName = procName;
     BOOL isWebProcess = [processName containsString:@"WebKit"] || 
                         [processName containsString:@"WebContent"] ||
                         [processName containsString:@"Safari"];
-                        
+                         
     // For Safari and web-focused apps, continue spoofing
-    NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+    NSString *bundleID = bid;
     BOOL isWebApp = [bundleID hasPrefix:@"com.apple.mobilesafari"] ||
                     [bundleID hasPrefix:@"com.google.chrome"] ||
                     [bundleID hasPrefix:@"org.mozilla.ios.Firefox"] ||
