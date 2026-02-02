@@ -497,6 +497,28 @@ static BOOL PXUADebugTraceEnabled(void) {
     return gUADebug.traceEnabled;
 }
 
+// Whether to spoof the UA Mobile/<build> token. Default OFF.
+// On older iOS/WebKit builds, changing the Mobile build token can create an impossible UA
+// and break sensitive sites (e.g. Google login flows).
+static BOOL gUAMobileBuildCached = NO;
+static BOOL gUAMobileBuildValid = NO;
+static NSTimeInterval gUAMobileBuildLastRead = 0;
+
+static BOOL PXUAShouldSpoofMobileBuildToken(void) {
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (gUAMobileBuildValid && (now - gUAMobileBuildLastRead) < 1.0) {
+        return gUAMobileBuildCached;
+    }
+    gUAMobileBuildLastRead = now;
+    gUAMobileBuildCached = PXSecuritySettingBoolDefault(@"uaSpoofMobileBuildEnabled", NO);
+    gUAMobileBuildValid = YES;
+    return gUAMobileBuildCached;
+}
+
+static void PXUAMobileBuildTokenInvalidate(void) {
+    gUAMobileBuildValid = NO;
+}
+
 static BOOL PXUADebugScopeAllows(NSString *bundleID, NSString *processName) {
     PXUADebugEnsure();
     if (!gUADebug.masterEnabled) return YES;
@@ -611,12 +633,14 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     // 6. AppleWebKit/605.1.15 (KHTML, like Gecko) Version/15.4 Safari/605.1.15
     
     // Pattern 1: Mobile/15E148
-    NSRegularExpression *mobileRegex = [NSRegularExpression regularExpressionWithPattern:@"(Mobile)/\\d+[A-Z]\\d+" options:0 error:nil];
-    NSString *spoofedBuild = getIOSVersionInfo()[@"build"];
+    // Keep the original Mobile/<build> token by default. Spoofing it can break sites.
     NSString *updatedUA = originalUA;
-    
-    if (spoofedBuild) {
-        updatedUA = [mobileRegex stringByReplacingMatchesInString:updatedUA options:0 range:NSMakeRange(0, updatedUA.length) withTemplate:[NSString stringWithFormat:@"$1/%@", spoofedBuild]];
+    if (PXUAShouldSpoofMobileBuildToken()) {
+        NSRegularExpression *mobileRegex = [NSRegularExpression regularExpressionWithPattern:@"(Mobile)/\\d+[A-Z]\\d+" options:0 error:nil];
+        NSString *spoofedBuild = getIOSVersionInfo()[@"build"];
+        if (spoofedBuild) {
+            updatedUA = [mobileRegex stringByReplacingMatchesInString:updatedUA options:0 range:NSMakeRange(0, updatedUA.length) withTemplate:[NSString stringWithFormat:@"$1/%@", spoofedBuild]];
+        }
     }
     
     // Pattern 2: OS 15_4 like Mac
@@ -1696,6 +1720,9 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
 
     // Clear UA debug cache (runtime toggles)
     PXUADebugInvalidate();
+
+    // Clear UA Mobile/<build> toggle cache
+    PXUAMobileBuildTokenInvalidate();
 }
 
 // Safe check if a bundle ID is a critical system process
