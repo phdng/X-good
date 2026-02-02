@@ -949,7 +949,8 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 - (CGFloat)native_scale {
     CGFloat originalScale = %orig;
     
-    if (!isSpoofingEnabled()) {
+    // Avoid spoofing screen density in Safari/Auth stack; it can desync page layout/touch logic.
+    if (!isSpoofingEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
         return originalScale;
     }
     
@@ -976,128 +977,6 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
     }
     
     return spoofedScale;
-}
-
-%end
-
-#pragma mark - JavaScript WebKit Feature Detection Hooks
-
-%hook WKWebView
-
-// Hook document.load to inject our custom JavaScript for device spoofing
-- (void)_documentDidFinishLoadForFrame:(WKFrameInfo *)frame {
-    %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return;
-    }
-    
-    NSDictionary *specs = getDeviceSpecs();
-    if (!specs) {
-        return;
-    }
-    
-    NSString *deviceModel = getSpoofedDeviceModel();
-    if (!deviceModel) {
-        return;
-    }
-    
-    // Prepare values from specs
-    NSString *screenResolution = specs[@"screenResolution"] ?: @"";
-    CGFloat devicePixelRatio = [specs[@"devicePixelRatio"] floatValue];
-    NSInteger deviceMemory = [specs[@"deviceMemory"] integerValue];
-    NSInteger cpuCoreCount = [specs[@"cpuCoreCount"] integerValue];
-    
-    // Create a comprehensive JavaScript to override browser properties
-    NSString *script = [NSString stringWithFormat:
-                      @"(function() {"
-                      // Device memory
-                      @"  if ('deviceMemory' in navigator) {"
-                      @"    Object.defineProperty(navigator, 'deviceMemory', { value: %ld, writable: false });"
-                      @"  }"
-                      
-                      // Hardware concurrency (CPU cores)
-                      @"  if ('hardwareConcurrency' in navigator) {"
-                      @"    Object.defineProperty(navigator, 'hardwareConcurrency', { value: %ld, writable: false });"
-                      @"  }"
-                      
-                      // Device pixel ratio
-                      @"  if ('devicePixelRatio' in window) {"
-                      @"    Object.defineProperty(window, 'devicePixelRatio', { value: %.2f, writable: false });"
-                      @"  }"
-                      
-                      // Screen properties
-                      @"  if ('screen' in window) {"
-                      @"    var res = '%@'.split('x');"
-                      @"    var w = parseInt(res[0], 10) || screen.width;"
-                      @"    var h = parseInt(res[1], 10) || screen.height;"
-                      @"    Object.defineProperty(screen, 'width', { value: w, writable: false });"
-                      @"    Object.defineProperty(screen, 'height', { value: h, writable: false });"
-                      @"    Object.defineProperty(screen, 'availWidth', { value: w, writable: false });"
-                      @"    Object.defineProperty(screen, 'availHeight', { value: h, writable: false });"
-                      @"  }"
-                      
-                      // Window dimensions - critical for browser fingerprinting
-                      @"  if ('innerWidth' in window) {"
-                      @"    var res = '%@'.split('x');"
-                      @"    var w = parseInt(res[0], 10) / %.2f || window.innerWidth;"
-                      @"    var h = parseInt(res[1], 10) / %.2f || window.innerHeight;"
-                      @"    Object.defineProperty(window, 'innerWidth', { "
-                      @"      get: function() { return Math.floor(w); },"
-                      @"      configurable: true"
-                      @"    });"
-                      @"    Object.defineProperty(window, 'innerHeight', { "
-                      @"      get: function() { return Math.floor(h); },"
-                      @"      configurable: true"
-                      @"    });"
-                      @"  }"
-                      
-                      // Outer window dimensions
-                      @"  if ('outerWidth' in window) {"
-                      @"    var res = '%@'.split('x');"
-                      @"    var w = parseInt(res[0], 10) / %.2f || window.outerWidth;"
-                      @"    var h = parseInt(res[1], 10) / %.2f || window.outerHeight;"
-                      @"    // Add small offset to simulate browser chrome"
-                      @"    Object.defineProperty(window, 'outerWidth', { "
-                      @"      get: function() { return Math.floor(w) + 16; },"
-                      @"      configurable: true"
-                      @"    });"
-                      @"    Object.defineProperty(window, 'outerHeight', { "
-                      @"      get: function() { return Math.floor(h) + 88; },"
-                      @"      configurable: true"
-                      @"    });"
-                      @"  }"
-                      
-                      // User agent manipulation if needed
-                      // Note: Generally better to spoof UA at the HTTP header level
-                      
-                      // Additional WebGL spoofing if needed
-                      @"})();",
-                      (long)deviceMemory,
-                      (long)cpuCoreCount,
-                      devicePixelRatio,
-                      screenResolution,
-                      // Parameters for inner window size
-                      screenResolution,
-                      devicePixelRatio,
-                      devicePixelRatio,
-                      // Parameters for outer window size
-                      screenResolution,
-                      devicePixelRatio,
-                      devicePixelRatio];
-    
-    // Execute the script
-    [self evaluateJavaScript:script completionHandler:^(id result, NSError *error) {
-        if (error) {
-            PXLog(@"[DeviceSpec] Error injecting device properties script: %@", error);
-        } else {
-            static BOOL loggedJSInjection = NO;
-            if (!loggedJSInjection) {
-                PXLog(@"[DeviceSpec] Successfully injected device properties for %@", deviceModel);
-                loggedJSInjection = YES;
-            }
-        }
-    }];
 }
 
 %end
