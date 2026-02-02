@@ -4689,6 +4689,36 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     return uuids;
 }
 
+- (void)_wipeRelatedDataContainersForBundleIDs:(NSArray<NSString *> *)bundleIDs {
+    if (![bundleIDs isKindOfClass:[NSArray class]] || bundleIDs.count == 0) return;
+
+    NSArray<NSString *> *dataBases = @[
+        @"/var/mobile/Containers/Data/Application",
+        @"/containers/Data/Application"
+    ];
+
+    for (NSString *bid in bundleIDs) {
+        if (![bid isKindOfClass:[NSString class]] || bid.length == 0) continue;
+        [self logMessage:@"[AppDataCleaner] Wiping related data containers for %@", bid];
+
+        // Rootful
+        NSString *uuid = [self findDataContainerUUID:bid aggressive:NO];
+        if (uuid.length) {
+            NSString *p = [dataBases[0] stringByAppendingPathComponent:uuid];
+            [self logMessage:@"[AppDataCleaner] Related container (rootful): %@", p];
+            [self completelyWipeContainer:p];
+        }
+
+        // Rootless
+        NSString *ruuid = [self findRootlessDataContainerUUID:bid aggressive:NO];
+        if (ruuid.length) {
+            NSString *p = [dataBases[1] stringByAppendingPathComponent:ruuid];
+            [self logMessage:@"[AppDataCleaner] Related container (rootless): %@", p];
+            [self completelyWipeContainer:p];
+        }
+    }
+}
+
 - (void)_wipeMobileSafariSystemStores {
     [self logMessage:@"[AppDataCleaner] MobileSafari: wiping global Safari/WebKit/Cookies stores..."];
 
@@ -4735,6 +4765,23 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     // Flush preference/caches used by Safari.
     [self runCommandWithPrivileges:@"killall -TERM cfprefsd 2>/dev/null || true"]; 
     [self runCommandWithPrivileges:@"killall -TERM webbookmarksd 2>/dev/null || true"]; 
+
+    // Also wipe data containers for WebKit helper services; cookies/session can live there.
+    [self _wipeRelatedDataContainersForBundleIDs:@[
+        @"com.apple.SafariViewService",
+        @"com.apple.WebKit.Networking",
+        @"com.apple.WebKit.WebContent",
+        @"com.apple.WebKit.GPU"
+    ]];
+
+    // Clear caches that can carry session state.
+    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.mobilesafari 2>/dev/null || true"]; 
+    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.SafariViewService 2>/dev/null || true"]; 
+    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.WebKit.* 2>/dev/null || true"]; 
+    [self runCommandWithPrivileges:@"rm -rf /private/var/mobile/Library/Caches/com.apple.WebKit.* 2>/dev/null || true"]; 
+
+    // Optional: SafeBrowsing can persist per-user browsing state.
+    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/SafariSafeBrowsing 2>/dev/null || true"]; 
 
     sync();
 }
