@@ -4867,6 +4867,55 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     }
 }
 
+- (void)_wipeContainersInBasePaths:(NSArray<NSString *> *)bases
+               matchingSubstrings:(NSArray<NSString *> *)needles
+                             tag:(NSString *)tag {
+    if (![bases isKindOfClass:[NSArray class]] || !bases.count) return;
+    if (![needles isKindOfClass:[NSArray class]] || !needles.count) return;
+
+    NSMutableArray<NSString *> *needlesLower = [NSMutableArray array];
+    for (NSString *n in needles) {
+        if ([n isKindOfClass:[NSString class]] && n.length) {
+            [needlesLower addObject:[n lowercaseString]];
+        }
+    }
+    if (!needlesLower.count) return;
+
+    NSUInteger matched = 0;
+    for (NSString *base in bases) {
+        if (![base isKindOfClass:[NSString class]] || !base.length) continue;
+        if (![_fileManager fileExistsAtPath:base]) continue;
+
+        NSArray *uuids = [self listDirectoriesInPath:base];
+        [self logMessage:@"[AppDataCleaner] %@ scanning %@ (count=%lu)", tag ?: @"", base, (unsigned long)uuids.count];
+        for (NSString *uuid in uuids) {
+            if (![uuid isKindOfClass:[NSString class]] || !uuid.length) continue;
+            NSString *metadataPath = [NSString stringWithFormat:@"%@/%@/.com.apple.mobile_container_manager.metadata.plist", base, uuid];
+            NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+            NSString *ident = [metadata[@"MCMMetadataIdentifier"] isKindOfClass:[NSString class]] ? metadata[@"MCMMetadataIdentifier"] : nil;
+            if (!ident.length) continue;
+            NSString *identLower = [ident lowercaseString];
+
+            BOOL match = NO;
+            for (NSString *needle in needlesLower) {
+                if ([identLower containsString:needle]) {
+                    match = YES;
+                    break;
+                }
+            }
+            if (!match) continue;
+
+            NSString *p = [NSString stringWithFormat:@"%@/%@", base, uuid];
+            matched++;
+            [self logMessage:@"[AppDataCleaner] %@ matched container: %@ (ident=%@)", tag ?: @"", p, ident];
+            [self completelyWipeContainer:p];
+        }
+    }
+    if (!matched) {
+        [self logMessage:@"[AppDataCleaner] %@ no containers matched substrings=%@", tag ?: @"", needlesLower];
+    }
+}
+
 - (void)_wipeMobileSafariSystemStores {
     [self logMessage:@"[AppDataCleaner] MobileSafari: wiping global Safari/WebKit/Cookies stores..."];
 
@@ -5081,6 +5130,15 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         @"com.apple.WebKit",
         @"com.apple.SafariViewService"
     ]];
+
+    // Broader scan: some iOS versions store WebKit state in AppGroup/SystemGroup containers with different identifiers.
+    // This is intentionally aggressive for Safari clear-data.
+    [self _wipeContainersInBasePaths:@[@"/var/mobile/Containers/Shared/SystemGroup", @"/containers/Shared/SystemGroup"]
+                  matchingSubstrings:@[@"webkit", @"safariviewservice", @"mobilesafari"]
+                                tag:@"MobileSafari(systemgroup)"];
+    [self _wipeContainersInBasePaths:@[@"/var/mobile/Containers/Shared/AppGroup", @"/containers/Shared/AppGroup"]
+                  matchingSubstrings:@[@"webkit", @"safariviewservice", @"mobilesafari"]
+                                tag:@"MobileSafari(appgroup)"];
 
     // Optional: SafeBrowsing can persist per-user browsing state.
     [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/SafariSafeBrowsing 2>/dev/null || true"]; 
