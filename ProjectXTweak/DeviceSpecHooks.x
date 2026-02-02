@@ -19,6 +19,8 @@
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import "IOSVersionInfo.h"
 
+#import "PXScope.h"
+
 // Define the swap usage structure if it's not available
 #ifndef HAVE_XSW_USAGE
 struct xsw_usage {
@@ -210,10 +212,10 @@ static BOOL isSpoofingEnabled(void) {
         }
     }
     
-    // Always exclude system processes
-    if ([currentBundleID hasPrefix:@"com.apple."] && 
-        ![currentBundleID isEqualToString:@"com.apple.mobilesafari"] &&
-        ![currentBundleID isEqualToString:@"com.apple.webapp"]) {
+    // Exclude system processes, except Safari/Auth stack when enabled.
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if ([currentBundleID hasPrefix:@"com.apple."] &&
+        !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc))) {
         @synchronized(cachedBundleDecisions) {
             cachedBundleDecisions[currentBundleID] = @NO;
             cachedBundleDecisions[[currentBundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
@@ -224,8 +226,8 @@ static BOOL isSpoofingEnabled(void) {
     // Check if the current app is a scoped app AND if device model spoofing is enabled
     BOOL shouldSpoof = NO;
     @try {
-        // First check if this app is in the scoped apps list
-        BOOL isScoped = isInScopedAppsList();
+        // First check if this app is in the scoped apps list (or is Safari/Auth stack and enabled)
+        BOOL isScoped = isInScopedAppsList() || PXAllowUnscopedSafariStack();
         if (!isScoped) {
             shouldSpoof = NO;
         } else {
@@ -1353,10 +1355,16 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
                 return;
             }
             
-            // Don't hook system processes and our own apps
-            if ([currentBundleID hasPrefix:@"com.apple."] || 
-                [currentBundleID isEqualToString:@"com.hydra.projectx"] || 
+            // Don't hook our own apps
+            if ([currentBundleID isEqualToString:@"com.hydra.projectx"] ||
                 [currentBundleID isEqualToString:@"com.hydra.weaponx"]) {
+                return;
+            }
+
+            // Don't hook system processes, except Safari/Auth stack when enabled.
+            NSString *proc = [NSProcessInfo processInfo].processName;
+            if ([currentBundleID hasPrefix:@"com.apple."] &&
+                !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc))) {
                 PXLog(@"[DeviceSpec] Not hooking system process: %@", currentBundleID);
                 return;
             }
@@ -1384,8 +1392,8 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
                 CFNotificationSuspensionBehaviorDeliverImmediately
             );
             
-            // CRITICAL: Only install hooks if this app is actually scoped
-            if (!isInScopedAppsList()) {
+            // Only install hooks if app is scoped, OR if Safari/Auth stack spoof is enabled.
+            if (!isInScopedAppsList() && !PXAllowUnscopedSafariStack()) {
                 // App is NOT scoped - no hooks, no interference, no crashes
                 PXLog(@"[DeviceSpec] App %@ is not scoped, skipping hook installation", currentBundleID);
                 return;

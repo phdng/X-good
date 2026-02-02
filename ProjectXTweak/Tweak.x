@@ -31,6 +31,7 @@
 #import "MobileGestalt.h"
 #import "IOSVersionInfo.h"
 #import "HookOwnership.h"
+#import "PXScope.h"
 #import <CoreFoundation/CoreFoundation.h>
 // Forward declarations for classes we need to hook
 @interface SBScreenshotManager : NSObject
@@ -868,8 +869,11 @@ static int uname_hook(struct utsname *buf) {
     NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
     
     PXLog(@"IDFA requested by app: %@", currentBundleID);
-    
-    if (![manager isApplicationEnabled:currentBundleID]) {
+
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    BOOL safariAllowed = (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc));
+
+    if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
         PXLog(@"App not in scope or disabled, passing through original IDFA");
         return %orig;
     }
@@ -902,8 +906,16 @@ static int uname_hook(struct utsname *buf) {
         
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+
+        if (!currentBundleID) {
+            return originalIdentifier;
+        }
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        BOOL safariAllowed = (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc));
+        if ([currentBundleID hasPrefix:@"com.apple."] && !safariAllowed) {
+            return originalIdentifier;
+        }
+        if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
             return originalIdentifier;
         }
         
@@ -952,8 +964,16 @@ static int uname_hook(struct utsname *buf) {
         
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-        
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+
+        if (!currentBundleID) {
+            return originalName;
+        }
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        BOOL safariAllowed = (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc));
+        if ([currentBundleID hasPrefix:@"com.apple."] && !safariAllowed) {
+            return originalName;
+        }
+        if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
             return originalName;
         }
         
@@ -990,8 +1010,11 @@ static int uname_hook(struct utsname *buf) {
     NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
     
     PXLog(@"ubiquityIdentityToken requested by app: %@", currentBundleID);
-    
-    if (![manager isApplicationEnabled:currentBundleID]) {
+
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    BOOL safariAllowed = (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc));
+
+    if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
         PXLog(@"App not in scope or disabled, passing through original ubiquityIdentityToken");
         return %orig;
     }
@@ -1022,8 +1045,11 @@ static int uname_hook(struct utsname *buf) {
     NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
     
     PXLog(@"NSHost currentHost requested by app: %@", currentBundleID);
-    
-    if (![manager isApplicationEnabled:currentBundleID]) {
+
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    BOOL safariAllowed = (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc));
+
+    if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
         PXLog(@"App not in scope, returning original host info");
         return originalHost;
     }
@@ -1051,7 +1077,15 @@ static int uname_hook(struct utsname *buf) {
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!currentBundleID) {
+            return originalName;
+        }
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        BOOL safariAllowed = (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc));
+        if ([currentBundleID hasPrefix:@"com.apple."] && !safariAllowed) {
+            return originalName;
+        }
+        if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
             return originalName;
         }
         
@@ -1091,7 +1125,15 @@ static int uname_hook(struct utsname *buf) {
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!currentBundleID) {
+            return original;
+        }
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        BOOL safariAllowed = (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc));
+        if ([currentBundleID hasPrefix:@"com.apple."] && !safariAllowed) {
+            return original;
+        }
+        if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
             return original;
         }
         
@@ -1121,7 +1163,15 @@ static int uname_hook(struct utsname *buf) {
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!currentBundleID) {
+            return original;
+        }
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        BOOL safariAllowed = (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc));
+        if ([currentBundleID hasPrefix:@"com.apple."] && !safariAllowed) {
+            return original;
+        }
+        if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
             return original;
         }
         
@@ -1152,7 +1202,15 @@ static int uname_hook(struct utsname *buf) {
         IdentifierManager *manager = [%c(IdentifierManager) sharedManager];
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!currentBundleID) {
+            return original;
+        }
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        BOOL safariAllowed = (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc));
+        if ([currentBundleID hasPrefix:@"com.apple."] && !safariAllowed) {
+            return original;
+        }
+        if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
             return original;
         }
         
@@ -2581,7 +2639,15 @@ static CFTypeRef hook_IORegistryEntryCreateCFProperty(io_registry_entry_t entry,
         NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
         
         // Skip spoofing for system processes or if application isn't enabled
-        if (!currentBundleID || [currentBundleID hasPrefix:@"com.apple."] || ![manager isApplicationEnabled:currentBundleID]) {
+        if (!currentBundleID) {
+            return orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
+        }
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        BOOL safariAllowed = (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc));
+        if ([currentBundleID hasPrefix:@"com.apple."] && !safariAllowed) {
+            return orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
+        }
+        if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
             return orig_IORegistryEntryCreateCFProperty(entry, key, allocator, options);
         }
         

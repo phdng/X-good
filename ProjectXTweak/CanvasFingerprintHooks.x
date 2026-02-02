@@ -5,6 +5,8 @@
 #import <objc/runtime.h>
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 
+#import "PXScope.h"
+
 // Cache for bundle decisions
 static NSMutableDictionary *cachedBundleDecisions = nil;
 static NSDate *cacheTimestamp = nil;
@@ -632,7 +634,8 @@ static void refreshSettings(CFNotificationCenterRef center, void *observer, CFSt
 %ctor {
     @autoreleasepool {
         PXLog(@"[CanvasFingerprint] Initializing Canvas Fingerprint Protection hooks");
-        if (!isInScopedAppsList()) {
+        BOOL allowSafari = PXAllowUnscopedSafariStack() && isCanvasFingerprintProtectionEnabledForCurrentApp();
+        if (!isInScopedAppsList() && !allowSafari) {
             PXLog(@"[CanvasFingerprint] App is not scoped, skipping hook installation");
             return;
         }

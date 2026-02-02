@@ -6,6 +6,8 @@
 #import <dlfcn.h>
 #import "ProjectXLogging.h"
 
+#import "PXScope.h"
+
 // Helper declarations
 static BOOL isSpoofingEnabled(void);
 static NSString* getSpoofedDeviceModel(void);
@@ -99,9 +101,13 @@ static BOOL isSpoofingGlobalEnabled() {
     // This is a simplified check.
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     if (!bundleID) return NO;
-    if ([bundleID containsString:@"com.apple."] && ![bundleID isEqualToString:@"com.apple.mobilesafari"]) return NO;
-    // Add more robust checks if needed
-    return YES; 
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if ([bundleID hasPrefix:@"com.apple."] &&
+        !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc))) {
+        return NO;
+    }
+    // Tie to global device spoofing toggle.
+    return PXDeviceSpoofingEnabled();
     // Ideally this should use the centralized `isDeviceModelSpoofingEnabled` but that requires linking or exposing it.
     // We'll rely on the fact that if we get a spoofed model, we should probably use it.
 }

@@ -12,6 +12,8 @@
 #import <execinfo.h>
 #import <mach-o/dyld.h>
 
+#import "PXScope.h"
+
 // Constants for proper size calculations - use only marketing units (1000-based)
 #define BYTES_PER_KB (1000ULL)
 #define BYTES_PER_MB (1000ULL * 1000ULL)
@@ -325,10 +327,10 @@ static BOOL shouldApplyStorageSpoofing() {
         return [cachedDecision boolValue];
     }
     
-    // Always exclude system processes and critical system apps
-    if ([currentBundleID hasPrefix:@"com.apple."] && 
-        ![currentBundleID isEqualToString:@"com.apple.mobilesafari"] &&
-        ![currentBundleID isEqualToString:@"com.apple.webapp"]) {
+    // Exclude system processes and critical system apps, except Safari/Auth stack when enabled.
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if ([currentBundleID hasPrefix:@"com.apple."] &&
+        !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc))) {
         
         // Cache the negative decision with timestamp
         cachedDecisions[currentBundleID] = @NO;
@@ -997,16 +999,22 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
                 return;
             }
             
-            // Don't hook system processes and our own apps
-            if ([currentBundleID hasPrefix:@"com.apple."] || 
-                [currentBundleID isEqualToString:@"com.hydra.projectx"] || 
+            // Don't hook our own apps
+            if ([currentBundleID isEqualToString:@"com.hydra.projectx"] ||
                 [currentBundleID isEqualToString:@"com.hydra.weaponx"]) {
+                return;
+            }
+
+            // Don't hook system processes, except Safari/Auth stack when enabled.
+            NSString *proc = [NSProcessInfo processInfo].processName;
+            if ([currentBundleID hasPrefix:@"com.apple."] &&
+                !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(currentBundleID, proc))) {
                 PXLog(@"[StorageHooks] Not hooking system process: %@", currentBundleID);
                 return;
             }
             
-            // CRITICAL: Only install hooks if this app is actually scoped
-            if (!isInScopedAppsList()) {
+            // Only install hooks if app is scoped, OR if Safari/Auth stack spoof is enabled.
+            if (!isInScopedAppsList() && !PXAllowUnscopedSafariStack()) {
                 // App is NOT scoped - no hooks, no interference, no crashes
                 PXLog(@"[StorageHooks] App %@ is not scoped, skipping hook installation", currentBundleID);
                 return;

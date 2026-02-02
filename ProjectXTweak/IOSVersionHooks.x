@@ -12,6 +12,8 @@
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <mach/mach_time.h>
 
+#import "PXScope.h"
+
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -220,6 +222,11 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
         if (!bundleID) {
             NSLog(@"[iosversion] Skipping iOS version spoofing for nil bundleID");
             return NO;
+        }
+
+        // Allow unscoped spoofing for Safari/Auth stack when enabled.
+        if (PXAllowUnscopedSafariStack()) {
+            return YES;
         }
         
         // Check cache first
@@ -570,9 +577,9 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        // Special case for Safari and WebKit processes to force spoofing
-        BOOL forceSpoofForWebKit = [bundleID isEqualToString:@"com.apple.mobilesafari"] || 
-                                  [bundleID hasPrefix:@"com.apple.WebKit"];
+        // Special case for Safari/Auth stack processes to force spoofing (even if not scoped)
+        BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
+                                  PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
         
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && resultWebView) {
             NSString *spoofedVersion = getSpoofedSystemVersion();
@@ -612,9 +619,9 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        // Special case for Safari and WebKit processes to force spoofing
-        BOOL forceSpoofForWebKit = [bundleID isEqualToString:@"com.apple.mobilesafari"] || 
-                                  [bundleID hasPrefix:@"com.apple.WebKit"];
+        // Special case for Safari/Auth stack processes to force spoofing (even if not scoped)
+        BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
+                                  PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
         
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && webView) {
             NSString *spoofedVersion = getSpoofedSystemVersion();
@@ -677,9 +684,9 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 - (void)setCustomUserAgent:(NSString *)customUserAgent {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        // Special case for Safari and WebKit processes to force spoofing
-        BOOL forceSpoofForWebKit = [bundleID isEqualToString:@"com.apple.mobilesafari"] || 
-                                  [bundleID hasPrefix:@"com.apple.WebKit"];
+        // Special case for Safari/Auth stack processes to force spoofing (even if not scoped)
+        BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
+                                  PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
         
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && customUserAgent) {
             NSString *spoofedVersion = getSpoofedSystemVersion();
@@ -715,9 +722,9 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     // If it's a user agent script, try to update the user agent
     if (isUserAgentScript) {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        // Special case for Safari and WebKit processes to force spoofing
-        BOOL forceSpoofForWebKit = [bundleID isEqualToString:@"com.apple.mobilesafari"] || 
-                                  [bundleID hasPrefix:@"com.apple.WebKit"];
+        // Special case for Safari/Auth stack processes to force spoofing (even if not scoped)
+        BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
+                                  PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
         
         if (forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) {
             // Wait a short time to let the script execute
@@ -1327,15 +1334,20 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
 // Safe check if a bundle ID is a critical system process
 static BOOL isCriticalSystemProcess(NSString *bundleID) {
     if (!bundleID) return YES; // Treat nil as critical for safety
+
+    // Safari/Auth stack is allowed when the dedicated toggle is enabled.
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc)) {
+        return NO;
+    }
     
     // Check against our critical system bundle IDs list
     if ([criticalSystemBundleIDs() containsObject:bundleID]) {
         // Allow spoofing for Safari and WebKit processes, even though they're in the critical list
         // This is necessary to spoof browser user agents
         if ([bundleID isEqualToString:@"com.apple.mobilesafari"] ||
-            [bundleID isEqualToString:@"com.apple.WebKit"] ||
-            [bundleID isEqualToString:@"com.apple.WebKit.WebContent"] ||
-            [bundleID isEqualToString:@"com.apple.WebKit.Networking"]) {
+            [bundleID isEqualToString:@"com.apple.SafariViewService"] ||
+            [bundleID hasPrefix:@"com.apple.WebKit"]) {
             return NO;
         }
         return YES;
@@ -1345,6 +1357,7 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
     if ([bundleID hasPrefix:@"com.apple."]) {
         // Allow spoofing for Safari and WebKit processes
         if ([bundleID isEqualToString:@"com.apple.mobilesafari"] ||
+            [bundleID isEqualToString:@"com.apple.SafariViewService"] ||
             [bundleID hasPrefix:@"com.apple.WebKit"]) {
             return NO;
         }
@@ -1390,8 +1403,8 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
         
         IOSVERSION_LOG(@"Initializing iOS Version Hooks for %@...", bundleID);
         
-        // CRITICAL: Only install hooks if this app is actually scoped
-        if (!isInScopedAppsList()) {
+        // Only install hooks if app is scoped, OR if Safari/Auth stack spoof is enabled.
+        if (!isInScopedAppsList() && !PXAllowUnscopedSafariStack()) {
             // App is NOT scoped - no hooks, no interference, no crashes
             IOSVERSION_LOG(@"App %@ is not scoped, skipping iOS version hook installation", bundleID);
             return;

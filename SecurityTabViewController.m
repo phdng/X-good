@@ -320,6 +320,9 @@
 
 @property (nonatomic, strong) UIButton *ipMonitorCheckButton;
 @property (nonatomic, strong) UISwitch *ipMonitorToggleSwitch;
+
+@property (nonatomic, strong) UILabel *safariStackSpoofingLabel;
+@property (nonatomic, strong) UISwitch *safariStackSpoofingToggleSwitch;
 - (void)setupIPMonitorControl:(UIView *)contentView;
 // Any private properties go here
 @property (nonatomic, strong) UILabel *copyrightLabel;
@@ -3255,6 +3258,28 @@
     
     [self.deviceSpoofingToggleSwitch addTarget:self action:@selector(deviceSpoofingToggleChanged:) forControlEvents:UIControlEventValueChanged];
     [bottomRowContainer addSubview:self.deviceSpoofingToggleSwitch];
+
+    // Safari/Auth Stack spoofing row (applies to SafariViewService/WebKit/ASWebAuthenticationSession)
+    UIView *safariRow = [[UIView alloc] init];
+    safariRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:safariRow];
+
+    self.safariStackSpoofingLabel = [[UILabel alloc] init];
+    self.safariStackSpoofingLabel.text = @"Safari/Auth Stack Spoofing";
+    self.safariStackSpoofingLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    self.safariStackSpoofingLabel.textColor = [UIColor secondaryLabelColor];
+    self.safariStackSpoofingLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [safariRow addSubview:self.safariStackSpoofingLabel];
+
+    self.safariStackSpoofingToggleSwitch = [[UISwitch alloc] init];
+    self.safariStackSpoofingToggleSwitch.onTintColor = [UIColor systemBlueColor];
+    self.safariStackSpoofingToggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+
+    id safariPref = [self.securitySettings objectForKey:@"safariStackSpoofEnabled"]; // may be nil
+    BOOL safariEnabled = safariPref ? [safariPref boolValue] : deviceSpoofingEnabled;
+    [self.safariStackSpoofingToggleSwitch setOn:safariEnabled animated:NO];
+    [self.safariStackSpoofingToggleSwitch addTarget:self action:@selector(safariStackSpoofingToggleChanged:) forControlEvents:UIControlEventValueChanged];
+    [safariRow addSubview:self.safariStackSpoofingToggleSwitch];
     
     // Enable/disable access button based on toggle state
     self.deviceSpoofingAccessButton.enabled = deviceSpoofingEnabled;
@@ -3277,7 +3302,7 @@
         [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:520], // Increased spacing below Network Connection Type
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
-        [controlView.heightAnchor constraintEqualToConstant:100], // Maintain height for vertical layout
+        [controlView.heightAnchor constraintEqualToConstant:120], // Extra row for Safari/Auth stack
         
         // Position label at the top
         [self.deviceSpoofingLabel.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
@@ -3294,8 +3319,20 @@
         
         // Position bottom row container
         [bottomRowContainer.centerXAnchor constraintEqualToAnchor:controlView.contentView.centerXAnchor],
-        [bottomRowContainer.topAnchor constraintEqualToAnchor:self.deviceSpoofingLabel.bottomAnchor constant:15],
+        [bottomRowContainer.topAnchor constraintEqualToAnchor:self.deviceSpoofingLabel.bottomAnchor constant:10],
         [bottomRowContainer.heightAnchor constraintEqualToConstant:30],
+
+        // Safari row
+        [safariRow.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
+        [safariRow.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
+        [safariRow.topAnchor constraintEqualToAnchor:bottomRowContainer.bottomAnchor constant:8],
+        [safariRow.heightAnchor constraintEqualToConstant:30],
+
+        [self.safariStackSpoofingLabel.leadingAnchor constraintEqualToAnchor:safariRow.leadingAnchor],
+        [self.safariStackSpoofingLabel.centerYAnchor constraintEqualToAnchor:safariRow.centerYAnchor],
+
+        [self.safariStackSpoofingToggleSwitch.trailingAnchor constraintEqualToAnchor:safariRow.trailingAnchor],
+        [self.safariStackSpoofingToggleSwitch.centerYAnchor constraintEqualToAnchor:safariRow.centerYAnchor],
         
         // Position elements inside bottom row container
         [appleBgView.leadingAnchor constraintEqualToAnchor:bottomRowContainer.leadingAnchor],
@@ -3317,6 +3354,25 @@
         [self.deviceSpoofingToggleSwitch.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
         [self.deviceSpoofingToggleSwitch.trailingAnchor constraintEqualToAnchor:bottomRowContainer.trailingAnchor]
     ]];
+
+    // Disable safari-stack toggle when global device spoofing is off
+    self.safariStackSpoofingToggleSwitch.enabled = deviceSpoofingEnabled;
+    self.safariStackSpoofingToggleSwitch.alpha = deviceSpoofingEnabled ? 1.0 : 0.5;
+}
+
+- (void)safariStackSpoofingToggleChanged:(UISwitch *)sender {
+    BOOL enabled = sender.isOn;
+
+    // Persist user override; effective enablement still follows global deviceSpoofingEnabled.
+    [self.securitySettings setBool:enabled forKey:@"safariStackSpoofEnabled"];
+    [self.securitySettings synchronize];
+
+    // Broadcast changes so all tweaks clear caches.
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    if (darwinCenter) {
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.safariStackSpoofToggleChanged"), NULL, NULL, YES);
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.settings.changed"), NULL, NULL, YES);
+    }
 }
 
 - (void)showDeviceSpoofingInfo {
@@ -3340,6 +3396,19 @@
     // Save setting immediately and synchronize
     [self.securitySettings setBool:enabled forKey:@"deviceSpoofingEnabled"];
     [self.securitySettings synchronize];
+
+    // Safari/Auth stack spoof toggle: default ON when global spoof is ON.
+    if (self.safariStackSpoofingToggleSwitch) {
+        self.safariStackSpoofingToggleSwitch.enabled = enabled;
+        self.safariStackSpoofingToggleSwitch.alpha = enabled ? 1.0 : 0.5;
+
+        if (enabled) {
+            // Only auto-default if user hasn't explicitly set the key.
+            if ([self.securitySettings objectForKey:@"safariStackSpoofEnabled"] == nil) {
+                [self.safariStackSpoofingToggleSwitch setOn:YES animated:YES];
+            }
+        }
+    }
     
     // Enable/disable access button based on toggle state
     self.deviceSpoofingAccessButton.enabled = enabled;
@@ -3378,6 +3447,13 @@
                                                             object:nil 
                                                           userInfo:userInfo];
     });
+
+    // Darwin notifications for injected tweaks (cache invalidation)
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    if (darwinCenter) {
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.settings.changed"), NULL, NULL, YES);
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.toggleDeviceSpoofing"), NULL, NULL, YES);
+    }
     
     // Add haptic feedback
     UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];

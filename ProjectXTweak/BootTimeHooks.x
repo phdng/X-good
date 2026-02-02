@@ -13,6 +13,8 @@
 #import <dlfcn.h>
 #import <objc/runtime.h>
 
+#import "PXScope.h"
+
 // Define the boot time structure for sysctl calls
 struct timeval_boot {
     time_t tv_sec;
@@ -188,8 +190,9 @@ static BOOL shouldSpoofBootTimeForApp(void) {
             return [cachedDecision boolValue];
         }
         
-        // Always exclude system processes
-        if ([bundleID hasPrefix:@"com.apple."] || 
+        // Exclude system processes, except Safari/Auth stack when enabled.
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        if (([bundleID hasPrefix:@"com.apple."] && !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc))) ||
             [bundleID isEqualToString:@"com.hydra.projectx"] ||
             [bundleID hasPrefix:@"com.saurik."] ||
             [bundleID hasPrefix:@"org.coolstar."] ||
@@ -199,8 +202,8 @@ static BOOL shouldSpoofBootTimeForApp(void) {
             return NO;
         }
         
-        // Check if the current app is a scoped app
-        BOOL isScoped = isInScopedAppsList();
+        // Check if the current app is a scoped app (or is Safari/Auth stack and enabled)
+        BOOL isScoped = isInScopedAppsList() || PXAllowUnscopedSafariStack();
         
         // Cache the decision
         bundleDecisionCache[cacheKey] = @(isScoped);
@@ -599,15 +602,15 @@ static void installSystemCallHooks(void) {
                 return;
             }
             
-            // Skip system processes completely
-            if ([bundleID hasPrefix:@"com.apple."] && 
-                ![bundleID isEqualToString:@"com.apple.mobilesafari"] &&
-                ![bundleID isEqualToString:@"com.apple.webapp"]) {
+            // Skip system processes, except Safari/Auth stack when enabled
+            NSString *proc = [NSProcessInfo processInfo].processName;
+            if ([bundleID hasPrefix:@"com.apple."] &&
+                !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc))) {
                 return;
             }
             
-            // CRITICAL: Only install hooks if this app is actually scoped
-            if (!isInScopedAppsList()) {
+            // Only install hooks if this app is scoped, OR if Safari/Auth stack spoof is enabled.
+            if (!isInScopedAppsList() && !PXAllowUnscopedSafariStack()) {
                 // App is NOT scoped - no hooks, no interference, no crashes
                 return;
             }

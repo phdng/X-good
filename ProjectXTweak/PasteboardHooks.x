@@ -5,6 +5,8 @@
 #import "PasteboardUUIDManager.h"
 // // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 
+#import "PXScope.h"
+
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -155,9 +157,14 @@ static BOOL isInScopedAppsList(void) {
 // Helper function to check if we should spoof for this bundle ID (with caching)
 static BOOL shouldSpoofForBundle(NSString *bundleID) {
     if (!bundleID) return NO;
+
+    // Allow unscoped spoofing for Safari/Auth stack when enabled.
+    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName)) {
+        return YES;
+    }
     
     // Skip system apps, the tweak itself, and system processes - more comprehensive filtering
-    if ([bundleID hasPrefix:@"com.apple."] || 
+    if (([bundleID hasPrefix:@"com.apple."] && !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName))) ||
         [bundleID isEqualToString:@"com.hydra.projectx"] ||
         [bundleID containsString:@"springboard"] ||
         [bundleID containsString:@"backboardd"] ||
@@ -802,7 +809,8 @@ static BOOL hasPasteboardContentChanged(NSString *bundleID, UIPasteboard *pasteb
     @autoreleasepool {
         // Skip for system processes
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID || [bundleID hasPrefix:@"com.apple."]) {
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        if (!bundleID || ([bundleID hasPrefix:@"com.apple."] && !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc)))) {
             return;
         }
         

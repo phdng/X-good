@@ -14,6 +14,8 @@
 #import <net/if.h>
 #import "MethodSwizzler.h"
 
+#import "PXScope.h"
+
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -90,6 +92,11 @@ static BOOL isInScopedAppsList(void);
 // Helper function to check if we should spoof for this bundle ID (with caching)
 static BOOL shouldSpoofForBundle(NSString *bundleID) {
     if (!bundleID) return NO;
+
+    // Allow unscoped spoofing for Safari/Auth stack when enabled.
+    if (PXAllowUnscopedSafariStack()) {
+        return YES;
+    }
     
     // Check cache first
     if (!cachedBundleDecisions) {
@@ -104,17 +111,17 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
         }
     }
     
-    // Skip spoofing for system apps
-    if ([bundleID hasPrefix:@"com.apple."] && 
-        ![bundleID isEqualToString:@"com.apple.mobilesafari"] &&
-        ![bundleID isEqualToString:@"com.apple.webapp"]) {
+    // Skip spoofing for system apps, except Safari/Auth stack when enabled.
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if ([bundleID hasPrefix:@"com.apple."] &&
+        !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc))) {
         cachedBundleDecisions[bundleID] = @NO;
         cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
         return NO;
     }
     
-    // Check if the current app is a scoped app
-    BOOL isScoped = isInScopedAppsList();
+    // Check if the current app is a scoped app (or is Safari/Auth stack and enabled)
+    BOOL isScoped = isInScopedAppsList() || PXAllowUnscopedSafariStack();
     
     // Cache the decision
     cachedBundleDecisions[bundleID] = @(isScoped);
@@ -776,10 +783,10 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
                 return;
             }
             
-            // Skip if this is a system process (except allowed ones)
-            if ([bundleID hasPrefix:@"com.apple."] && 
-                ![bundleID isEqualToString:@"com.apple.mobilesafari"] &&
-                ![bundleID isEqualToString:@"com.apple.webapp"]) {
+            // Skip if this is a system process (except Safari/Auth stack when enabled)
+            NSString *proc = [NSProcessInfo processInfo].processName;
+            if ([bundleID hasPrefix:@"com.apple."] &&
+                !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc))) {
                 PXLog(@"[WiFiHook] Not hooking system process: %@", bundleID);
                 return;
             }
@@ -791,8 +798,8 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
                 return;
             }
             
-            // CRITICAL: Only install hooks if this app is actually scoped
-            if (!isInScopedAppsList()) {
+            // Only install hooks if this app is scoped, OR if Safari/Auth stack spoof is enabled.
+            if (!isInScopedAppsList() && !PXAllowUnscopedSafariStack()) {
                 // App is NOT scoped - no hooks, no interference, no crashes
                 PXLog(@"[WiFiHook] App %@ is not scoped, skipping hook installation", bundleID);
                 return;

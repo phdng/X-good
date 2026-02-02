@@ -6,6 +6,7 @@
 #import "IdentifierManager.h"
 #import "SystemUUIDManager.h"
 #import "DyldCacheUUIDManager.h"
+#import "PXScope.h"
 #import <dlfcn.h>
 #import <substrate.h>
 #import <mach-o/dyld.h>
@@ -38,9 +39,14 @@ static void clearCacheCallback(CFNotificationCenterRef center, void *observer, C
 // Update the shouldSpoofForBundle function to directly check settings files
 static BOOL shouldSpoofForBundle(NSString *bundleID) {
     if (!bundleID) return NO;
+
+    // Allow unscoped spoofing for Safari/Auth stack when enabled.
+    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName)) {
+        return YES;
+    }
     
     // Skip system apps, the tweak itself, and system processes - more comprehensive filtering
-    if ([bundleID hasPrefix:@"com.apple."] || 
+    if (([bundleID hasPrefix:@"com.apple."] && !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName))) ||
         [bundleID isEqualToString:@"com.hydra.projectx"] ||
         [bundleID containsString:@"springboard"] ||
         [bundleID containsString:@"backboardd"] ||
@@ -58,10 +64,11 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
     }
     
     // Get the executable path to check if it's a system binary
+    // Safari/Auth stack is allowed even if it resides under system paths.
     NSString *executablePath = [[NSBundle mainBundle] executablePath];
-    if (executablePath && 
-        ([executablePath hasPrefix:@"/usr/"] || 
-         [executablePath hasPrefix:@"/bin/"] || 
+    if (executablePath &&
+        ([executablePath hasPrefix:@"/usr/"] ||
+         [executablePath hasPrefix:@"/bin/"] ||
          [executablePath hasPrefix:@"/sbin/"])) {
         return NO;
     }
@@ -1098,15 +1105,16 @@ static void setupAdditionalSystemUUIDHooks() {
             NSString *processName = [executablePath lastPathComponent];
             
             // Skip for critical system processes to prevent crashes
-            // More comprehensive check than before to ensure stability
+            // Allow Safari/Auth stack when enabled.
+            BOOL safariAllowed = (bundleID && PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, processName));
             if (!bundleID || 
-                [bundleID hasPrefix:@"com.apple."] || 
+                (!safariAllowed && [bundleID hasPrefix:@"com.apple."]) || 
                 [processName isEqualToString:@"SpringBoard"] ||
                 [processName isEqualToString:@"backboardd"] ||
                 [processName isEqualToString:@"assertiond"] ||
                 [processName isEqualToString:@"useractivityd"] ||
                 [processName isEqualToString:@"apsd"] ||
-                [processName hasPrefix:@"com.apple."] ||
+                (!safariAllowed && [processName hasPrefix:@"com.apple."]) ||
                 [processName containsString:@"daemon"] ||
                 [processName containsString:@"assistant"] ||
                 [processName containsString:@"locationd"] ||

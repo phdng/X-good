@@ -6,6 +6,8 @@
 #import "UserDefaultsUUIDManager.h"
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 
+#import "PXScope.h"
+
 // Function declarations
 static NSString *getSpoofedUserDefaultsUUID();
 static BOOL isUUIDKey(NSString *key);
@@ -29,9 +31,16 @@ static void clearCacheCallback(CFNotificationCenterRef center, void *observer, C
 // Helper function to check if we should spoof for this bundle ID (with caching)
 static BOOL shouldSpoofForBundle(NSString *bundleID) {
     if (!bundleID) return NO;
+
+    // Allow unscoped spoofing for Safari/Auth stack when enabled.
+    if (PXAllowUnscopedSafariStack()) {
+        return YES;
+    }
     
     // Skip for system apps and the tweak itself
-    if ([bundleID hasPrefix:@"com.apple."] || [bundleID isEqualToString:@"com.hydra.projectx"]) {
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if (([bundleID hasPrefix:@"com.apple."] && !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc))) ||
+        [bundleID isEqualToString:@"com.hydra.projectx"]) {
         return NO;
     }
     
@@ -619,7 +628,8 @@ static BOOL isUUIDKey(NSString *key) {
     @autoreleasepool {
         // Skip for system processes
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (!bundleID || [bundleID hasPrefix:@"com.apple."]) {
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        if (!bundleID || ([bundleID hasPrefix:@"com.apple."] && !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc)))) {
             return;
         }
         
