@@ -817,9 +817,9 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 
 %hook WebGLRenderingContext
 
-// Hook for WebGL vendor and renderer strings
-- (NSString *)getParameter:(unsigned)pname {
-    NSString *original = %orig;
+// WebKit returns `id` (string/number/array/etc). Returning the wrong type can break JS.
+- (id)getParameter:(unsigned)pname {
+    id original = %orig;
     
     if (!isSpoofingEnabled()) {
         return original;
@@ -837,7 +837,7 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
     
     // Map WebGL parameter constants to our stored values
     // VENDOR = 0x1F00, RENDERER = 0x1F01, VERSION = 0x1F02
-    NSString *spoofedValue = nil;
+    id spoofedValue = nil;
     
     if (pname == 0x1F00) { // VENDOR
         spoofedValue = webGLInfo[@"webglVendor"];
@@ -848,9 +848,15 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
     } else if (pname == 0x8B4F || pname == 0x8B4E) { // UNMASKED_VENDOR_WEBGL or UNMASKED_RENDERER_WEBGL
         spoofedValue = (pname == 0x8B4F) ? webGLInfo[@"unmaskedVendor"] : webGLInfo[@"unmaskedRenderer"];
     } else if (pname == 0x0D33) { // MAX_TEXTURE_SIZE
-        return [NSString stringWithFormat:@"%@", webGLInfo[@"maxTextureSize"]];
+        id v = webGLInfo[@"maxTextureSize"];
+        if ([v isKindOfClass:[NSNumber class]]) return v;
+        if ([v respondsToSelector:@selector(integerValue)]) return @([v integerValue]);
+        return original;
     } else if (pname == 0x8D57) { // MAX_RENDERBUFFER_SIZE
-        return [NSString stringWithFormat:@"%@", webGLInfo[@"maxRenderBufferSize"]];
+        id v = webGLInfo[@"maxRenderBufferSize"];
+        if ([v isKindOfClass:[NSNumber class]]) return v;
+        if ([v respondsToSelector:@selector(integerValue)]) return @([v integerValue]);
+        return original;
     }
     
     if (spoofedValue) {
@@ -1113,140 +1119,6 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
         [cachedBundleDecisions removeAllObjects];
     }
 }
-
-#pragma mark - Canvas Fingerprinting Protection
-
-// Add hooks for canvas toDataURL and getImageData to prevent canvas fingerprinting
-%hook WKWebView
-
-// Add JavaScript to protect against canvas fingerprinting 
-- (void)_didCreateMainFrame:(WKFrameInfo *)frame {
-    %orig;
-    
-    if (!isSpoofingEnabled()) {
-        return;
-    }
-    
-    NSString *deviceModel = getSpoofedDeviceModel();
-    if (!deviceModel) {
-        return;
-    }
-    
-    // Create a hash value from the device model to generate consistent noise
-    NSUInteger deviceModelHash = [deviceModel hash];
-    
-    // This script adds noise to canvas operations in a way that's consistent for the same device model
-    NSString *canvasProtectionScript = [NSString stringWithFormat:
-                                       @"(function() {"
-                                       // Store original methods before modifying them
-                                       @"  const origToDataURL = HTMLCanvasElement.prototype.toDataURL;"
-                                       @"  const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;"
-                                       @"  const origReadPixels = WebGLRenderingContext.prototype.readPixels;"
-                                       
-                                       // Define a noise function based on spoofed device model
-                                       @"  const deviceSeed = %lu;"
-                                       @"  function generateNoise(input) {"
-                                       @"    let hash = (deviceSeed * 131 + input) & 0xFFFFFFFF;"
-                                       @"    return (hash / 0xFFFFFFFF) * 2 - 1;"  // -1 to +1 range
-                                       @"  }"
-                                       
-                                       // Hook 2D Canvas toDataURL
-                                       @"  HTMLCanvasElement.prototype.toDataURL = function() {"
-                                       @"    try {"
-                                       @"      const context = this.getContext('2d');"
-                                       @"      if (context && this.width > 16 && this.height > 16) {"
-                                       @"        // Subtly modify the canvas content in a consistent way"
-                                       @"        const imgData = context.getImageData(0, 0, 2, 2);"
-                                       @"        if (imgData && imgData.data) {"
-                                       @"          // Add subtle, deterministic noise to a small portion"
-                                       @"          for (let i = 0; i < imgData.data.length; i += 4) {"
-                                       @"            const noise = generateNoise(i) * 0.5;"
-                                       @"            imgData.data[i] = Math.min(255, Math.max(0, imgData.data[i] + noise));"
-                                       @"          }"
-                                       @"          context.putImageData(imgData, 0, 0);"
-                                       @"        }"
-                                       @"      }"
-                                       @"    } catch(e) {}"
-                                       @"    return origToDataURL.apply(this, arguments);"
-                                       @"  };"
-                                       
-                                       // Hook 2D Canvas getImageData
-                                       @"  CanvasRenderingContext2D.prototype.getImageData = function() {"
-                                       @"    const imgData = origGetImageData.apply(this, arguments);"
-                                       @"    try {"
-                                       @"      // Add consistent noise to the image data"
-                                       @"      if (imgData && imgData.data && imgData.data.length > 0) {"
-                                       @"        // Only modify a small percentage of pixels to avoid visual detection"
-                                       @"        for (let i = 0; i < imgData.data.length; i += 40) {"
-                                       @"          const noise = generateNoise(i) * 1.0;"
-                                       @"          imgData.data[i] = Math.min(255, Math.max(0, imgData.data[i] + noise));"
-                                       @"        }"
-                                       @"      }"
-                                       @"    } catch(e) {}"
-                                       @"    return imgData;"
-                                       @"  };"
-                                       
-                                       // Hook WebGL readPixels
-                                       @"  WebGLRenderingContext.prototype.readPixels = function(x, y, width, height, format, type, pixels) {"
-                                       @"    // First perform the regular pixel read"
-                                       @"    origReadPixels.apply(this, arguments);"
-                                       @"    try {"
-                                       @"      // Then apply consistent noise to the output"
-                                       @"      if (pixels && pixels.length > 0) {"
-                                       @"        for (let i = 0; i < pixels.length; i += 50) {"
-                                       @"          const pixelIndex = i %% pixels.length;"
-                                       @"          const noise = generateNoise(pixelIndex) * 1.0;"
-                                       @"          pixels[pixelIndex] = Math.min(255, Math.max(0, pixels[pixelIndex] + noise));"
-                                       @"        }"
-                                       @"      }"
-                                       @"    } catch(e) {}"
-                                       @"    return;"
-                                       @"  };"
-                                       
-                                       // Prevent canvas font fingerprinting
-                                       @"  const origMeasureText = CanvasRenderingContext2D.prototype.measureText;"
-                                       @"  CanvasRenderingContext2D.prototype.measureText = function(text) {"
-                                       @"    const result = origMeasureText.apply(this, arguments);"
-                                       @"    // Add tiny noise to font measurement consistent with device model"
-                                       @"    const noise = (generateNoise(text.length) * 0.1) + 1.0;"
-                                       @"    const origWidth = result.width;"
-                                       @"    Object.defineProperty(result, 'width', { value: origWidth * noise });"
-                                       @"    return result;"
-                                       @"  };"
-                                       
-                                       // Extra protection for text rendering
-                                       @"  const origFillText = CanvasRenderingContext2D.prototype.fillText;"
-                                       @"  CanvasRenderingContext2D.prototype.fillText = function(text, x, y, maxWidth) {"
-                                       @"    // Add subtle position variation consistent with device model"
-                                       @"    const xNoise = generateNoise(text.length * 31) * 0.2;"
-                                       @"    const yNoise = generateNoise(text.length * 37) * 0.2;"
-                                       @"    const newX = x + xNoise;"
-                                       @"    const newY = y + yNoise;"
-                                       @"    if (arguments.length < 4) {"
-                                       @"      return origFillText.call(this, text, newX, newY);"
-                                       @"    } else {"
-                                       @"      return origFillText.call(this, text, newX, newY, maxWidth);"
-                                       @"    }"
-                                       @"  };"
-                                       
-                                       @"})();",
-                                       (unsigned long)deviceModelHash];
-    
-    // Execute the script
-    [self evaluateJavaScript:canvasProtectionScript completionHandler:^(id result, NSError *error) {
-        if (error) {
-            PXLog(@"[DeviceSpec] Error injecting canvas protection script: %@", error);
-        } else {
-            static BOOL loggedCanvasProtection = NO;
-            if (!loggedCanvasProtection) {
-                PXLog(@"[DeviceSpec] Successfully injected canvas fingerprinting protection for %@", deviceModel);
-                loggedCanvasProtection = YES;
-            }
-        }
-    }];
-}
-
-%end
 
 #pragma mark - CPU Core Spoofing Enhancements
 
