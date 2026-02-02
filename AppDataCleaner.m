@@ -4916,6 +4916,80 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     }
 }
 
+- (void)_scrubWebKitStateInSharedContainerBase:(NSString *)base tag:(NSString *)tag {
+    if (!base.length) return;
+    if (![_fileManager fileExistsAtPath:base]) {
+        [self logMessage:@"[AppDataCleaner] %@ shared base missing: %@", tag ?: @"", base];
+        return;
+    }
+
+    NSArray *uuids = [self listDirectoriesInPath:base];
+    [self logMessage:@"[AppDataCleaner] %@ scrub scan %@ (count=%lu)", tag ?: @"", base, (unsigned long)uuids.count];
+
+    for (NSString *uuid in uuids) {
+        if (![uuid isKindOfClass:[NSString class]] || !uuid.length) continue;
+        NSString *containerPath = [NSString stringWithFormat:@"%@/%@", base, uuid];
+        NSString *metadataPath = [containerPath stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"]; 
+        NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+        NSString *ident = [metadata[@"MCMMetadataIdentifier"] isKindOfClass:[NSString class]] ? metadata[@"MCMMetadataIdentifier"] : nil;
+
+        // Detect Safari/WebKit state by structure, not identifier (ident can be opaque on some builds).
+        NSArray<NSString *> *pathsToNuke = @[
+            @"Library/WebKit",
+            @"Library/Safari",
+            @"Library/Cookies",
+            @"Library/HTTPStorages",
+            @"Library/Caches/com.apple.Safari",
+            @"Library/Caches/com.apple.mobilesafari",
+            @"Library/Caches/com.apple.SafariViewService"
+        ];
+        BOOL hasAny = NO;
+        for (NSString *rel in pathsToNuke) {
+            NSString *p = [containerPath stringByAppendingPathComponent:rel];
+            if ([_fileManager fileExistsAtPath:p]) { hasAny = YES; break; }
+        }
+
+        // Also detect any WebKit caches via glob patterns.
+        if (!hasAny) {
+            NSString *caches = [containerPath stringByAppendingPathComponent:@"Library/Caches"]; 
+            if ([_fileManager fileExistsAtPath:caches]) {
+                // Cheap heuristic: if any entry begins with com.apple.WebKit.
+                NSArray *entries = [_fileManager contentsOfDirectoryAtPath:caches error:nil];
+                for (NSString *e in entries) {
+                    if ([[e lowercaseString] containsString:@"webkit"] || [[e lowercaseString] containsString:@"safari"]) {
+                        hasAny = YES;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (!hasAny) continue;
+
+        [self logMessage:@"[AppDataCleaner] %@ scrubbing container=%@ ident=%@", tag ?: @"", containerPath, ident ?: @""];
+
+        // Kill helpers again to reduce races.
+        PXStopSafariDaemonsBestEffort(self);
+
+        for (NSString *rel in pathsToNuke) {
+            NSString *p = [containerPath stringByAppendingPathComponent:rel];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@' 2>/dev/null || true", p]];
+        }
+
+        // Nuke WebKit caches with both dot and dash variants.
+        NSString *cachesDir = [containerPath stringByAppendingPathComponent:@"Library/Caches"]; 
+        if ([_fileManager fileExistsAtPath:cachesDir]) {
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/com.apple.WebKit.* '%@'/com.apple.WebKit-* 2>/dev/null || true", cachesDir, cachesDir]];
+        }
+
+        // Remove any Safari/WebKit preferences under the container.
+        NSString *prefsDir = [containerPath stringByAppendingPathComponent:@"Library/Preferences"]; 
+        if ([_fileManager fileExistsAtPath:prefsDir]) {
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -f '%@'/com.apple.Safari*.plist '%@'/com.apple.WebKit*.plist 2>/dev/null || true", prefsDir, prefsDir]];
+        }
+    }
+}
+
 - (void)_wipeMobileSafariSystemStores {
     [self logMessage:@"[AppDataCleaner] MobileSafari: wiping global Safari/WebKit/Cookies stores..."];
 
@@ -5139,6 +5213,12 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     [self _wipeContainersInBasePaths:@[@"/var/mobile/Containers/Shared/AppGroup", @"/containers/Shared/AppGroup"]
                   matchingSubstrings:@[@"webkit", @"safariviewservice", @"mobilesafari"]
                                 tag:@"MobileSafari(appgroup)"];
+
+    // Final fallback: scrub WebKit/Safari state by filesystem structure inside shared containers.
+    [self _scrubWebKitStateInSharedContainerBase:@"/var/mobile/Containers/Shared/AppGroup" tag:@"MobileSafari(appgroup-scrub)"];
+    [self _scrubWebKitStateInSharedContainerBase:@"/containers/Shared/AppGroup" tag:@"MobileSafari(appgroup-scrub)"];
+    [self _scrubWebKitStateInSharedContainerBase:@"/var/mobile/Containers/Shared/SystemGroup" tag:@"MobileSafari(systemgroup-scrub)"];
+    [self _scrubWebKitStateInSharedContainerBase:@"/containers/Shared/SystemGroup" tag:@"MobileSafari(systemgroup-scrub)"];
 
     // Optional: SafeBrowsing can persist per-user browsing state.
     [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/SafariSafeBrowsing 2>/dev/null || true"]; 
