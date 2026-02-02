@@ -397,6 +397,152 @@ static BOOL PXIsSensitiveAuthHost(NSString *host) {
            PXHostMatchesSuffix(host, @"recaptcha.net");
 }
 
+// ---- UA Debug Toggles (runtime, plist-driven) ----
+// Stored in com.weaponx.securitySettings.plist (same file as other settings)
+
+typedef struct {
+    BOOL masterEnabled;
+    BOOL traceEnabled;
+
+    BOOL scopeSafari;
+    BOOL scopeSafariViewService;
+    BOOL scopeWebKit;
+
+    BOOL hook_allowedTopLevelWebView;
+    BOOL hook_init;
+    BOOL hook_setCustomUserAgent;
+    BOOL hook_evaluateJavaScript;
+    BOOL hook_appNameUA;
+    BOOL hook_requestHeaderUA;
+    BOOL hook_sfUserAgentWithDomain;
+    BOOL hook_sfDefaultUA;
+
+    BOOL sensitiveHostExemptionsEnabled;
+} PXUADebugSettings;
+
+static PXUADebugSettings gUADebug;
+static BOOL gUADebugValid = NO;
+static NSTimeInterval gUADebugLastRead = 0;
+
+static void PXUADebugInvalidate(void) {
+    gUADebugValid = NO;
+}
+
+static NSDictionary *PXReadSecuritySettingsDict(void) {
+    NSArray<NSString *> *paths = @[
+        @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
+        @"/private/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist"
+    ];
+    for (NSString *p in paths) {
+        NSDictionary *d = [NSDictionary dictionaryWithContentsOfFile:p];
+        if ([d isKindOfClass:[NSDictionary class]]) return d;
+    }
+    return nil;
+}
+
+static id PXSecuritySettingObject(NSString *key) {
+    NSDictionary *d = PXReadSecuritySettingsDict();
+    if ([d isKindOfClass:[NSDictionary class]] && d[key] != nil) {
+        return d[key];
+    }
+    NSUserDefaults *ud = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+    return [ud objectForKey:key];
+}
+
+static BOOL PXSecuritySettingBoolDefault(NSString *key, BOOL def) {
+    id v = PXSecuritySettingObject(key);
+    return v ? [v boolValue] : def;
+}
+
+static void PXUADebugEnsure(void) {
+    NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
+    if (gUADebugValid && (now - gUADebugLastRead) < 1.0) {
+        return;
+    }
+    gUADebugLastRead = now;
+
+    // Default: master OFF (no behavior change)
+    BOOL master = PXSecuritySettingBoolDefault(@"debugSafariUAMasterEnabled", NO);
+    gUADebug.masterEnabled = master;
+    gUADebug.traceEnabled = PXSecuritySettingBoolDefault(@"debugSafariUATraceEnabled", NO);
+
+    // Defaults when master ON: everything enabled
+    gUADebug.scopeSafari = PXSecuritySettingBoolDefault(@"debugSafariUAScope_applySafari", YES);
+    gUADebug.scopeSafariViewService = PXSecuritySettingBoolDefault(@"debugSafariUAScope_applySafariViewService", YES);
+    gUADebug.scopeWebKit = PXSecuritySettingBoolDefault(@"debugSafariUAScope_applyWebKit", YES);
+
+    gUADebug.hook_allowedTopLevelWebView = PXSecuritySettingBoolDefault(@"debugSafariUA_WKWebView_allowedTopLevelWebView", YES);
+    gUADebug.hook_init = PXSecuritySettingBoolDefault(@"debugSafariUA_WKWebView_init", YES);
+    gUADebug.hook_setCustomUserAgent = PXSecuritySettingBoolDefault(@"debugSafariUA_WKWebView_setCustomUserAgent", YES);
+    gUADebug.hook_evaluateJavaScript = PXSecuritySettingBoolDefault(@"debugSafariUA_WKWebView_evaluateJavaScript", YES);
+    gUADebug.hook_appNameUA = PXSecuritySettingBoolDefault(@"debugSafariUA_WKWebViewConfiguration_appNameUA", YES);
+    gUADebug.hook_requestHeaderUA = PXSecuritySettingBoolDefault(@"debugSafariUA_NSURLRequest_setHeaderUA", YES);
+    gUADebug.hook_sfUserAgentWithDomain = PXSecuritySettingBoolDefault(@"debugSafariUA_SFUserAgentController_userAgentWithDomain", YES);
+    gUADebug.hook_sfDefaultUA = PXSecuritySettingBoolDefault(@"debugSafariUA_SFUserAgentController_defaultUA", YES);
+
+    // Defaults: exemptions ON
+    gUADebug.sensitiveHostExemptionsEnabled = PXSecuritySettingBoolDefault(@"debugSafariUA_SensitiveHostExemptionsEnabled", YES);
+
+    gUADebugValid = YES;
+}
+
+static BOOL PXUADebugMasterEnabled(void) {
+    PXUADebugEnsure();
+    return gUADebug.masterEnabled;
+}
+
+static BOOL PXUADebugTraceEnabled(void) {
+    PXUADebugEnsure();
+    return gUADebug.traceEnabled;
+}
+
+static BOOL PXUADebugScopeAllows(NSString *bundleID, NSString *processName) {
+    PXUADebugEnsure();
+    if (!gUADebug.masterEnabled) return YES;
+
+    BOOL isSafari = [bundleID isEqualToString:@"com.apple.mobilesafari"];
+    BOOL isSafariViewService = [bundleID isEqualToString:@"com.apple.SafariViewService"] ||
+                               ([processName isKindOfClass:[NSString class]] && [processName containsString:@"SafariViewService"]);
+    BOOL isWebKit = ([bundleID hasPrefix:@"com.apple.WebKit"] ||
+                     ([processName isKindOfClass:[NSString class]] && [processName containsString:@"WebKit"]));
+
+    if (isSafari) return gUADebug.scopeSafari;
+    if (isSafariViewService) return gUADebug.scopeSafariViewService;
+    if (isWebKit) return gUADebug.scopeWebKit;
+    return YES;
+}
+
+static BOOL PXUAHostIsSensitive(NSString *hostOrDomain) {
+    if (!hostOrDomain.length) return NO;
+    PXUADebugEnsure();
+    if (gUADebug.masterEnabled && !gUADebug.sensitiveHostExemptionsEnabled) {
+        return NO;
+    }
+    return PXIsSensitiveAuthHost(hostOrDomain);
+}
+
+static void PXUADebugTrace(NSString *hookName,
+                           NSString *bundleID,
+                           NSString *processName,
+                           NSString *host,
+                           NSString *decision,
+                           NSString *reason,
+                           NSString *uaBefore,
+                           NSString *uaAfter) {
+    if (!PXUADebugTraceEnabled()) return;
+    NSString *h = host.length ? host : @"(nil)";
+    NSString *b = bundleID.length ? bundleID : @"(nil)";
+    NSString *p = processName.length ? processName : @"(nil)";
+    NSString *r = reason.length ? reason : @"";
+    if (uaBefore.length || uaAfter.length) {
+        IOSVERSION_LOG(@"[UADebug] hook=%@ bid=%@ proc=%@ host=%@ decision=%@ %@ ua='%@' -> '%@'",
+                       hookName, b, p, h, decision, r, uaBefore ?: @"", uaAfter ?: @"");
+    } else {
+        IOSVERSION_LOG(@"[UADebug] hook=%@ bid=%@ proc=%@ host=%@ decision=%@ %@",
+                       hookName, b, p, h, decision, r);
+    }
+}
+
 // Helper function to modify a user agent string with the spoofed iOS version
 static void modifyUserAgentString(NSString **userAgentString, NSString *originalVersion, NSString *spoofedVersion) {
     if (!userAgentString || !*userAgentString || !spoofedVersion || !originalVersion) {
@@ -597,15 +743,25 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        if (PXUADebugMasterEnabled() && !PXUADebugScopeAllows(bundleID, proc)) {
+            PXUADebugTrace(@"WKWebView._allowedTopLevelWebView", bundleID, proc, resultWebView.URL.host, @"skip", @"reason=scope", nil, nil);
+            return resultWebView;
+        }
+        if (PXUADebugMasterEnabled() && !gUADebug.hook_allowedTopLevelWebView) {
+            PXUADebugTrace(@"WKWebView._allowedTopLevelWebView", bundleID, proc, resultWebView.URL.host, @"skip", @"reason=toggle", nil, nil);
+            return resultWebView;
+        }
         // Special case for Safari/Auth stack processes to force spoofing (even if not scoped)
         BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
-                                  PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
-        
+                                  PXIsSafariStackProcess(bundleID, proc);
+         
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && resultWebView) {
             // For Safari/Auth stack, avoid setting a global UA before we know the host.
             if (forceSpoofForWebKit) {
                 NSString *host = resultWebView.URL.host;
-                if (!host.length || PXIsSensitiveAuthHost(host)) {
+                if (!host.length || PXUAHostIsSensitive(host)) {
+                    PXUADebugTrace(@"WKWebView._allowedTopLevelWebView", bundleID, proc, host, @"skip", @"reason=host", nil, nil);
                     return resultWebView;
                 }
             }
@@ -624,6 +780,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                             // Set the new user agent if it changed
                             if (![modifiedUA isEqualToString:userAgent]) {
                                 if ([resultWebView respondsToSelector:@selector(setCustomUserAgent:)]) {
+                                    PXUADebugTrace(@"WKWebView._allowedTopLevelWebView", bundleID, proc, resultWebView.URL.host, @"modify", @"", userAgent, modifiedUA);
                                     [resultWebView setCustomUserAgent:modifiedUA];
                                     IOSVERSION_LOG(@"Set modified user agent for WebView in %@", bundleID);
                                 }
@@ -646,15 +803,25 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        if (PXUADebugMasterEnabled() && !PXUADebugScopeAllows(bundleID, proc)) {
+            PXUADebugTrace(@"WKWebView.init", bundleID, proc, webView.URL.host, @"skip", @"reason=scope", nil, nil);
+            return webView;
+        }
+        if (PXUADebugMasterEnabled() && !gUADebug.hook_init) {
+            PXUADebugTrace(@"WKWebView.init", bundleID, proc, webView.URL.host, @"skip", @"reason=toggle", nil, nil);
+            return webView;
+        }
         // Special case for Safari/Auth stack processes to force spoofing (even if not scoped)
         BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
-                                  PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
-        
+                                  PXIsSafariStackProcess(bundleID, proc);
+         
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && webView) {
             // For Safari/Auth stack, avoid setting a global UA before we know the host.
             if (forceSpoofForWebKit) {
                 NSString *host = webView.URL.host;
-                if (!host.length || PXIsSensitiveAuthHost(host)) {
+                if (!host.length || PXUAHostIsSensitive(host)) {
+                    PXUADebugTrace(@"WKWebView.init", bundleID, proc, host, @"skip", @"reason=host", nil, nil);
                     return webView;
                 }
             }
@@ -698,6 +865,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                                 modifyUserAgentString(&modifiedUA, originalVersion, spoofedVersion);
                                 
                                 if (![modifiedUA isEqualToString:userAgent]) {
+                                    PXUADebugTrace(@"WKWebView.init", bundleID, proc, webView.URL.host, @"modify", @"", userAgent, modifiedUA);
                                     [webView setCustomUserAgent:modifiedUA];
                                     IOSVERSION_LOG(@"Set custom user agent from default: %@ → %@", userAgent, modifiedUA);
                                 }
@@ -718,14 +886,26 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 - (void)setCustomUserAgent:(NSString *)customUserAgent {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        if (PXUADebugMasterEnabled() && !PXUADebugScopeAllows(bundleID, proc)) {
+            PXUADebugTrace(@"WKWebView.setCustomUserAgent", bundleID, proc, self.URL.host, @"skip", @"reason=scope", customUserAgent, nil);
+            %orig;
+            return;
+        }
+        if (PXUADebugMasterEnabled() && !gUADebug.hook_setCustomUserAgent) {
+            PXUADebugTrace(@"WKWebView.setCustomUserAgent", bundleID, proc, self.URL.host, @"skip", @"reason=toggle", customUserAgent, nil);
+            %orig;
+            return;
+        }
         // Special case for Safari/Auth stack processes to force spoofing (even if not scoped)
         BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
-                                  PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
-        
+                                  PXIsSafariStackProcess(bundleID, proc);
+         
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && customUserAgent) {
             if (forceSpoofForWebKit) {
                 NSString *host = self.URL.host;
-                if (!host.length || PXIsSensitiveAuthHost(host)) {
+                if (!host.length || PXUAHostIsSensitive(host)) {
+                    PXUADebugTrace(@"WKWebView.setCustomUserAgent", bundleID, proc, host, @"skip", @"reason=host", customUserAgent, nil);
                     %orig;
                     return;
                 }
@@ -738,6 +918,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                 modifyUserAgentString(&modifiedUA, originalVersion, spoofedVersion);
                 
                 if (![modifiedUA isEqualToString:customUserAgent]) {
+                    PXUADebugTrace(@"WKWebView.setCustomUserAgent", bundleID, proc, self.URL.host, @"modify", @"", customUserAgent, modifiedUA);
                     IOSVERSION_LOG(@"Setting modified custom UA: %@ → %@", customUserAgent, modifiedUA);
                     %orig(modifiedUA);
                     return;
@@ -763,19 +944,30 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     // If it's a user agent script, try to update the user agent
     if (isUserAgentScript) {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        if (PXUADebugMasterEnabled() && !PXUADebugScopeAllows(bundleID, proc)) {
+            PXUADebugTrace(@"WKWebView.evaluateJavaScript", bundleID, proc, self.URL.host, @"skip", @"reason=scope", nil, nil);
+            return;
+        }
+        if (PXUADebugMasterEnabled() && !gUADebug.hook_evaluateJavaScript) {
+            PXUADebugTrace(@"WKWebView.evaluateJavaScript", bundleID, proc, self.URL.host, @"skip", @"reason=toggle", nil, nil);
+            return;
+        }
         // Special case for Safari/Auth stack processes to force spoofing (even if not scoped)
         BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
-                                  PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
+                                  PXIsSafariStackProcess(bundleID, proc);
         
         if (forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) {
             // For Safari/Auth stack, only touch UA when host is known and not sensitive.
             NSString *host = self.URL.host;
             if (forceSpoofForWebKit) {
-                if (!host.length || PXIsSensitiveAuthHost(host)) {
+                if (!host.length || PXUAHostIsSensitive(host)) {
+                    PXUADebugTrace(@"WKWebView.evaluateJavaScript", bundleID, proc, host, @"skip", @"reason=host", nil, nil);
                     return;
                 }
             } else {
-                if (PXIsSensitiveAuthHost(host)) {
+                if (PXUAHostIsSensitive(host)) {
+                    PXUADebugTrace(@"WKWebView.evaluateJavaScript", bundleID, proc, host, @"skip", @"reason=sensitive", nil, nil);
                     return;
                 }
             }
@@ -791,6 +983,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                         modifyUserAgentString(&modifiedUA, originalVersion, spoofedVersion);
                         
                         if (![modifiedUA isEqualToString:currentUA]) {
+                            PXUADebugTrace(@"WKWebView.evaluateJavaScript", bundleID, proc, self.URL.host, @"modify", @"", currentUA, modifiedUA);
                             [self setCustomUserAgent:modifiedUA];
                             IOSVERSION_LOG(@"Updated UA after JS evaluation: %@ → %@", currentUA, modifiedUA);
                         }
@@ -810,10 +1003,22 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
 - (void)setApplicationNameForUserAgent:(NSString *)applicationNameForUserAgent {
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        if (PXUADebugMasterEnabled() && !PXUADebugScopeAllows(bundleID, proc)) {
+            PXUADebugTrace(@"WKWebViewConfiguration.setApplicationNameForUserAgent", bundleID, proc, nil, @"skip", @"reason=scope", applicationNameForUserAgent, nil);
+            %orig;
+            return;
+        }
+        if (PXUADebugMasterEnabled() && !gUADebug.hook_appNameUA) {
+            PXUADebugTrace(@"WKWebViewConfiguration.setApplicationNameForUserAgent", bundleID, proc, nil, @"skip", @"reason=toggle", applicationNameForUserAgent, nil);
+            %orig;
+            return;
+        }
         // Don't mutate UA at configuration time for Safari/Auth stack; host is unknown here.
         BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
-                                  PXIsSafariStackProcess(bundleID, [NSProcessInfo processInfo].processName);
+                                  PXIsSafariStackProcess(bundleID, proc);
         if (forceSpoofForWebKit) {
+            PXUADebugTrace(@"WKWebViewConfiguration.setApplicationNameForUserAgent", bundleID, proc, nil, @"skip", @"reason=safaristack", applicationNameForUserAgent, nil);
             %orig;
             return;
         }
@@ -827,6 +1032,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                 modifyUserAgentString(&modifiedName, originalVersion, spoofedVersion);
                 
                 if (![modifiedName isEqualToString:applicationNameForUserAgent]) {
+                    PXUADebugTrace(@"WKWebViewConfiguration.setApplicationNameForUserAgent", bundleID, proc, nil, @"modify", @"", applicationNameForUserAgent, modifiedName);
                     %orig(modifiedName);
                     return;
                 }
@@ -849,9 +1055,21 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     @try {
         if ([field isEqualToString:@"User-Agent"] && value) {
             NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+            NSString *proc = [NSProcessInfo processInfo].processName;
+            if (PXUADebugMasterEnabled() && !PXUADebugScopeAllows(bundleID, proc)) {
+                PXUADebugTrace(@"NSMutableURLRequest.setValue(User-Agent)", bundleID, proc, self.URL.host, @"skip", @"reason=scope", value, nil);
+                %orig;
+                return;
+            }
+            if (PXUADebugMasterEnabled() && !gUADebug.hook_requestHeaderUA) {
+                PXUADebugTrace(@"NSMutableURLRequest.setValue(User-Agent)", bundleID, proc, self.URL.host, @"skip", @"reason=toggle", value, nil);
+                %orig;
+                return;
+            }
             if (shouldSpoofForBundle(bundleID)) {
                 NSString *host = self.URL.host;
-                if (PXIsSensitiveAuthHost(host)) {
+                if (PXUAHostIsSensitive(host)) {
+                    PXUADebugTrace(@"NSMutableURLRequest.setValue(User-Agent)", bundleID, proc, host, @"skip", @"reason=sensitive", value, nil);
                     %orig;
                     return;
                 }
@@ -863,6 +1081,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                     modifyUserAgentString(&modifiedValue, originalVersion, spoofedVersion);
                     
                     if (![modifiedValue isEqualToString:value]) {
+                        PXUADebugTrace(@"NSMutableURLRequest.setValue(User-Agent)", bundleID, proc, host, @"modify", @"", value, modifiedValue);
                         %orig(modifiedValue, field);
                         return;
                     }
@@ -888,8 +1107,18 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        if (PXUADebugMasterEnabled() && !PXUADebugScopeAllows(bundleID, proc)) {
+            PXUADebugTrace(@"SFUserAgentController.userAgentWithDomain", bundleID, proc, domain, @"skip", @"reason=scope", originalUA, nil);
+            return originalUA;
+        }
+        if (PXUADebugMasterEnabled() && !gUADebug.hook_sfUserAgentWithDomain) {
+            PXUADebugTrace(@"SFUserAgentController.userAgentWithDomain", bundleID, proc, domain, @"skip", @"reason=toggle", originalUA, nil);
+            return originalUA;
+        }
         if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
-            if (PXIsSensitiveAuthHost(domain)) {
+            if (PXUAHostIsSensitive(domain)) {
+                PXUADebugTrace(@"SFUserAgentController.userAgentWithDomain", bundleID, proc, domain, @"skip", @"reason=sensitive", originalUA, nil);
                 return originalUA;
             }
             NSString *spoofedVersion = getSpoofedSystemVersion();
@@ -900,6 +1129,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                 modifyUserAgentString(&modifiedUA, originalVersion, spoofedVersion);
                 
                 if (![modifiedUA isEqualToString:originalUA]) {
+                    PXUADebugTrace(@"SFUserAgentController.userAgentWithDomain", bundleID, proc, domain, @"modify", @"", originalUA, modifiedUA);
                     IOSVERSION_LOG(@"Safari: Modified user agent for domain %@", domain);
                     return modifiedUA;
                 }
@@ -917,9 +1147,19 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     
     @try {
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        NSString *proc = [NSProcessInfo processInfo].processName;
+        if (PXUADebugMasterEnabled() && !PXUADebugScopeAllows(bundleID, proc)) {
+            PXUADebugTrace(@"SFUserAgentController.defaultUserAgentString", bundleID, proc, nil, @"skip", @"reason=scope", originalUA, nil);
+            return originalUA;
+        }
+        if (PXUADebugMasterEnabled() && !gUADebug.hook_sfDefaultUA) {
+            PXUADebugTrace(@"SFUserAgentController.defaultUserAgentString", bundleID, proc, nil, @"skip", @"reason=toggle", originalUA, nil);
+            return originalUA;
+        }
         if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
             // Avoid global UA changes for Safari; per-request/domain hooks handle spoofing.
             if (PXSafariStackSpoofEnabled()) {
+                PXUADebugTrace(@"SFUserAgentController.defaultUserAgentString", bundleID, proc, nil, @"skip", @"reason=safaristack", originalUA, nil);
                 return originalUA;
             }
             NSString *spoofedVersion = getSpoofedSystemVersion();
@@ -930,6 +1170,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                 modifyUserAgentString(&modifiedUA, originalVersion, spoofedVersion);
                 
                 if (![modifiedUA isEqualToString:originalUA]) {
+                    PXUADebugTrace(@"SFUserAgentController.defaultUserAgentString", bundleID, proc, nil, @"modify", @"", originalUA, modifiedUA);
                     IOSVERSION_LOG(@"Safari: Modified default user agent");
                     return modifiedUA;
                 }
@@ -1401,6 +1642,9 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
     // Clear version cache
     versionCache = nil;
     lastVersionLoad = 0;
+
+    // Clear UA debug cache (runtime toggles)
+    PXUADebugInvalidate();
 }
 
 // Safe check if a bundle ID is a critical system process
