@@ -4916,6 +4916,57 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     }
 }
 
+- (void)_wipeDataContainersByIdentifierPrefixOrSubstring:(NSArray<NSString *> *)prefixes
+                                              substrings:(NSArray<NSString *> *)substrings
+                                                    tag:(NSString *)tag {
+    NSArray<NSString *> *bases = @[
+        @"/var/mobile/Containers/Data/Application",
+        @"/containers/Data/Application"
+    ];
+    NSMutableArray<NSString *> *pfx = [NSMutableArray array];
+    for (NSString *s in prefixes) {
+        if ([s isKindOfClass:[NSString class]] && s.length) [pfx addObject:s];
+    }
+    NSMutableArray<NSString *> *subs = [NSMutableArray array];
+    for (NSString *s in substrings) {
+        if ([s isKindOfClass:[NSString class]] && s.length) [subs addObject:[s lowercaseString]];
+    }
+
+    NSUInteger matched = 0;
+    for (NSString *base in bases) {
+        if (![_fileManager fileExistsAtPath:base]) continue;
+        NSArray *uuids = [self listDirectoriesInPath:base];
+        [self logMessage:@"[AppDataCleaner] %@ scanning %@ (count=%lu)", tag ?: @"", base, (unsigned long)uuids.count];
+        for (NSString *uuid in uuids) {
+            if (![uuid isKindOfClass:[NSString class]] || !uuid.length) continue;
+            NSString *metadataPath = [NSString stringWithFormat:@"%@/%@/.com.apple.mobile_container_manager.metadata.plist", base, uuid];
+            NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+            NSString *ident = [metadata[@"MCMMetadataIdentifier"] isKindOfClass:[NSString class]] ? metadata[@"MCMMetadataIdentifier"] : nil;
+            if (!ident.length) continue;
+
+            BOOL match = NO;
+            for (NSString *pre in pfx) {
+                if ([ident hasPrefix:pre]) { match = YES; break; }
+            }
+            if (!match) {
+                NSString *lower = [ident lowercaseString];
+                for (NSString *sub in subs) {
+                    if ([lower containsString:sub]) { match = YES; break; }
+                }
+            }
+            if (!match) continue;
+
+            NSString *p = [NSString stringWithFormat:@"%@/%@", base, uuid];
+            matched++;
+            [self logMessage:@"[AppDataCleaner] %@ matched data container: %@ (ident=%@)", tag ?: @"", p, ident];
+            [self completelyWipeContainer:p];
+        }
+    }
+    if (!matched) {
+        [self logMessage:@"[AppDataCleaner] %@ no data containers matched", tag ?: @""];
+    }
+}
+
 - (void)_scrubWebKitStateInSharedContainerBase:(NSString *)base tag:(NSString *)tag {
     if (!base.length) return;
     if (![_fileManager fileExistsAtPath:base]) {
@@ -5193,6 +5244,17 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         @"com.apple.WebKit.GPU"
     ]];
 
+    // Fallback: on some builds these WebKit service containers do not use the exact bundle id.
+    // Wipe any data container whose identifier clearly belongs to Apple WebKit/Safari services.
+    [self _wipeDataContainersByIdentifierPrefixOrSubstring:@[
+        @"com.apple.WebKit.",
+        @"com.apple.safariviewservice",
+        @"com.apple.mobilesafari"
+    ] substrings:@[
+        @"com.apple.webkit",
+        @"safariviewservice"
+    ] tag:@"MobileSafari(webkit-data)"];
+
     // Also wipe SystemGroup containers used by WebKit (common for Safari/SafariViewService).
     [self _wipeRelatedSystemGroupContainersForIdentifiers:@[
         @"systemgroup.com.apple.WebKit",
@@ -5222,6 +5284,10 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
     // Optional: SafeBrowsing can persist per-user browsing state.
     [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/SafariSafeBrowsing 2>/dev/null || true"]; 
+
+    // CFNetwork caches can hold cookie/state caches outside WebKit dir.
+    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.CFNetwork 2>/dev/null || true"]; 
+    [self runCommandWithPrivileges:@"rm -rf /private/var/mobile/Library/Caches/com.apple.CFNetwork 2>/dev/null || true"]; 
 
     sync();
 }
