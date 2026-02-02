@@ -714,24 +714,26 @@ static void PXUASyncApplyToWebViewsForHost(NSString *host, NSString *ua) {
                 if (![h.lowercaseString isEqualToString:host.lowercaseString]) continue;
             }
 
-            // Apply in this process; avoid recursion.
-            gUASyncApplying = YES;
-            @try {
-                if ([wv respondsToSelector:@selector(setCustomUserAgent:)]) {
-                    [wv setCustomUserAgent:ua];
-                }
+            // WKWebView APIs must be called on main thread.
+            dispatch_async(dispatch_get_main_queue(), ^{
+                gUASyncApplying = YES;
+                @try {
+                    if ([wv respondsToSelector:@selector(setCustomUserAgent:)]) {
+                        [wv setCustomUserAgent:ua];
+                    }
 
-                if (injectJS && [wv respondsToSelector:@selector(evaluateJavaScript:completionHandler:)]) {
-                    NSString *escaped = [[ua stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
-                                         stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
-                    NSString *js = [NSString stringWithFormat:
-                                    @"(function(){try{Object.defineProperty(navigator,'userAgent',{get:function(){return '%@';},configurable:true});}catch(e){}})();",
-                                    escaped];
-                    [wv evaluateJavaScript:js completionHandler:nil];
+                    if (injectJS && [wv respondsToSelector:@selector(evaluateJavaScript:completionHandler:)]) {
+                        NSString *escaped = [[ua stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+                                             stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
+                        NSString *js = [NSString stringWithFormat:
+                                        @"(function(){try{Object.defineProperty(navigator,'userAgent',{get:function(){return '%@';},configurable:true});}catch(e){}})();",
+                                        escaped];
+                        [wv evaluateJavaScript:js completionHandler:nil];
+                    }
+                } @catch (__unused NSException *e) {
                 }
-            } @catch (__unused NSException *e) {
-            }
-            gUASyncApplying = NO;
+                gUASyncApplying = NO;
+            });
         }
     });
 }
@@ -746,22 +748,24 @@ static void PXUASyncApplyLastToWebViewIfNeeded(WKWebView *webView) {
     if (!ua.length) return;
 
     BOOL injectJS = PXSecuritySettingBoolDefault(@"uaSyncInjectJS", YES);
-    gUASyncApplying = YES;
-    @try {
-        if ([webView respondsToSelector:@selector(setCustomUserAgent:)]) {
-            [webView setCustomUserAgent:ua];
+    dispatch_async(dispatch_get_main_queue(), ^{
+        gUASyncApplying = YES;
+        @try {
+            if ([webView respondsToSelector:@selector(setCustomUserAgent:)]) {
+                [webView setCustomUserAgent:ua];
+            }
+            if (injectJS && [webView respondsToSelector:@selector(evaluateJavaScript:completionHandler:)]) {
+                NSString *escaped = [[ua stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+                                     stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
+                NSString *js = [NSString stringWithFormat:
+                                @"(function(){try{Object.defineProperty(navigator,'userAgent',{get:function(){return '%@';},configurable:true});}catch(e){}})();",
+                                escaped];
+                [webView evaluateJavaScript:js completionHandler:nil];
+            }
+        } @catch (__unused NSException *e) {
         }
-        if (injectJS && [webView respondsToSelector:@selector(evaluateJavaScript:completionHandler:)]) {
-            NSString *escaped = [[ua stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
-                                 stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
-            NSString *js = [NSString stringWithFormat:
-                            @"(function(){try{Object.defineProperty(navigator,'userAgent',{get:function(){return '%@';},configurable:true});}catch(e){}})();",
-                            escaped];
-            [webView evaluateJavaScript:js completionHandler:nil];
-        }
-    } @catch (__unused NSException *e) {
-    }
-    gUASyncApplying = NO;
+        gUASyncApplying = NO;
+    });
 }
 
 // Helper function to modify a user agent string with the spoofed iOS version
@@ -1029,7 +1033,6 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
         PXUASyncRegisterWKWebView(webView);
         // Best-effort apply most recent UA immediately to reduce header/JS mismatch.
         PXUASyncApplyLastToWebViewIfNeeded(webView);
-        PXUADebugTrace(@"UASync.applyOnInit", [[NSBundle mainBundle] bundleIdentifier], [NSProcessInfo processInfo].processName, webView.URL.host, @"modify", @"", nil, @"(lastUA)");
     }
     
     @try {
@@ -1167,13 +1170,6 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
         IOSVERSION_LOG(@"Error in setCustomUserAgent: %@", e);
     }
     
-    %orig;
-}
-
-- (void)dealloc {
-    if (PXUASyncHeaderAndJSEnabled()) {
-        PXUASyncUnregisterWKWebView(self);
-    }
     %orig;
 }
 
@@ -1907,6 +1903,7 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
     dispatch_async(gWKWebViewsQueue, ^{
         [gUAByHost removeAllObjects];
         gUASyncLastUA = nil;
+        [gWKWebViews compact];
     });
 }
 
