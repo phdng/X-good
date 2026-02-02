@@ -11,6 +11,7 @@
 #import <substrate.h>
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <mach/mach_time.h>
+#import <dispatch/dispatch.h>
 
 #import "PXScope.h"
 
@@ -530,16 +531,66 @@ static void PXUADebugTrace(NSString *hookName,
                            NSString *uaBefore,
                            NSString *uaAfter) {
     if (!PXUADebugTraceEnabled()) return;
+
+    // Optional file logging to avoid relying on syslog.
+    // Enabled by default when trace is enabled; can be disabled via plist key.
+    static dispatch_queue_t logQueue;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        logQueue = dispatch_queue_create("com.hydra.projectx.uadebuglog", DISPATCH_QUEUE_SERIAL);
+    });
+
+    BOOL fileLogEnabled = PXSecuritySettingBoolDefault(@"debugSafariUA_LogFileEnabled", YES);
+    NSString *logPath = @"/var/mobile/Documents/WeaponX_UADebug.log";
     NSString *h = host.length ? host : @"(nil)";
     NSString *b = bundleID.length ? bundleID : @"(nil)";
     NSString *p = processName.length ? processName : @"(nil)";
     NSString *r = reason.length ? reason : @"";
+    NSMutableString *line = [NSMutableString string];
+    NSTimeInterval ts = [[NSDate date] timeIntervalSince1970];
     if (uaBefore.length || uaAfter.length) {
-        IOSVERSION_LOG(@"[UADebug] hook=%@ bid=%@ proc=%@ host=%@ decision=%@ %@ ua='%@' -> '%@'",
-                       hookName, b, p, h, decision, r, uaBefore ?: @"", uaAfter ?: @"");
+        [line appendFormat:@"[%.0f] [UADebug] hook=%@ bid=%@ proc=%@ host=%@ decision=%@ %@ ua='%@' -> '%@'",
+         ts, hookName, b, p, h, decision, r, uaBefore ?: @"", uaAfter ?: @""];
     } else {
-        IOSVERSION_LOG(@"[UADebug] hook=%@ bid=%@ proc=%@ host=%@ decision=%@ %@",
-                       hookName, b, p, h, decision, r);
+        [line appendFormat:@"[%.0f] [UADebug] hook=%@ bid=%@ proc=%@ host=%@ decision=%@ %@",
+         ts, hookName, b, p, h, decision, r];
+    }
+
+    IOSVERSION_LOG(@"%@", line);
+
+    if (fileLogEnabled) {
+        dispatch_async(logQueue, ^{
+            @autoreleasepool {
+                NSFileManager *fm = [NSFileManager defaultManager];
+                // Rotate if too large (2MB)
+                NSDictionary *attrs = [fm attributesOfItemAtPath:logPath error:nil];
+                unsigned long long size = [attrs[NSFileSize] respondsToSelector:@selector(unsignedLongLongValue)] ? [attrs[NSFileSize] unsignedLongLongValue] : 0;
+                if (size > (2ULL * 1024ULL * 1024ULL)) {
+                    NSString *rotated = [logPath stringByAppendingString:@".1"];
+                    [fm removeItemAtPath:rotated error:nil];
+                    [fm moveItemAtPath:logPath toPath:rotated error:nil];
+                }
+
+                if (![fm fileExistsAtPath:logPath]) {
+                    [fm createFileAtPath:logPath contents:nil attributes:@{NSFilePosixPermissions: @(0644)}];
+                }
+
+                NSFileHandle *fh = [NSFileHandle fileHandleForWritingAtPath:logPath];
+                if (!fh) return;
+                @try {
+                    [fh seekToEndOfFile];
+                    NSData *d = [[line stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
+                    if (d) {
+                        [fh writeData:d];
+                    }
+                } @catch (__unused NSException *e) {
+                }
+                @try {
+                    [fh closeFile];
+                } @catch (__unused NSException *e) {
+                }
+            }
+        });
     }
 }
 
