@@ -93,6 +93,31 @@ static NSString *PXSQLiteScalar(sqlite3 *db, NSString *sql) {
     return out;
 }
 
+static BOOL PXSQLiteTableHasColumn(sqlite3 *db, NSString *table, NSString *column) {
+    if (!db || !table.length || !column.length) return NO;
+    NSString *t = [table stringByReplacingOccurrencesOfString:@"'" withString:@"''"]; 
+    NSString *sql = [NSString stringWithFormat:@"PRAGMA table_info('%@');", t];
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(db, sql.UTF8String, -1, &st, NULL);
+    if (rc != SQLITE_OK || !st) {
+        if (st) sqlite3_finalize(st);
+        return NO;
+    }
+    BOOL found = NO;
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char *name = sqlite3_column_text(st, 1); // column name
+        if (name) {
+            NSString *n = [NSString stringWithUTF8String:(const char *)name];
+            if ([n isEqualToString:column]) {
+                found = YES;
+                break;
+            }
+        }
+    }
+    sqlite3_finalize(st);
+    return found;
+}
+
 - (NSString *)_sqliteScalarAtPath:(NSString *)dbPath sql:(NSString *)sql errorOut:(NSString **)errorOut {
     if (!dbPath.length || !sql.length) {
         if (errorOut) *errorOut = @"invalid args";
@@ -2466,15 +2491,46 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     // Clear iCloud accounts info (batch, in-process sqlite to avoid missing sqlite3 tool)
     NSString *accountsDBPath = @"/var/mobile/Library/Accounts/Accounts3.sqlite";
     if ([_fileManager fileExistsAtPath:accountsDBPath] && finalTerms.count) {
-        NSMutableString *sql = [NSMutableString stringWithString:@"PRAGMA busy_timeout=3000; BEGIN IMMEDIATE; "];
-        for (NSString *term in finalTerms.array) {
-            NSString *t = [term stringByReplacingOccurrencesOfString:@"'" withString:@"''"]; 
-            [sql appendFormat:@"DELETE FROM ZACCOUNT WHERE ZNAME LIKE '%%%%%@%%%%' OR ZIDENTIFIER LIKE '%%%%%@%%%%' OR ZOWNINGBUNDLEID LIKE '%%%%%@%%%%'; ", t, t, t];
+        sqlite3 *db = NULL;
+        int rc = sqlite3_open_v2(accountsDBPath.UTF8String, &db, SQLITE_OPEN_READWRITE, NULL);
+        if (rc == SQLITE_OK && db) {
+            sqlite3_busy_timeout(db, 3000);
+
+            // Build a predicate using only columns that exist on this iOS schema.
+            NSMutableArray<NSString *> *cols = [NSMutableArray array];
+            for (NSString *c in @[@"ZIDENTIFIER", @"ZOWNINGBUNDLEID", @"ZUSERNAME", @"ZACCOUNTDESCRIPTION", @"ZDISPLAYNAME", @"ZEMAILADDRESS"]) {
+                if (PXSQLiteTableHasColumn(db, @"ZACCOUNT", c)) {
+                    [cols addObject:c];
+                }
+            }
+            if (!cols.count) {
+                sqlite3_close(db);
+            } else {
+                NSString *errMsg = nil;
+                PXSQLiteExec(db, @"PRAGMA busy_timeout=3000;", NULL);
+                PXSQLiteExec(db, @"BEGIN IMMEDIATE;", &errMsg);
+                if (errMsg.length) {
+                    errMsg = nil;
+                }
+
+                for (NSString *term in finalTerms.array) {
+                    NSString *t = [term stringByReplacingOccurrencesOfString:@"'" withString:@"''"]; 
+                    NSMutableArray<NSString *> *preds = [NSMutableArray array];
+                    for (NSString *c in cols) {
+                        [preds addObject:[NSString stringWithFormat:@"%@ LIKE '%%%%%@%%%%'", c, t]];
+                    }
+                    NSString *where = [preds componentsJoinedByString:@" OR "];
+                    NSString *del = [NSString stringWithFormat:@"DELETE FROM ZACCOUNT WHERE %@;", where];
+                    PXSQLiteExec(db, del, NULL);
+                }
+
+                PXSQLiteExec(db, @"COMMIT;", NULL);
+                PXSQLiteExec(db, @"PRAGMA wal_checkpoint(TRUNCATE);", NULL);
+                sqlite3_close(db);
+            }
+        } else {
+            if (db) sqlite3_close(db);
         }
-        [sql appendString:@"COMMIT;" ];
-        NSString *execErr = nil;
-        [self _sqliteExecAtPath:accountsDBPath sql:sql errorOut:&execErr];
-        [self _sqliteExecAtPath:accountsDBPath sql:@"VACUUM;" errorOut:NULL];
     }
 }
 
@@ -4752,27 +4808,104 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         ]);
         if (accountsDB.length && [_fileManager fileExistsAtPath:accountsDB]) {
             [self logMessage:@"[AppDataCleaner] MobileSafari: removing Google accounts from Accounts3 (shared) ..."]; 
+
+            // Stop accountsd before touching DB (avoid "database is locked").
             [self runCommandWithPrivileges:@"killall -TERM accountsd 2>/dev/null || true"]; 
             [NSThread sleepForTimeInterval:0.2];
             [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
             [NSThread sleepForTimeInterval:0.2];
 
-            NSMutableString *sql = [NSMutableString stringWithString:@"PRAGMA busy_timeout=3000; BEGIN IMMEDIATE; "];
-            // Delete accounts that are backed by Google account types.
-            [sql appendString:@"DELETE FROM ZACCOUNT WHERE ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%google%' OR ZIDENTIFIER LIKE '%gmail%'); "];
-            // Also match by visible name/identifier fields where present.
-            [sql appendString:@"DELETE FROM ZACCOUNT WHERE (ZNAME LIKE '%google%' OR ZNAME LIKE '%gmail%' OR ZIDENTIFIER LIKE '%google%' OR ZIDENTIFIER LIKE '%gmail%'); "];
-            // Best-effort cleanup of orphan rows.
-            [sql appendString:@"DELETE FROM ZACCOUNTPROPERTY WHERE ZOWNER NOT IN (SELECT Z_PK FROM ZACCOUNT); "];
-            [sql appendString:@"DELETE FROM ZCREDENTIALITEM WHERE ZOWNER NOT IN (SELECT Z_PK FROM ZACCOUNT); "];
-            [sql appendString:@"COMMIT;" ];
+            sqlite3 *db = NULL;
+            int rc = sqlite3_open_v2(accountsDB.UTF8String, &db, SQLITE_OPEN_READWRITE, NULL);
+            if (rc != SQLITE_OK || !db) {
+                NSString *msg = db ? [NSString stringWithUTF8String:sqlite3_errmsg(db)] : @"open failed";
+                [self logMessage:@"[AppDataCleaner] MobileSafari: Accounts3 open failed rc=%d %@", rc, msg ?: @""];
+                if (db) sqlite3_close(db);
+            } else {
+                sqlite3_busy_timeout(db, 3000);
 
-            NSString *execErr = nil;
-            [self _sqliteExecAtPath:accountsDB sql:sql errorOut:&execErr];
-            if (execErr.length) {
-                [self logMessage:@"[AppDataCleaner] MobileSafari: Accounts3 cleanup error: %@", execErr];
+                NSString *beforeCount = PXSQLiteScalar(db, @"SELECT count(*) FROM ZACCOUNT;");
+                [self logMessage:@"[AppDataCleaner] MobileSafari: Accounts3 ZACCOUNT count before=%@", beforeCount ?: @"(nil)"];
+
+                NSString *typeCount = PXSQLiteScalar(db, @"SELECT count(*) FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%google%' OR ZIDENTIFIER LIKE '%gmail%';");
+                if (typeCount.length) {
+                    [self logMessage:@"[AppDataCleaner] MobileSafari: google-ish account types=%@", typeCount];
+                }
+
+                BOOL hasZAccountType = PXSQLiteTableHasColumn(db, @"ZACCOUNT", @"ZACCOUNTTYPE");
+
+                NSMutableArray<NSString *> *preds = [NSMutableArray array];
+                if (hasZAccountType) {
+                    [preds addObject:@"ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%google%' OR ZIDENTIFIER LIKE '%gmail%')"]; 
+                }
+                // Match on any existing identifier-like columns.
+                NSArray<NSString *> *maybeCols = @[
+                    @"ZIDENTIFIER",
+                    @"ZUSERNAME",
+                    @"ZACCOUNTDESCRIPTION",
+                    @"ZDISPLAYNAME",
+                    @"ZEMAILADDRESS",
+                    @"ZOWNINGBUNDLEID"
+                ];
+                for (NSString *c in maybeCols) {
+                    if (PXSQLiteTableHasColumn(db, @"ZACCOUNT", c)) {
+                        [preds addObject:[NSString stringWithFormat:@"%@ LIKE '%%google%%' OR %@ LIKE '%%gmail%%'", c, c]];
+                    }
+                }
+
+                NSString *where = preds.count ? [preds componentsJoinedByString:@" OR "] : nil;
+
+                NSString *errMsg = nil;
+                PXSQLiteExec(db, @"PRAGMA busy_timeout=3000;", NULL);
+                PXSQLiteExec(db, @"BEGIN IMMEDIATE;", &errMsg);
+                if (errMsg.length) {
+                    [self logMessage:@"[AppDataCleaner] MobileSafari: BEGIN IMMEDIATE failed %@", errMsg];
+                    errMsg = nil;
+                }
+
+                if (where.length) {
+                    NSString *del = [NSString stringWithFormat:@"DELETE FROM ZACCOUNT WHERE %@;", where];
+                    BOOL ok = PXSQLiteExec(db, del, &errMsg);
+                    int changes = sqlite3_changes(db);
+                    [self logMessage:@"[AppDataCleaner] MobileSafari: ZACCOUNT delete ok=%d changes=%d %@", ok, changes, errMsg.length ? errMsg : @""];
+                    errMsg = nil;
+                } else {
+                    [self logMessage:@"[AppDataCleaner] MobileSafari: Accounts3 schema unknown; skip delete"]; 
+                }
+
+                // Best-effort cleanup of orphan rows (ignore failures if tables don't exist).
+                PXSQLiteExec(db, @"DELETE FROM ZACCOUNTPROPERTY WHERE ZOWNER NOT IN (SELECT Z_PK FROM ZACCOUNT);", NULL);
+                PXSQLiteExec(db, @"DELETE FROM ZCREDENTIALITEM WHERE ZOWNER NOT IN (SELECT Z_PK FROM ZACCOUNT);", NULL);
+
+                PXSQLiteExec(db, @"COMMIT;", &errMsg);
+                if (errMsg.length) {
+                    [self logMessage:@"[AppDataCleaner] MobileSafari: COMMIT failed %@", errMsg];
+                    errMsg = nil;
+                    PXSQLiteExec(db, @"ROLLBACK;", NULL);
+                }
+                PXSQLiteExec(db, @"PRAGMA wal_checkpoint(TRUNCATE);", NULL);
+
+                NSString *afterCount = PXSQLiteScalar(db, @"SELECT count(*) FROM ZACCOUNT;");
+                [self logMessage:@"[AppDataCleaner] MobileSafari: Accounts3 ZACCOUNT count after=%@", afterCount ?: @"(nil)"];
+
+                // Debug sample of account types (helps tune predicates across iOS versions)
+                sqlite3_stmt *st = NULL;
+                if (sqlite3_prepare_v2(db, "SELECT ZIDENTIFIER FROM ZACCOUNTTYPE LIMIT 12;", -1, &st, NULL) == SQLITE_OK && st) {
+                    NSMutableArray *ids = [NSMutableArray array];
+                    while (sqlite3_step(st) == SQLITE_ROW) {
+                        const unsigned char *txt = sqlite3_column_text(st, 0);
+                        if (txt) [ids addObject:[NSString stringWithUTF8String:(const char *)txt]];
+                    }
+                    sqlite3_finalize(st);
+                    if (ids.count) {
+                        [self logMessage:@"[AppDataCleaner] MobileSafari: ZACCOUNTTYPE sample=%@", [ids componentsJoinedByString:@", "]];
+                    }
+                } else if (st) {
+                    sqlite3_finalize(st);
+                }
+
+                sqlite3_close(db);
             }
-            [self _sqliteExecAtPath:accountsDB sql:@"PRAGMA wal_checkpoint(TRUNCATE);" errorOut:NULL];
 
             // Restart accountsd so UI refreshes.
             [self runCommandWithPrivileges:@"killall -TERM accountsd 2>/dev/null || true"]; 
