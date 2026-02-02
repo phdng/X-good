@@ -771,6 +771,14 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 // Inject JavaScript to override navigator.deviceMemory
 - (void)_didFinishLoadForFrame:(WKFrameInfo *)frame {
     %orig;
+
+    // Web compatibility: avoid JS property overrides in Safari/Auth stack.
+    // These hooks can break complex login flows (e.g. Google sign-in) in SafariViewService.
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, proc)) {
+        return;
+    }
     
     if (!isSpoofingEnabled()) {
         return;
@@ -1007,6 +1015,13 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
 // Hook page initialization to spoof cores early
 - (void)_didStartProvisionalLoadForFrame:(WKFrameInfo *)frame {
     %orig;
+
+    // Web compatibility: avoid JS property overrides in Safari/Auth stack.
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, proc)) {
+        return;
+    }
     
     if (!isSpoofingEnabled()) {
         return;
@@ -1044,6 +1059,13 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
 // Hook JavaScript context creation to spoof core count at the earliest possible moment
 - (void)_didCreateJavaScriptContext:(id)context {
     %orig;
+
+    // Web compatibility: avoid JS property overrides in Safari/Auth stack.
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, proc)) {
+        return;
+    }
     
     if (!isSpoofingEnabled()) {
         return;
