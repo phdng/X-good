@@ -118,6 +118,47 @@ static BOOL PXSQLiteTableHasColumn(sqlite3 *db, NSString *table, NSString *colum
     return found;
 }
 
+static void PXSQLiteLogAccountsSample(AppDataCleaner *selfRef, sqlite3 *db, NSString *label) {
+    if (!selfRef || !db) return;
+
+    NSMutableArray<NSString *> *cols = [NSMutableArray array];
+    // Always include primary key if present.
+    if (PXSQLiteTableHasColumn(db, @"ZACCOUNT", @"Z_PK")) [cols addObject:@"Z_PK"]; 
+    if (PXSQLiteTableHasColumn(db, @"ZACCOUNT", @"ZACCOUNTTYPE")) [cols addObject:@"ZACCOUNTTYPE"]; 
+    for (NSString *c in @[@"ZIDENTIFIER", @"ZUSERNAME", @"ZEMAILADDRESS", @"ZDISPLAYNAME", @"ZACCOUNTDESCRIPTION", @"ZOWNINGBUNDLEID"]) {
+        if (PXSQLiteTableHasColumn(db, @"ZACCOUNT", c)) [cols addObject:c];
+    }
+    if (!cols.count) return;
+
+    NSString *select = [NSString stringWithFormat:@"SELECT %@ FROM ZACCOUNT ORDER BY Z_PK LIMIT 10;", [cols componentsJoinedByString:@", "]];
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(db, select.UTF8String, -1, &st, NULL);
+    if (rc != SQLITE_OK || !st) {
+        if (st) sqlite3_finalize(st);
+        return;
+    }
+
+    NSMutableArray *rows = [NSMutableArray array];
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        NSMutableDictionary *row = [NSMutableDictionary dictionary];
+        for (int i = 0; i < (int)cols.count; i++) {
+            const unsigned char *txt = sqlite3_column_text(st, i);
+            if (txt) {
+                row[cols[i]] = [NSString stringWithUTF8String:(const char *)txt];
+            } else {
+                // Integers can come back as NULL in text; try int64.
+                sqlite3_int64 v = sqlite3_column_int64(st, i);
+                row[cols[i]] = [NSString stringWithFormat:@"%lld", v];
+            }
+        }
+        [rows addObject:row];
+    }
+    sqlite3_finalize(st);
+    if (rows.count) {
+        [selfRef logMessage:@"[AppDataCleaner] %@ Accounts3 ZACCOUNT sample=%@", label ?: @"", rows];
+    }
+}
+
 - (NSString *)_sqliteScalarAtPath:(NSString *)dbPath sql:(NSString *)sql errorOut:(NSString **)errorOut {
     if (!dbPath.length || !sql.length) {
         if (errorOut) *errorOut = @"invalid args";
@@ -4791,6 +4832,41 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     }
 }
 
+- (void)_wipeRelatedSystemGroupContainersForIdentifiers:(NSArray<NSString *> *)idents {
+    if (![idents isKindOfClass:[NSArray class]] || idents.count == 0) return;
+
+    NSArray<NSString *> *bases = @[
+        @"/var/mobile/Containers/Shared/SystemGroup",
+        @"/containers/Shared/SystemGroup"
+    ];
+
+    for (NSString *base in bases) {
+        if (![_fileManager fileExistsAtPath:base]) continue;
+        NSArray *uuids = [self listDirectoriesInPath:base];
+        for (NSString *uuid in uuids) {
+            if (![uuid isKindOfClass:[NSString class]] || !uuid.length) continue;
+            NSString *metadataPath = [NSString stringWithFormat:@"%@/%@/.com.apple.mobile_container_manager.metadata.plist", base, uuid];
+            NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+            NSString *ident = [metadata[@"MCMMetadataIdentifier"] isKindOfClass:[NSString class]] ? metadata[@"MCMMetadataIdentifier"] : nil;
+            if (!ident.length) continue;
+
+            BOOL match = NO;
+            for (NSString *needle in idents) {
+                if (![needle isKindOfClass:[NSString class]] || !needle.length) continue;
+                if ([ident isEqualToString:needle] || [ident containsString:needle]) {
+                    match = YES;
+                    break;
+                }
+            }
+            if (!match) continue;
+
+            NSString *p = [NSString stringWithFormat:@"%@/%@", base, uuid];
+            [self logMessage:@"[AppDataCleaner] Related systemgroup container: %@ (ident=%@)", p, ident];
+            [self completelyWipeContainer:p];
+        }
+    }
+}
+
 - (void)_wipeMobileSafariSystemStores {
     [self logMessage:@"[AppDataCleaner] MobileSafari: wiping global Safari/WebKit/Cookies stores..."];
 
@@ -4826,6 +4902,7 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
                 NSString *beforeCount = PXSQLiteScalar(db, @"SELECT count(*) FROM ZACCOUNT;");
                 [self logMessage:@"[AppDataCleaner] MobileSafari: Accounts3 ZACCOUNT count before=%@", beforeCount ?: @"(nil)"];
+                PXSQLiteLogAccountsSample(self, db, @"MobileSafari(before)");
 
                 NSString *typeCount = PXSQLiteScalar(db, @"SELECT count(*) FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%google%' OR ZIDENTIFIER LIKE '%gmail%';");
                 if (typeCount.length) {
@@ -4887,6 +4964,7 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
                 NSString *afterCount = PXSQLiteScalar(db, @"SELECT count(*) FROM ZACCOUNT;");
                 [self logMessage:@"[AppDataCleaner] MobileSafari: Accounts3 ZACCOUNT count after=%@", afterCount ?: @"(nil)"];
+                PXSQLiteLogAccountsSample(self, db, @"MobileSafari(after)");
 
                 // Debug sample of account types (helps tune predicates across iOS versions)
                 sqlite3_stmt *st = NULL;
@@ -4990,6 +5068,18 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         @"com.apple.WebKit.Networking",
         @"com.apple.WebKit.WebContent",
         @"com.apple.WebKit.GPU"
+    ]];
+
+    // Also wipe SystemGroup containers used by WebKit (common for Safari/SafariViewService).
+    [self _wipeRelatedSystemGroupContainersForIdentifiers:@[
+        @"systemgroup.com.apple.WebKit",
+        @"systemgroup.com.apple.WebKit.Networking",
+        @"systemgroup.com.apple.WebKit.WebContent",
+        @"systemgroup.com.apple.WebKit.GPU",
+        @"systemgroup.com.apple.SafariViewService",
+        @"systemgroup.com.apple.mobilesafari",
+        @"com.apple.WebKit",
+        @"com.apple.SafariViewService"
     ]];
 
     // Optional: SafeBrowsing can persist per-user browsing state.
