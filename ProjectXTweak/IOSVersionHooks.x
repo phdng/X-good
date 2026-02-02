@@ -640,6 +640,7 @@ static void PXUASyncInvalidate(void) {
 static dispatch_queue_t gWKWebViewsQueue;
 static NSPointerArray *gWKWebViews; // weak
 static NSMutableDictionary<NSString *, NSString *> *gUAByHost;
+static NSString *gUASyncLastUA;
 static __thread BOOL gUASyncApplying = NO;
 
 static void PXUASyncInitIfNeeded(void) {
@@ -680,6 +681,7 @@ static void PXUASyncRememberHostUA(NSString *host, NSString *ua) {
     PXUASyncInitIfNeeded();
     dispatch_async(gWKWebViewsQueue, ^{
         gUAByHost[host.lowercaseString] = ua;
+        gUASyncLastUA = ua;
     });
 }
 
@@ -698,12 +700,19 @@ static void PXUASyncApplyToWebViewsForHost(NSString *host, NSString *ua) {
     PXUASyncInitIfNeeded();
     dispatch_async(gWKWebViewsQueue, ^{
         [gWKWebViews compact];
+
+        BOOL applyAll = PXSecuritySettingBoolDefault(@"uaSyncApplyAllWebViews", YES);
+        BOOL injectJS = PXSecuritySettingBoolDefault(@"uaSyncInjectJS", YES);
+
         for (NSUInteger i = 0; i < gWKWebViews.count; i++) {
             WKWebView *wv = [gWKWebViews pointerAtIndex:i] ? (__bridge WKWebView *)[gWKWebViews pointerAtIndex:i] : nil;
             if (!wv) continue;
             NSString *h = wv.URL.host;
-            if (!h.length) continue;
-            if (![h.lowercaseString isEqualToString:host.lowercaseString]) continue;
+
+            if (!applyAll) {
+                if (!h.length) continue;
+                if (![h.lowercaseString isEqualToString:host.lowercaseString]) continue;
+            }
 
             // Apply in this process; avoid recursion.
             gUASyncApplying = YES;
@@ -711,11 +720,48 @@ static void PXUASyncApplyToWebViewsForHost(NSString *host, NSString *ua) {
                 if ([wv respondsToSelector:@selector(setCustomUserAgent:)]) {
                     [wv setCustomUserAgent:ua];
                 }
+
+                if (injectJS && [wv respondsToSelector:@selector(evaluateJavaScript:completionHandler:)]) {
+                    NSString *escaped = [[ua stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+                                         stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
+                    NSString *js = [NSString stringWithFormat:
+                                    @"(function(){try{Object.defineProperty(navigator,'userAgent',{get:function(){return '%@';},configurable:true});}catch(e){}})();",
+                                    escaped];
+                    [wv evaluateJavaScript:js completionHandler:nil];
+                }
             } @catch (__unused NSException *e) {
             }
             gUASyncApplying = NO;
         }
     });
+}
+
+static void PXUASyncApplyLastToWebViewIfNeeded(WKWebView *webView) {
+    if (!PXUASyncHeaderAndJSEnabled() || !webView) return;
+    PXUASyncInitIfNeeded();
+    __block NSString *ua = nil;
+    dispatch_sync(gWKWebViewsQueue, ^{
+        ua = gUASyncLastUA;
+    });
+    if (!ua.length) return;
+
+    BOOL injectJS = PXSecuritySettingBoolDefault(@"uaSyncInjectJS", YES);
+    gUASyncApplying = YES;
+    @try {
+        if ([webView respondsToSelector:@selector(setCustomUserAgent:)]) {
+            [webView setCustomUserAgent:ua];
+        }
+        if (injectJS && [webView respondsToSelector:@selector(evaluateJavaScript:completionHandler:)]) {
+            NSString *escaped = [[ua stringByReplacingOccurrencesOfString:@"\\" withString:@"\\\\"]
+                                 stringByReplacingOccurrencesOfString:@"'" withString:@"\\'"];
+            NSString *js = [NSString stringWithFormat:
+                            @"(function(){try{Object.defineProperty(navigator,'userAgent',{get:function(){return '%@';},configurable:true});}catch(e){}})();",
+                            escaped];
+            [webView evaluateJavaScript:js completionHandler:nil];
+        }
+    } @catch (__unused NSException *e) {
+    }
+    gUASyncApplying = NO;
 }
 
 // Helper function to modify a user agent string with the spoofed iOS version
@@ -981,17 +1027,9 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
     // Track instances for UA sync testing.
     if (PXUASyncHeaderAndJSEnabled() && webView) {
         PXUASyncRegisterWKWebView(webView);
-        NSString *host = webView.URL.host;
-        NSString *mappedUA = PXUASyncLookupHostUA(host);
-        if (mappedUA.length && [webView respondsToSelector:@selector(setCustomUserAgent:)]) {
-            gUASyncApplying = YES;
-            @try {
-                [webView setCustomUserAgent:mappedUA];
-                PXUADebugTrace(@"UASync.applyOnInit", [[NSBundle mainBundle] bundleIdentifier], [NSProcessInfo processInfo].processName, host, @"modify", @"", nil, mappedUA);
-            } @catch (__unused NSException *e) {
-            }
-            gUASyncApplying = NO;
-        }
+        // Best-effort apply most recent UA immediately to reduce header/JS mismatch.
+        PXUASyncApplyLastToWebViewIfNeeded(webView);
+        PXUADebugTrace(@"UASync.applyOnInit", [[NSBundle mainBundle] bundleIdentifier], [NSProcessInfo processInfo].processName, webView.URL.host, @"modify", @"", nil, @"(lastUA)");
     }
     
     @try {
@@ -1863,6 +1901,13 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
 
     // Clear UA sync toggle cache
     PXUASyncInvalidate();
+
+    // Clear sync mapping (avoid stale UA across tests)
+    PXUASyncInitIfNeeded();
+    dispatch_async(gWKWebViewsQueue, ^{
+        [gUAByHost removeAllObjects];
+        gUASyncLastUA = nil;
+    });
 }
 
 // Safe check if a bundle ID is a critical system process
