@@ -263,6 +263,7 @@ static void PXStopSafariDaemonsBestEffort(AppDataCleaner *selfRef) {
         @"com.apple.WebKit.WebContent",
         @"com.apple.WebKit.Networking",
         @"com.apple.WebKit.GPU",
+        @"nsurlsessiond",
         @"webbookmarksd"
     ];
     for (NSString *name in names) {
@@ -4692,29 +4693,33 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 - (void)_wipeRelatedDataContainersForBundleIDs:(NSArray<NSString *> *)bundleIDs {
     if (![bundleIDs isKindOfClass:[NSArray class]] || bundleIDs.count == 0) return;
 
-    NSArray<NSString *> *dataBases = @[
-        @"/var/mobile/Containers/Data/Application",
-        @"/containers/Data/Application"
-    ];
-
     for (NSString *bid in bundleIDs) {
         if (![bid isKindOfClass:[NSString class]] || bid.length == 0) continue;
         [self logMessage:@"[AppDataCleaner] Wiping related data containers for %@", bid];
 
-        // Rootful
-        NSString *uuid = [self findDataContainerUUID:bid aggressive:NO];
-        if (uuid.length) {
-            NSString *p = [dataBases[0] stringByAppendingPathComponent:uuid];
-            [self logMessage:@"[AppDataCleaner] Related container (rootful): %@", p];
-            [self completelyWipeContainer:p];
-        }
+        // Rootful and rootless: scan metadata identifiers and wipe all matches.
+        NSArray<NSString *> *bases = @[
+            @"/var/mobile/Containers/Data/Application",
+            @"/containers/Data/Application"
+        ];
+        for (NSString *base in bases) {
+            if (![_fileManager fileExistsAtPath:base]) continue;
+            NSArray *uuids = [self listDirectoriesInPath:base];
+            for (NSString *uuid in uuids) {
+                if (![uuid isKindOfClass:[NSString class]] || !uuid.length) continue;
+                NSString *metadataPath = [NSString stringWithFormat:@"%@/%@/.com.apple.mobile_container_manager.metadata.plist", base, uuid];
+                NSDictionary *metadata = [NSDictionary dictionaryWithContentsOfFile:metadataPath];
+                NSString *ident = [metadata[@"MCMMetadataIdentifier"] isKindOfClass:[NSString class]] ? metadata[@"MCMMetadataIdentifier"] : nil;
+                if (!ident.length) continue;
 
-        // Rootless
-        NSString *ruuid = [self findRootlessDataContainerUUID:bid aggressive:NO];
-        if (ruuid.length) {
-            NSString *p = [dataBases[1] stringByAppendingPathComponent:ruuid];
-            [self logMessage:@"[AppDataCleaner] Related container (rootless): %@", p];
-            [self completelyWipeContainer:p];
+                // Exact match or prefix match (some services use suffixes).
+                BOOL match = [ident isEqualToString:bid] || [ident hasPrefix:[bid stringByAppendingString:@"."]] || [ident containsString:bid];
+                if (!match) continue;
+
+                NSString *p = [NSString stringWithFormat:@"%@/%@", base, uuid];
+                [self logMessage:@"[AppDataCleaner] Related container: %@ (ident=%@)", p, ident];
+                [self completelyWipeContainer:p];
+            }
         }
     }
 }
@@ -4737,6 +4742,35 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             continue;
         }
 
+        // Preferences that affect Safari session/cookies.
+        NSString *prefsDir = [base stringByAppendingPathComponent:@"Preferences"];
+        if ([_fileManager fileExistsAtPath:prefsDir]) {
+            NSArray<NSString *> *prefs = @[
+                @"com.apple.Safari.plist",
+                @"com.apple.mobilesafari.plist",
+                @"com.apple.SafariViewService.plist",
+                @"com.apple.WebKit.WebContent.plist",
+                @"com.apple.WebKit.Networking.plist",
+                @"com.apple.WebKit.GPU.plist",
+                @"com.apple.WebKit.plist"
+            ];
+            for (NSString *p in prefs) {
+                NSString *full = [prefsDir stringByAppendingPathComponent:p];
+                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -f '%@' 2>/dev/null || true", full]];
+            }
+        }
+
+        // Caches that can carry session state.
+        NSString *cachesDir = [base stringByAppendingPathComponent:@"Caches"];
+        if ([_fileManager fileExistsAtPath:cachesDir]) {
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/com.apple.Safari' 2>/dev/null || true", cachesDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/com.apple.mobilesafari' 2>/dev/null || true", cachesDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/com.apple.SafariViewService' 2>/dev/null || true", cachesDir]];
+            // Handle both dot and dash variants.
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/com.apple.WebKit.* '%@'/com.apple.WebKit-* 2>/dev/null || true", cachesDir, cachesDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/com.apple.nsurlsessiond' 2>/dev/null || true", cachesDir]];
+        }
+
         NSString *safariDir = [base stringByAppendingPathComponent:@"Safari"];
         if ([_fileManager fileExistsAtPath:safariDir]) {
             // Preserve bookmarks DB by default; nuke session/history/website data.
@@ -4745,12 +4779,12 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
                 safariDir]];
         }
 
+        // WebKit global stores are the main source of persistent web sessions.
         NSString *webKitDir = [base stringByAppendingPathComponent:@"WebKit"];
         if ([_fileManager fileExistsAtPath:webKitDir]) {
-            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/WebsiteData' 2>/dev/null || true", webKitDir]];
-            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/NetworkCache' 2>/dev/null || true", webKitDir]];
-            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/LocalStorage' 2>/dev/null || true", webKitDir]];
-            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/Databases' 2>/dev/null || true", webKitDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@' 2>/dev/null || true", webKitDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"mkdir -p '%@' 2>/dev/null || true", webKitDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"chown -R mobile:mobile '%@' 2>/dev/null || true", webKitDir]];
         }
 
         NSString *cookiesDir = [base stringByAppendingPathComponent:@"Cookies"];
@@ -4773,12 +4807,6 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         @"com.apple.WebKit.WebContent",
         @"com.apple.WebKit.GPU"
     ]];
-
-    // Clear caches that can carry session state.
-    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.mobilesafari 2>/dev/null || true"]; 
-    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.SafariViewService 2>/dev/null || true"]; 
-    [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.WebKit.* 2>/dev/null || true"]; 
-    [self runCommandWithPrivileges:@"rm -rf /private/var/mobile/Library/Caches/com.apple.WebKit.* 2>/dev/null || true"]; 
 
     // Optional: SafeBrowsing can persist per-user browsing state.
     [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/SafariSafeBrowsing 2>/dev/null || true"]; 
