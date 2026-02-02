@@ -254,6 +254,26 @@ static void PXStopMailDaemonsBestEffort(AppDataCleaner *selfRef) {
     [selfRef runCommandWithPrivileges:@"killall -TERM Mail 2>/dev/null || true"]; 
 }
 
+static void PXStopSafariDaemonsBestEffort(AppDataCleaner *selfRef) {
+    if (!selfRef) return;
+    // Safari uses multiple helper processes that can keep databases open.
+    NSArray<NSString *> *names = @[
+        @"MobileSafari",
+        @"SafariViewService",
+        @"com.apple.WebKit.WebContent",
+        @"com.apple.WebKit.Networking",
+        @"com.apple.WebKit.GPU",
+        @"webbookmarksd"
+    ];
+    for (NSString *name in names) {
+        [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -TERM '%@' 2>/dev/null || true", name]];
+    }
+    [NSThread sleepForTimeInterval:0.2];
+    for (NSString *name in names) {
+        [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", name]];
+    }
+}
+
 static BOOL PXWaitForProcessExit(AppDataCleaner *selfRef, NSString *procName, NSTimeInterval timeout) {
     if (!selfRef || !procName.length) return YES;
     CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
@@ -746,8 +766,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             [strongSelf logMessage:@"[AppDataCleaner] Background cleaning started for %@", bundleID];
             
             @try {
-                // Step 0: Force Kill Application to release file locks
-                [strongSelf logMessage:@"[AppDataCleaner] Step 0: Kill application..."];
+                 // Step 0: Force Kill Application to release file locks
+                 [strongSelf logMessage:@"[AppDataCleaner] Step 0: Kill application..."];
 
                 [strongSelf logMessage:@"[AppDataCleaner] Deep Clean (verify scan) = %@", [strongSelf _deepCleanEnabled] ? @"ON" : @"OFF"];
                 
@@ -779,10 +799,16 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
                     }
                 }
                 
-                [NSThread sleepForTimeInterval:0.5]; // Wait for process to die
-                
-                // Step 1: Clear keychain FIRST (most important for login data)
-                [strongSelf logMessage:@"[AppDataCleaner] Step 1: Clearing keychain (selected groups)..."];
+                 [NSThread sleepForTimeInterval:0.5]; // Wait for process to die
+
+                 // Safari: also stop WebKit helper processes to fully release cookie/session DBs.
+                 if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
+                     [strongSelf logMessage:@"[AppDataCleaner] MobileSafari: stopping WebKit/Safari helper processes..."];
+                     PXStopSafariDaemonsBestEffort(strongSelf);
+                 }
+                 
+                 // Step 1: Clear keychain FIRST (most important for login data)
+                 [strongSelf logMessage:@"[AppDataCleaner] Step 1: Clearing keychain (selected groups)..."];
                 NSError *keychainError1 = nil;
                 BOOL keychainOK1 = [strongSelf _wipeSelectedKeychainForBundleID:bundleID error:&keychainError1];
                 
@@ -1149,7 +1175,12 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     [self logMessage:@"[AppDataCleaner] DEBUG: Skipping media/health/safari (optimization)"];
     // [self clearMediaData:bundleID];
     // [self clearHealthData:bundleID];
-    // [self clearSafariData:bundleID];
+
+    // Safari is special: it uses system-scoped stores under /var/mobile/Library.
+    // Without clearing those, sessions/cookies can persist even after wiping the app container.
+    if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
+        [self _wipeMobileSafariSystemStores];
+    }
     
     // Clean SiriAnalytics
     [self logMessage:@"[AppDataCleaner] DEBUG: Cleaning Siri analytics..."];
@@ -4656,6 +4687,56 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         }
     }
     return uuids;
+}
+
+- (void)_wipeMobileSafariSystemStores {
+    [self logMessage:@"[AppDataCleaner] MobileSafari: wiping global Safari/WebKit/Cookies stores..."];
+
+    // Ensure processes are stopped first to avoid sqlite "database is locked" and detached DB crashes.
+    PXStopSafariDaemonsBestEffort(self);
+
+    NSArray<NSString *> *libraryBases = @[
+        @"/var/mobile/Library",
+        @"/private/var/mobile/Library",
+        @"/var/jb/var/mobile/Library",
+        @"/private/var/jb/var/mobile/Library"
+    ];
+
+    for (NSString *base in libraryBases) {
+        if (![_fileManager fileExistsAtPath:base]) {
+            continue;
+        }
+
+        NSString *safariDir = [base stringByAppendingPathComponent:@"Safari"];
+        if ([_fileManager fileExistsAtPath:safariDir]) {
+            // Preserve bookmarks DB by default; nuke session/history/website data.
+            [self runCommandWithPrivileges:[NSString stringWithFormat:
+                @"find '%@' -mindepth 1 -maxdepth 1 -not -name 'Bookmarks.db' -not -name 'Bookmarks.db-wal' -not -name 'Bookmarks.db-shm' -exec rm -rf {} + 2>/dev/null || true",
+                safariDir]];
+        }
+
+        NSString *webKitDir = [base stringByAppendingPathComponent:@"WebKit"];
+        if ([_fileManager fileExistsAtPath:webKitDir]) {
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/WebsiteData' 2>/dev/null || true", webKitDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/NetworkCache' 2>/dev/null || true", webKitDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/LocalStorage' 2>/dev/null || true", webKitDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@/Databases' 2>/dev/null || true", webKitDir]];
+        }
+
+        NSString *cookiesDir = [base stringByAppendingPathComponent:@"Cookies"];
+        if ([_fileManager fileExistsAtPath:cookiesDir]) {
+            // Cookie stores can be global. Removing them clears Safari sessions/cookies.
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -f '%@/Cookies.binarycookies' 2>/dev/null || true", cookiesDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -f '%@/Cookies.sqlite' '%@/Cookies.sqlite-wal' '%@/Cookies.sqlite-shm' 2>/dev/null || true", cookiesDir, cookiesDir, cookiesDir]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -f '%@'/*.binarycookies 2>/dev/null || true", cookiesDir]];
+        }
+    }
+
+    // Flush preference/caches used by Safari.
+    [self runCommandWithPrivileges:@"killall -TERM cfprefsd 2>/dev/null || true"]; 
+    [self runCommandWithPrivileges:@"killall -TERM webbookmarksd 2>/dev/null || true"]; 
+
+    sync();
 }
 
 - (NSArray *)findExtensionDataContainersForBundleID:(NSString *)bundleID {
