@@ -264,6 +264,7 @@ static void PXStopSafariDaemonsBestEffort(AppDataCleaner *selfRef) {
         @"com.apple.WebKit.Networking",
         @"com.apple.WebKit.GPU",
         @"nsurlsessiond",
+        @"accountsd",
         @"webbookmarksd"
     ];
     for (NSString *name in names) {
@@ -273,6 +274,16 @@ static void PXStopSafariDaemonsBestEffort(AppDataCleaner *selfRef) {
     for (NSString *name in names) {
         [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", name]];
     }
+}
+
+static NSString *PXFirstExistingPath(NSFileManager *fm, NSArray<NSString *> *paths) {
+    if (!fm || ![paths isKindOfClass:[NSArray class]]) return nil;
+    for (NSString *p in paths) {
+        if ([p isKindOfClass:[NSString class]] && p.length && [fm fileExistsAtPath:p]) {
+            return p;
+        }
+    }
+    return nil;
 }
 
 static BOOL PXWaitForProcessExit(AppDataCleaner *selfRef, NSString *procName, NSTimeInterval timeout) {
@@ -4729,6 +4740,46 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
     // Ensure processes are stopped first to avoid sqlite "database is locked" and detached DB crashes.
     PXStopSafariDaemonsBestEffort(self);
+
+    // Google sign-in can surface "Continue as <gmail>" from system Accounts even when cookies are gone.
+    // For Safari clear-data, we treat it as web session state and remove Google account rows best-effort.
+    {
+        NSString *accountsDB = PXFirstExistingPath(_fileManager, @[
+            @"/var/mobile/Library/Accounts/Accounts3.sqlite",
+            @"/private/var/mobile/Library/Accounts/Accounts3.sqlite",
+            @"/var/jb/var/mobile/Library/Accounts/Accounts3.sqlite",
+            @"/private/var/jb/var/mobile/Library/Accounts/Accounts3.sqlite"
+        ]);
+        if (accountsDB.length && [_fileManager fileExistsAtPath:accountsDB]) {
+            [self logMessage:@"[AppDataCleaner] MobileSafari: removing Google accounts from Accounts3 (shared) ..."]; 
+            [self runCommandWithPrivileges:@"killall -TERM accountsd 2>/dev/null || true"]; 
+            [NSThread sleepForTimeInterval:0.2];
+            [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
+            [NSThread sleepForTimeInterval:0.2];
+
+            NSMutableString *sql = [NSMutableString stringWithString:@"PRAGMA busy_timeout=3000; BEGIN IMMEDIATE; "];
+            // Delete accounts that are backed by Google account types.
+            [sql appendString:@"DELETE FROM ZACCOUNT WHERE ZACCOUNTTYPE IN (SELECT Z_PK FROM ZACCOUNTTYPE WHERE ZIDENTIFIER LIKE '%google%' OR ZIDENTIFIER LIKE '%gmail%'); "];
+            // Also match by visible name/identifier fields where present.
+            [sql appendString:@"DELETE FROM ZACCOUNT WHERE (ZNAME LIKE '%google%' OR ZNAME LIKE '%gmail%' OR ZIDENTIFIER LIKE '%google%' OR ZIDENTIFIER LIKE '%gmail%'); "];
+            // Best-effort cleanup of orphan rows.
+            [sql appendString:@"DELETE FROM ZACCOUNTPROPERTY WHERE ZOWNER NOT IN (SELECT Z_PK FROM ZACCOUNT); "];
+            [sql appendString:@"DELETE FROM ZCREDENTIALITEM WHERE ZOWNER NOT IN (SELECT Z_PK FROM ZACCOUNT); "];
+            [sql appendString:@"COMMIT;" ];
+
+            NSString *execErr = nil;
+            [self _sqliteExecAtPath:accountsDB sql:sql errorOut:&execErr];
+            if (execErr.length) {
+                [self logMessage:@"[AppDataCleaner] MobileSafari: Accounts3 cleanup error: %@", execErr];
+            }
+            [self _sqliteExecAtPath:accountsDB sql:@"PRAGMA wal_checkpoint(TRUNCATE);" errorOut:NULL];
+
+            // Restart accountsd so UI refreshes.
+            [self runCommandWithPrivileges:@"killall -TERM accountsd 2>/dev/null || true"]; 
+        } else {
+            [self logMessage:@"[AppDataCleaner] MobileSafari: Accounts3.sqlite not found; skipping Google accounts cleanup"]; 
+        }
+    }
 
     NSArray<NSString *> *libraryBases = @[
         @"/var/mobile/Library",
