@@ -752,6 +752,19 @@ static int uname_hook(struct utsname *buf) {
     NSString *pinnedCountryCode = [securitySettings[@"targetRegionPinnedCountryCode"] isKindOfClass:[NSString class]] ? securitySettings[@"targetRegionPinnedCountryCode"] : nil;
     NSString *pinnedMCC = [securitySettings[@"targetRegionPinnedCarrierMCC"] isKindOfClass:[NSString class]] ? securitySettings[@"targetRegionPinnedCarrierMCC"] : nil;
     NSString *pinnedMNC = [securitySettings[@"targetRegionPinnedCarrierMNC"] isKindOfClass:[NSString class]] ? securitySettings[@"targetRegionPinnedCarrierMNC"] : nil;
+
+    // TargetRegion (pinned from IP) - keep Region/Subscriber fields consistent.
+    if (propertyString && targetRegionFollowsIP) {
+        if ([propertyString isEqualToString:@"RegionCode"] && pinnedCountryCode.length) {
+            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)[pinnedCountryCode uppercaseString]);
+        }
+        if ([propertyString isEqualToString:@"MobileSubscriberCountryCode"] && pinnedMCC.length) {
+            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)pinnedMCC);
+        }
+        if ([propertyString isEqualToString:@"MobileSubscriberNetworkCode"] && pinnedMNC.length) {
+            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)pinnedMNC);
+        }
+    }
     
     // Device model / hardware identifiers (keep consistent across sysctl/IOKit/MobileGestalt)
     if (propertyString) {
@@ -884,19 +897,6 @@ static int uname_hook(struct utsname *buf) {
         return %orig;
     }
 
-    // TargetRegion (pinned from IP) - keep Region/Subscriber fields consistent.
-    if (propertyString && targetRegionFollowsIP) {
-        if ([propertyString isEqualToString:@"RegionCode"] && pinnedCountryCode.length) {
-            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)[pinnedCountryCode uppercaseString]);
-        }
-        if ([propertyString isEqualToString:@"MobileSubscriberCountryCode"] && pinnedMCC.length) {
-            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)pinnedMCC);
-        }
-        if ([propertyString isEqualToString:@"MobileSubscriberNetworkCode"] && pinnedMNC.length) {
-            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)pinnedMNC);
-        }
-    }
-    
     if ([manager isIdentifierEnabled:@"IDFA"]) {
         NSString *idfaString = [manager currentValueForIdentifier:@"IDFA"];
         if (idfaString) {
