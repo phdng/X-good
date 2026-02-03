@@ -13,6 +13,7 @@
 #import "DomainManagementViewController.h"
 #import <notify.h>  // Add this import for Darwin notification functions
 #import "common/UIButton+SafeConfiguration.h"
+#import "common/VersionCompare.h"
 #import <CoreLocation/CoreLocation.h>
 #import <ifaddrs.h>
 #import <arpa/inet.h>
@@ -323,6 +324,10 @@
 
 @property (nonatomic, strong) UILabel *safariStackSpoofingLabel;
 @property (nonatomic, strong) UISwitch *safariStackSpoofingToggleSwitch;
+
+@property (nonatomic, strong) UILabel *webCompatIOSRangeLabel;
+@property (nonatomic, strong) UISwitch *webCompatIOSRangeToggleSwitch;
+@property (nonatomic, strong) UILabel *webCompatIOSRangeWarningLabel;
 - (void)setupIPMonitorControl:(UIView *)contentView;
 // Any private properties go here
 @property (nonatomic, strong) UILabel *copyrightLabel;
@@ -671,7 +676,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1130],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1190],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -2596,7 +2601,7 @@
 
     // Position above Setup Alert Checks (e.g., top: 790)
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1280],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1340],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:60],
@@ -2796,7 +2801,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1590],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1650],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:140],
@@ -3003,7 +3008,7 @@
     [NSLayoutConstraint activateConstraints:@[
         [self.copyrightLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
         [self.copyrightLabel.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
-        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2030], // Positioned after Canvas Fingerprinting
+        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2090], // Positioned after Canvas Fingerprinting
         [self.copyrightLabel.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-30] // More bottom padding
     ]];
     
@@ -3280,6 +3285,34 @@
     [self.safariStackSpoofingToggleSwitch setOn:safariEnabled animated:NO];
     [self.safariStackSpoofingToggleSwitch addTarget:self action:@selector(safariStackSpoofingToggleChanged:) forControlEvents:UIControlEventValueChanged];
     [safariRow addSubview:self.safariStackSpoofingToggleSwitch];
+
+    // WebCompat iOS range row (generation-only; does not modify existing profiles)
+    UIView *webCompatRow = [[UIView alloc] init];
+    webCompatRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:webCompatRow];
+
+    self.webCompatIOSRangeLabel = [[UILabel alloc] init];
+    self.webCompatIOSRangeLabel.text = @"WebCompat iOS Range (<= 16.3.1)";
+    self.webCompatIOSRangeLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    self.webCompatIOSRangeLabel.textColor = [UIColor secondaryLabelColor];
+    self.webCompatIOSRangeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [webCompatRow addSubview:self.webCompatIOSRangeLabel];
+
+    self.webCompatIOSRangeToggleSwitch = [[UISwitch alloc] init];
+    self.webCompatIOSRangeToggleSwitch.onTintColor = [UIColor systemBlueColor];
+    self.webCompatIOSRangeToggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    BOOL webCompatEnabled = [self.securitySettings boolForKey:@"webCompatIOSRangeEnabled"];
+    [self.webCompatIOSRangeToggleSwitch setOn:webCompatEnabled animated:NO];
+    [self.webCompatIOSRangeToggleSwitch addTarget:self action:@selector(webCompatIOSRangeToggleChanged:) forControlEvents:UIControlEventValueChanged];
+    [webCompatRow addSubview:self.webCompatIOSRangeToggleSwitch];
+
+    self.webCompatIOSRangeWarningLabel = [[UILabel alloc] init];
+    self.webCompatIOSRangeWarningLabel.text = @"WebCompat is ON, but this profile uses iOS > 16.3.1. Regenerate to apply.";
+    self.webCompatIOSRangeWarningLabel.font = [UIFont systemFontOfSize:10 weight:UIFontWeightRegular];
+    self.webCompatIOSRangeWarningLabel.textColor = [UIColor systemOrangeColor];
+    self.webCompatIOSRangeWarningLabel.numberOfLines = 2;
+    self.webCompatIOSRangeWarningLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:self.webCompatIOSRangeWarningLabel];
     
     // Enable/disable access button based on toggle state
     self.deviceSpoofingAccessButton.enabled = deviceSpoofingEnabled;
@@ -3302,7 +3335,7 @@
         [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:520], // Increased spacing below Network Connection Type
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
-        [controlView.heightAnchor constraintEqualToConstant:120], // Extra row for Safari/Auth stack
+        [controlView.heightAnchor constraintEqualToConstant:170], // Extra rows for Safari/Auth stack + WebCompat
         
         // Position label at the top
         [self.deviceSpoofingLabel.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
@@ -3333,7 +3366,24 @@
 
         [self.safariStackSpoofingToggleSwitch.trailingAnchor constraintEqualToAnchor:safariRow.trailingAnchor],
         [self.safariStackSpoofingToggleSwitch.centerYAnchor constraintEqualToAnchor:safariRow.centerYAnchor],
-        
+
+        // WebCompat row
+        [webCompatRow.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
+        [webCompatRow.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
+        [webCompatRow.topAnchor constraintEqualToAnchor:safariRow.bottomAnchor constant:8],
+        [webCompatRow.heightAnchor constraintEqualToConstant:30],
+
+        [self.webCompatIOSRangeLabel.leadingAnchor constraintEqualToAnchor:webCompatRow.leadingAnchor],
+        [self.webCompatIOSRangeLabel.centerYAnchor constraintEqualToAnchor:webCompatRow.centerYAnchor],
+
+        [self.webCompatIOSRangeToggleSwitch.trailingAnchor constraintEqualToAnchor:webCompatRow.trailingAnchor],
+        [self.webCompatIOSRangeToggleSwitch.centerYAnchor constraintEqualToAnchor:webCompatRow.centerYAnchor],
+
+        // WebCompat warning label
+        [self.webCompatIOSRangeWarningLabel.topAnchor constraintEqualToAnchor:webCompatRow.bottomAnchor constant:2],
+        [self.webCompatIOSRangeWarningLabel.leadingAnchor constraintEqualToAnchor:webCompatRow.leadingAnchor],
+        [self.webCompatIOSRangeWarningLabel.trailingAnchor constraintEqualToAnchor:webCompatRow.trailingAnchor],
+
         // Position elements inside bottom row container
         [appleBgView.leadingAnchor constraintEqualToAnchor:bottomRowContainer.leadingAnchor],
         [appleBgView.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
@@ -3358,6 +3408,33 @@
     // Disable safari-stack toggle when global device spoofing is off
     self.safariStackSpoofingToggleSwitch.enabled = deviceSpoofingEnabled;
     self.safariStackSpoofingToggleSwitch.alpha = deviceSpoofingEnabled ? 1.0 : 0.5;
+
+    // Disable WebCompat toggle when global device spoofing is off
+    self.webCompatIOSRangeToggleSwitch.enabled = deviceSpoofingEnabled;
+    self.webCompatIOSRangeToggleSwitch.alpha = deviceSpoofingEnabled ? 1.0 : 0.5;
+
+    // Initial warning visibility
+    NSString *currentIOSVersion = [[IdentifierManager sharedManager] currentValueForIdentifier:@"IOSVersion"];
+    BOOL showWarning = deviceSpoofingEnabled && webCompatEnabled && currentIOSVersion.length && (PXCompareVersions(currentIOSVersion, @"16.3.1") == NSOrderedDescending);
+    self.webCompatIOSRangeWarningLabel.hidden = !showWarning;
+}
+
+- (void)webCompatIOSRangeToggleChanged:(UISwitch *)sender {
+    BOOL enabled = sender.isOn;
+
+    [self.securitySettings setBool:enabled forKey:@"webCompatIOSRangeEnabled"];
+    [self.securitySettings synchronize];
+
+    NSString *currentIOSVersion = [[IdentifierManager sharedManager] currentValueForIdentifier:@"IOSVersion"];
+    BOOL deviceSpoofingEnabled = [self.securitySettings boolForKey:@"deviceSpoofingEnabled"];
+    BOOL showWarning = deviceSpoofingEnabled && enabled && currentIOSVersion.length && (PXCompareVersions(currentIOSVersion, @"16.3.1") == NSOrderedDescending);
+    self.webCompatIOSRangeWarningLabel.hidden = !showWarning;
+
+    // Broadcast changes so generators/tweaks can react.
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    if (darwinCenter) {
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.settings.changed"), NULL, NULL, YES);
+    }
 }
 
 - (void)safariStackSpoofingToggleChanged:(UISwitch *)sender {
@@ -3408,6 +3485,17 @@
                 [self.safariStackSpoofingToggleSwitch setOn:YES animated:YES];
             }
         }
+    }
+
+    // WebCompat range toggle is only meaningful when device spoofing is enabled.
+    if (self.webCompatIOSRangeToggleSwitch) {
+        self.webCompatIOSRangeToggleSwitch.enabled = enabled;
+        self.webCompatIOSRangeToggleSwitch.alpha = enabled ? 1.0 : 0.5;
+
+        NSString *currentIOSVersion = [[IdentifierManager sharedManager] currentValueForIdentifier:@"IOSVersion"];
+        BOOL webCompatEnabled = [self.securitySettings boolForKey:@"webCompatIOSRangeEnabled"];
+        BOOL showWarning = enabled && webCompatEnabled && currentIOSVersion.length && (PXCompareVersions(currentIOSVersion, @"16.3.1") == NSOrderedDescending);
+        self.webCompatIOSRangeWarningLabel.hidden = !showWarning;
     }
     
     // Enable/disable access button based on toggle state
@@ -3592,7 +3680,7 @@
     
     // Position control under the device specific spoofing control
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:645], // Increased spacing below Device Specific Spoofing
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:710], // Increased spacing below Device Specific Spoofing
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:100], // Increased height to accommodate vertical layout
@@ -3723,7 +3811,7 @@
     [bottomRowContainer addSubview:self.fixVersionToggleSwitch];
 
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1010],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1070],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:100],
@@ -3828,7 +3916,7 @@
     [bottomRowContainer addSubview:self.deepCleanToggleSwitch];
 
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:770],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:830],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:100],
@@ -3914,7 +4002,7 @@
     [bottomRowContainer addSubview:self.systemKeychainWipeToggleSwitch];
 
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:830],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:950],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:100],
@@ -4534,7 +4622,7 @@
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
         // Control view
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1750], // Position between App Version Spoofing and Canvas Fingerprinting
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1810], // Position between App Version Spoofing and Canvas Fingerprinting
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -4710,7 +4798,7 @@
     
     // Position control between Domain Blocking and Copyright label
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1890], // Moved down to be below Domain Blocking
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1950], // Moved down to be below Domain Blocking
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],

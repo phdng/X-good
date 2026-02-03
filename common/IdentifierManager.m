@@ -9,6 +9,7 @@
 #import "IPhoneModelDB.h"
 #import "DBDebugLogger.h"
 #import "ProjectXLogging.h"
+#import "VersionCompare.h"
 #import "WiFiManager.h"
 #import "StorageManager.h"
 #import "BatteryManager.h"
@@ -51,6 +52,43 @@
 @end
 
 @implementation IdentifierManager
+
+static BOOL PXWebCompatIOSRangeEnabled(void) {
+    NSUserDefaults *securitySettings = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+    return [securitySettings boolForKey:@"webCompatIOSRangeEnabled"];
+}
+
+static NSString *PXWebCompatMaxIOSForDeviceMaxIOS(NSString *deviceMaxIOS) {
+    NSString *cap = @"16.3.1";
+    if (![deviceMaxIOS isKindOfClass:[NSString class]] || deviceMaxIOS.length == 0) {
+        return cap;
+    }
+    return (PXCompareVersions(deviceMaxIOS, cap) == NSOrderedAscending) ? deviceMaxIOS : cap;
+}
+
+static NSDictionary *PXPickFallbackIOSVersionInfoMax(NSString *maxIOSVersion) {
+    IOSVersionInfo *mgr = [IOSVersionInfo sharedManager];
+    NSArray *pairs = [mgr availableIOSVersions];
+    if (![pairs isKindOfClass:[NSArray class]] || pairs.count == 0) return nil;
+
+    NSMutableArray<NSDictionary *> *candidates = [NSMutableArray array];
+    for (id item in pairs) {
+        if (![item isKindOfClass:[NSDictionary class]]) continue;
+        NSString *v = item[@"version"];
+        if (![v isKindOfClass:[NSString class]] || v.length == 0) continue;
+        if (PXCompareVersions(v, maxIOSVersion) != NSOrderedDescending) {
+            [candidates addObject:(NSDictionary *)item];
+        }
+    }
+
+    if (candidates.count == 0) return nil;
+
+    uint32_t r = 0;
+    if (SecRandomCopyBytes(kSecRandomDefault, sizeof(r), (uint8_t *)&r) != errSecSuccess) {
+        r = arc4random_uniform((uint32_t)candidates.count);
+    }
+    return candidates[(NSUInteger)(r % (uint32_t)candidates.count)];
+}
 
 #pragma mark - Device Model
 
@@ -136,8 +174,32 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
         return nil;
     }
 
-    // Pick a random iPhone model that supports min iOS 13.0
-    NSDictionary *modelSpec = [modelDB randomModelMinIOS:@"13.0" error:&dbErr];
+    BOOL webCompat = PXWebCompatIOSRangeEnabled();
+
+    // Pick a random iPhone model that supports min iOS 13.0.
+    // In WebCompat mode, we also require an iOS build <= 16.3.1 to exist for the chosen device.
+    NSDictionary *modelSpec = nil;
+    NSDictionary *iosMeta = nil;
+    NSString *productType = nil;
+    NSString *modelName = nil;
+    NSString *maxIOS = nil;
+    NSString *effectiveMaxIOS = nil;
+    for (NSInteger attempt = 0; attempt < (webCompat ? 60 : 1); attempt++) {
+        modelSpec = [modelDB randomModelMinIOS:@"13.0" error:&dbErr];
+        if (!modelSpec) break;
+
+        productType = [modelSpec[@"productType"] isKindOfClass:[NSString class]] ? modelSpec[@"productType"] : nil;
+        modelName = [modelSpec[@"name"] isKindOfClass:[NSString class]] ? modelSpec[@"name"] : @"";
+        maxIOS = [modelSpec[@"maxIOS"] isKindOfClass:[NSString class]] ? modelSpec[@"maxIOS"] : nil;
+        if (!productType.length || !maxIOS.length) {
+            continue;
+        }
+
+        effectiveMaxIOS = webCompat ? PXWebCompatMaxIOSForDeviceMaxIOS(maxIOS) : maxIOS;
+        iosMeta = [buildDB randomMetaForDevice:productType min:@"13.0" max:effectiveMaxIOS error:&dbErr];
+        if (iosMeta) break;
+    }
+
     if (!modelSpec) {
         self.error = dbErr;
         PXLog(@"[WeaponX] ❌ DeviceProfileGroup: failed to pick model (%@)", dbErr.localizedDescription ?: @"unknown");
@@ -145,21 +207,16 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
         return nil;
     }
 
-    NSString *productType = [modelSpec[@"productType"] isKindOfClass:[NSString class]] ? modelSpec[@"productType"] : nil;
-    NSString *modelName = [modelSpec[@"name"] isKindOfClass:[NSString class]] ? modelSpec[@"name"] : @"";
-    NSString *maxIOS = [modelSpec[@"maxIOS"] isKindOfClass:[NSString class]] ? modelSpec[@"maxIOS"] : nil;
     if (!productType.length || !maxIOS.length) {
         self.error = [NSError errorWithDomain:@"com.hydra.projectx" code:6002 userInfo:@{NSLocalizedDescriptionKey: @"Invalid model spec (missing productType/maxIOS)"}];
         PXDBLog(@"DeviceProfileGroup: invalid modelSpec missing productType/maxIOS spec=%@", modelSpec);
         return nil;
     }
 
-    // Pick an iOS build compatible with this device model and version range.
-    NSDictionary *iosMeta = [buildDB randomMetaForDevice:productType min:@"13.0" max:maxIOS error:&dbErr];
     if (!iosMeta) {
-        self.error = dbErr;
-        PXLog(@"[WeaponX] ❌ DeviceProfileGroup: no compatible build for %@ (%@)", productType, dbErr.localizedDescription ?: @"unknown");
-        PXDBLog(@"DeviceProfileGroup: no compatible build device=%@ maxIOS=%@ err=%@", productType, maxIOS, dbErr.localizedDescription ?: @"nil");
+        self.error = dbErr ?: [NSError errorWithDomain:@"com.hydra.projectx" code:6005 userInfo:@{NSLocalizedDescriptionKey: @"No compatible iOS build found for chosen model"}];
+        PXLog(@"[WeaponX] ❌ DeviceProfileGroup: no compatible build for %@ (maxIOS=%@ effectiveMax=%@ webCompat=%@)", productType, maxIOS, effectiveMaxIOS ?: @"<nil>", webCompat ? @"YES" : @"NO");
+        PXDBLog(@"DeviceProfileGroup: no compatible build device=%@ maxIOS=%@ effectiveMax=%@ webCompat=%@ err=%@", productType, maxIOS, effectiveMaxIOS ?: @"<nil>", webCompat ? @"YES" : @"NO", dbErr.localizedDescription ?: @"nil");
         return nil;
     }
 
@@ -611,6 +668,9 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
 - (NSDictionary *)generateIOSVersion {
     self.error = nil;
 
+    BOOL webCompat = PXWebCompatIOSRangeEnabled();
+    NSString *webCompatMax = @"16.3.1";
+
     // Prefer external DB if available and current device model is known.
     @try {
         NSString *identityDir = [self profileIdentityPath];
@@ -622,8 +682,9 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
             if ([modelDB loadIfNeeded:&dbErr] && [buildDB loadIfNeeded:&dbErr]) {
                 NSDictionary *spec = [modelDB specForProductType:deviceModel];
                 NSString *maxIOS = [spec[@"maxIOS"] isKindOfClass:[NSString class]] ? spec[@"maxIOS"] : nil;
-                if (maxIOS.length) {
-                    NSDictionary *meta = [buildDB randomMetaForDevice:deviceModel min:@"13.0" max:maxIOS error:&dbErr];
+                NSString *effectiveMaxIOS = (webCompat ? PXWebCompatMaxIOSForDeviceMaxIOS(maxIOS) : maxIOS);
+                if (effectiveMaxIOS.length) {
+                    NSDictionary *meta = [buildDB randomMetaForDevice:deviceModel min:@"13.0" max:effectiveMaxIOS error:&dbErr];
                     if (meta) {
                         NSString *iosVersion = meta[@"version"];
                         NSString *iosBuild = meta[@"build"];
@@ -658,8 +719,25 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
         }
     } @catch (__unused NSException *e) {
     }
-    
-    NSDictionary *versionInfo = [[IOSVersionInfo sharedManager] generateIOSVersionInfo];
+
+    NSDictionary *versionInfo = nil;
+    if (webCompat) {
+        NSDictionary *picked = PXPickFallbackIOSVersionInfoMax(webCompatMax);
+        if (picked) {
+            versionInfo = @{
+                @"version": picked[@"version"] ?: @"",
+                @"build": picked[@"build"] ?: @"",
+                @"darwin": picked[@"darwin"] ?: @"",
+                @"xnu": picked[@"xnu"] ?: @"",
+                @"kernel_version": picked[@"kernel_version"] ?: @"",
+                @"lastUpdated": [NSDate date]
+            };
+        }
+    }
+
+    if (!versionInfo) {
+        versionInfo = [[IOSVersionInfo sharedManager] generateIOSVersionInfo];
+    }
     if (!versionInfo) {
         self.error = [[IOSVersionInfo sharedManager] lastError];
         return nil;
