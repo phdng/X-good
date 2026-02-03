@@ -537,6 +537,13 @@ static BOOL PXUADebugScopeAllows(NSString *bundleID, NSString *processName) {
 
 static BOOL PXUAHostIsSensitive(NSString *hostOrDomain) {
     if (!hostOrDomain.length) return NO;
+
+    // In Full Spoof Test Mode we intentionally do NOT exempt sensitive hosts.
+    // This is used to reproduce failure cases (e.g. Google login breakages) reliably.
+    if (PXFullSpoofTestModeEnabled()) {
+        return NO;
+    }
+
     PXUADebugEnsure();
     if (gUADebug.masterEnabled && !gUADebug.sensitiveHostExemptionsEnabled) {
         return NO;
@@ -989,7 +996,8 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
          
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && resultWebView) {
             // For Safari/Auth stack, avoid setting a global UA before we know the host.
-            if (forceSpoofForWebKit) {
+            // In FullSpoof test mode, we override this to force UA spoofing.
+            if (forceSpoofForWebKit && !PXFullSpoofTestModeEnabled()) {
                 NSString *host = resultWebView.URL.host;
                 if (!host.length || PXUAHostIsSensitive(host)) {
                     PXUADebugTrace(@"WKWebView._allowedTopLevelWebView", bundleID, proc, host, @"skip", @"reason=host", nil, nil);
@@ -1056,7 +1064,8 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
          
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && webView) {
             // For Safari/Auth stack, avoid setting a global UA before we know the host.
-            if (forceSpoofForWebKit) {
+            // In FullSpoof test mode, we override this to force UA spoofing.
+            if (forceSpoofForWebKit && !PXFullSpoofTestModeEnabled()) {
                 NSString *host = webView.URL.host;
                 if (!host.length || PXUAHostIsSensitive(host)) {
                     PXUADebugTrace(@"WKWebView.init", bundleID, proc, host, @"skip", @"reason=host", nil, nil);
@@ -1146,7 +1155,7 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                                   PXIsSafariStackProcess(bundleID, proc);
          
         if ((forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) && customUserAgent) {
-            if (forceSpoofForWebKit) {
+            if (forceSpoofForWebKit && !PXFullSpoofTestModeEnabled()) {
                 NSString *host = self.URL.host;
                 if (!host.length || PXUAHostIsSensitive(host)) {
                     PXUADebugTrace(@"WKWebView.setCustomUserAgent", bundleID, proc, host, @"skip", @"reason=host", customUserAgent, nil);
@@ -1203,16 +1212,19 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
         
         if (forceSpoofForWebKit || shouldSpoofForBundle(bundleID)) {
             // For Safari/Auth stack, only touch UA when host is known and not sensitive.
+            // In FullSpoof test mode, we override this to force UA spoofing.
             NSString *host = self.URL.host;
-            if (forceSpoofForWebKit) {
-                if (!host.length || PXUAHostIsSensitive(host)) {
-                    PXUADebugTrace(@"WKWebView.evaluateJavaScript", bundleID, proc, host, @"skip", @"reason=host", nil, nil);
-                    return;
-                }
-            } else {
-                if (PXUAHostIsSensitive(host)) {
-                    PXUADebugTrace(@"WKWebView.evaluateJavaScript", bundleID, proc, host, @"skip", @"reason=sensitive", nil, nil);
-                    return;
+            if (!PXFullSpoofTestModeEnabled()) {
+                if (forceSpoofForWebKit) {
+                    if (!host.length || PXUAHostIsSensitive(host)) {
+                        PXUADebugTrace(@"WKWebView.evaluateJavaScript", bundleID, proc, host, @"skip", @"reason=host", nil, nil);
+                        return;
+                    }
+                } else {
+                    if (PXUAHostIsSensitive(host)) {
+                        PXUADebugTrace(@"WKWebView.evaluateJavaScript", bundleID, proc, host, @"skip", @"reason=sensitive", nil, nil);
+                        return;
+                    }
                 }
             }
             // Wait a short time to let the script execute
@@ -1259,9 +1271,10 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
             return;
         }
         // Don't mutate UA at configuration time for Safari/Auth stack; host is unknown here.
+        // In FullSpoof test mode we allow this to force UA spoofing.
         BOOL forceSpoofForWebKit = PXSafariStackSpoofEnabled() &&
                                   PXIsSafariStackProcess(bundleID, proc);
-        if (forceSpoofForWebKit) {
+        if (forceSpoofForWebKit && !PXFullSpoofTestModeEnabled()) {
             PXUADebugTrace(@"WKWebViewConfiguration.setApplicationNameForUserAgent", bundleID, proc, nil, @"skip", @"reason=safaristack", applicationNameForUserAgent, nil);
             %orig;
             return;
@@ -1419,7 +1432,8 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
         }
         if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
             // Avoid global UA changes for Safari; per-request/domain hooks handle spoofing.
-            if (PXSafariStackSpoofEnabled()) {
+            // In FullSpoof test mode, allow default UA mutation to force failures.
+            if (PXSafariStackSpoofEnabled() && !PXFullSpoofTestModeEnabled()) {
                 PXUADebugTrace(@"SFUserAgentController.defaultUserAgentString", bundleID, proc, nil, @"skip", @"reason=safaristack", originalUA, nil);
                 return originalUA;
             }
