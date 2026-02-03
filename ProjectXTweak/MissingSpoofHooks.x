@@ -113,56 +113,56 @@ static BOOL isSpoofingGlobalEnabled() {
 }
 
 
-// --- UIScreen Hook ---
-
-%hook UIScreen
-
-- (CGRect)nativeBounds {
-    CGRect original = %orig;
-    NSString *spoofedModel = getSpoofedModel();
-    NSDictionary *specs = getSpecsForModel(spoofedModel);
-    
-    if (specs) {
-        // PXLog(@"[MissingHooks] Spoofing nativeBounds for %@", spoofedModel);
-        CGFloat w = [specs[@"w"] floatValue];
-        CGFloat h = [specs[@"h"] floatValue];
-        return CGRectMake(0, 0, w, h);
-    }
-    return original;
-}
-
-- (CGRect)bounds {
-    // Do NOT spoof bounds (layout coordinates). Spoofing this will cause UI scaling issues.
-    return %orig;
-}
-
-- (CGFloat)scale {
-    // Do NOT spoof scale (layout/rendering). Keep UI stable.
-    return %orig;
-}
-
-- (CGFloat)nativeScale {
-    // Do NOT spoof nativeScale. Keep UI stable.
-    return %orig;
-}
-
-%end
-
 // --- Metal GPU Name Hook ---
 
 // Helper to get GPU name from Chip
-static NSString* getGPUName(NSString *model) {
-    // Simplified mapping based on Generation
-    if ([model hasPrefix:@"iPhone8"]) return @"Apple A9 GPU";
-    if ([model hasPrefix:@"iPhone9"]) return @"Apple A10 GPU";
-    if ([model hasPrefix:@"iPhone10"]) return @"Apple A11 GPU";
-    if ([model hasPrefix:@"iPhone11"]) return @"Apple A12 GPU";
-    if ([model hasPrefix:@"iPhone12"]) return @"Apple A13 GPU";
-    if ([model hasPrefix:@"iPhone13"]) return @"Apple A14 GPU";
-    if ([model hasPrefix:@"iPhone14"]) return @"Apple A15 GPU";
-    if ([model hasPrefix:@"iPhone15"]) return @"Apple A16 GPU"; // 14 Pro
-    if ([model hasPrefix:@"iPhone16"]) return @"Apple A17 GPU"; // 15 Pro (hypothetical naming)
-    return @"Apple GPU";
+static BOOL isInScopedAppsList_Missing(void) {
+    @try {
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        if (!bundleID.length) return NO;
+        NSArray *paths = @[@"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist",
+                           @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist",
+                           @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist"];
+        NSDictionary *plist = nil;
+        for (NSString *p in paths) {
+            plist = [NSDictionary dictionaryWithContentsOfFile:p];
+            if (plist) break;
+        }
+        NSDictionary *scopedApps = [plist isKindOfClass:[NSDictionary class]] ? plist[@"ScopedApps"] : nil;
+        NSDictionary *entry = [scopedApps isKindOfClass:[NSDictionary class]] ? scopedApps[bundleID] : nil;
+        return [entry isKindOfClass:[NSDictionary class]] ? [entry[@"enabled"] boolValue] : NO;
+    } @catch (__unused NSException *e) {
+        return NO;
+    }
+}
+
+static BOOL shouldSpoofForCurrentProcess_Missing(void) {
+    if (!PXDeviceSpoofingEnabled()) return NO;
+    NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
+    if (!bid.length) return NO;
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if ([bid hasPrefix:@"com.apple."] && !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, proc))) {
+        return NO;
+    }
+    return isInScopedAppsList_Missing() || PXAllowUnscopedSafariStack();
+}
+
+static NSString *getSpoofedGPUFamily(void) {
+    @try {
+        NSString *profilesPath = @"/var/mobile/Library/WeaponX/Profiles";
+        NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
+        NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
+        NSString *profileId = centralInfo[@"ProfileId"];
+        if (!profileId.length) return nil;
+        NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
+        NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:[identityDir stringByAppendingPathComponent:@"device_ids.plist"]];
+        NSString *gpuFamily = [deviceIds[@"GPUFamily"] isKindOfClass:[NSString class]] ? deviceIds[@"GPUFamily"] : nil;
+        if (gpuFamily.length) return gpuFamily;
+        NSString *webgl = [deviceIds[@"WebGLRenderer"] isKindOfClass:[NSString class]] ? deviceIds[@"WebGLRenderer"] : nil;
+        return webgl.length ? webgl : nil;
+    } @catch (__unused NSException *e) {
+        return nil;
+    }
 }
 
 // Hook MTLDevice name
@@ -171,11 +171,11 @@ static NSString* getGPUName(NSString *model) {
 
 static NSString *(*orig_MTLDevice_name)(id, SEL);
 static NSString *hook_MTLDevice_name(id self, SEL _cmd) {
-    NSString *model = getSpoofedModel();
-    if (model) {
-        NSString *gpuName = getGPUName(model);
-        // PXLog(@"[MissingHooks] Spoofing GPU Name to %@", gpuName);
-        return gpuName;
+    if (shouldSpoofForCurrentProcess_Missing()) {
+        NSString *gpuName = getSpoofedGPUFamily();
+        if (gpuName.length) {
+            return gpuName;
+        }
     }
     return orig_MTLDevice_name(self, _cmd);
 }

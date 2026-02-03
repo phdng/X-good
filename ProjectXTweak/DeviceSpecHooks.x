@@ -453,12 +453,13 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
     }
     
     // IMPORTANT:
-    // Do NOT spoof UIScreen bounds/scale for Safari/Auth stack processes.
+    // By default, do NOT spoof UIScreen bounds/scale for Safari/Auth stack processes.
     // In SafariViewService/WebKit services, spoofing UIScreen can desync touch hit-testing
     // and break critical flows (e.g. Google login buttons not clickable).
+    // In FullSpoof test mode we override this to intentionally stress web flows.
     NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
     NSString *procName = [[NSProcessInfo processInfo] processName];
-    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, procName)) {
+    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, procName) && !PXFullSpoofTestModeEnabled()) {
         hasCheckedProcess = YES;
         cachedDecision = NO;
         return NO;
@@ -494,7 +495,7 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 - (CGRect)bounds {
     CGRect originalBounds = %orig;
     
-    if (!isSpoofingEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
+    if (!isSpoofingEnabled() || !PXDisplayUIScaleSpoofEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
         return originalBounds;
     }
     
@@ -537,7 +538,7 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 - (CGRect)nativeBounds {
     CGRect originalNativeBounds = %orig;
     
-    if (!isSpoofingEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
+    if (!isSpoofingEnabled() || !PXDisplayPixelMetricsSpoofEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
         return originalNativeBounds;
     }
     
@@ -776,7 +777,7 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
     // These hooks can break complex login flows (e.g. Google sign-in) in SafariViewService.
     NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
     NSString *proc = [NSProcessInfo processInfo].processName;
-    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, proc)) {
+    if (!PXFullSpoofTestModeEnabled() && PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, proc)) {
         return;
     }
     
@@ -953,12 +954,29 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
 
 %hook UIScreen
 
+// Keep nativeScale aligned with scale when UI scale spoofing is enabled.
+- (CGFloat)nativeScale {
+    CGFloat original = %orig;
+
+    if (!isSpoofingEnabled() || !PXDisplayUIScaleSpoofEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
+        return original;
+    }
+
+    NSDictionary *specs = getDeviceSpecs();
+    if (!specs) return original;
+
+    CGFloat pixelRatio = [specs[@"devicePixelRatio"] floatValue];
+    if (pixelRatio <= 0) return original;
+
+    return pixelRatio;
+}
+
 // For screen density
 - (CGFloat)native_scale {
     CGFloat originalScale = %orig;
     
     // Avoid spoofing screen density in Safari/Auth stack; it can desync page layout/touch logic.
-    if (!isSpoofingEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
+    if (!isSpoofingEnabled() || !PXDisplayUIScaleSpoofEnabled() || !shouldSpoofResolutionForCurrentProcess()) {
         return originalScale;
     }
     
@@ -1019,7 +1037,7 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
     // Web compatibility: avoid JS property overrides in Safari/Auth stack.
     NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
     NSString *proc = [NSProcessInfo processInfo].processName;
-    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, proc)) {
+    if (!PXFullSpoofTestModeEnabled() && PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, proc)) {
         return;
     }
     
@@ -1063,7 +1081,7 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
     // Web compatibility: avoid JS property overrides in Safari/Auth stack.
     NSString *bid = [[NSBundle mainBundle] bundleIdentifier];
     NSString *proc = [NSProcessInfo processInfo].processName;
-    if (PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, proc)) {
+    if (!PXFullSpoofTestModeEnabled() && PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bid, proc)) {
         return;
     }
     

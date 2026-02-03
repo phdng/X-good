@@ -42,6 +42,10 @@ static BOOL PXReadSecuritySettingBool(NSString *key) {
 static NSTimeInterval gLastSettingsRead = 0;
 static BOOL gCachedDeviceSpoofEnabled = NO;
 static BOOL gCachedSafariStackEnabled = NO;
+static BOOL gCachedFullSpoofTestModeEnabled = NO;
+static BOOL gCachedDisplayUIScaleEnabled = YES;
+static BOOL gCachedDisplayPixelMetricsEnabled = YES;
+static BOOL gCachedDisplayWebScreenEnabled = YES;
 static BOOL gCacheValid = NO;
 
 static void PXInvalidateScopeCache(void) {
@@ -62,14 +66,41 @@ static void PXEnsureScopeCache(void) {
 
     BOOL deviceEnabled = PXReadSecuritySettingBool(@"deviceSpoofingEnabled");
 
+    // Full spoof test mode: force Safari/Auth stack spoofing ON (for failure testing).
+    BOOL fullTest = PXReadSecuritySettingBool(@"fullSpoofTestModeEnabled");
+
     // Default behavior: if safariStackSpoofEnabled is absent, follow deviceSpoofingEnabled.
     BOOL safariEnabled = deviceEnabled;
     if (PXReadSecuritySettingHasKey(@"safariStackSpoofEnabled")) {
         safariEnabled = deviceEnabled && PXReadSecuritySettingBool(@"safariStackSpoofEnabled");
     }
+    // In test mode, always allow Safari/Auth stack spoofing when global spoofing is enabled.
+    if (deviceEnabled && fullTest) {
+        safariEnabled = YES;
+    }
+
+    // Display spoof controls. Defaults are ON when keys are absent.
+    BOOL uiScaleEnabled = deviceEnabled;
+    if (PXReadSecuritySettingHasKey(@"displayUIScaleSpoofEnabled")) {
+        uiScaleEnabled = deviceEnabled && PXReadSecuritySettingBool(@"displayUIScaleSpoofEnabled");
+    }
+
+    BOOL pixelMetricsEnabled = deviceEnabled;
+    if (PXReadSecuritySettingHasKey(@"displayPixelMetricsSpoofEnabled")) {
+        pixelMetricsEnabled = deviceEnabled && PXReadSecuritySettingBool(@"displayPixelMetricsSpoofEnabled");
+    }
+
+    BOOL webScreenEnabled = deviceEnabled;
+    if (PXReadSecuritySettingHasKey(@"displayWebScreenSpoofEnabled")) {
+        webScreenEnabled = deviceEnabled && PXReadSecuritySettingBool(@"displayWebScreenSpoofEnabled");
+    }
 
     gCachedDeviceSpoofEnabled = deviceEnabled;
+    gCachedFullSpoofTestModeEnabled = (deviceEnabled && fullTest);
     gCachedSafariStackEnabled = safariEnabled;
+    gCachedDisplayUIScaleEnabled = uiScaleEnabled;
+    gCachedDisplayPixelMetricsEnabled = pixelMetricsEnabled;
+    gCachedDisplayWebScreenEnabled = webScreenEnabled;
     gCacheValid = YES;
 }
 
@@ -90,6 +121,26 @@ BOOL PXDeviceSpoofingEnabled(void) {
 BOOL PXSafariStackSpoofEnabled(void) {
     PXEnsureScopeCache();
     return gCachedSafariStackEnabled;
+}
+
+BOOL PXFullSpoofTestModeEnabled(void) {
+    PXEnsureScopeCache();
+    return gCachedFullSpoofTestModeEnabled;
+}
+
+BOOL PXDisplayUIScaleSpoofEnabled(void) {
+    PXEnsureScopeCache();
+    return gCachedDisplayUIScaleEnabled;
+}
+
+BOOL PXDisplayPixelMetricsSpoofEnabled(void) {
+    PXEnsureScopeCache();
+    return gCachedDisplayPixelMetricsEnabled;
+}
+
+BOOL PXDisplayWebScreenSpoofEnabled(void) {
+    PXEnsureScopeCache();
+    return gCachedDisplayWebScreenEnabled;
 }
 
 BOOL PXIsSafariStackProcess(NSString *bundleID, NSString *processName) {

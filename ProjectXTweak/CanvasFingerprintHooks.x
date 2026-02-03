@@ -39,6 +39,137 @@ static BOOL isCanvasFingerprintProtectionEnabledForCurrentApp(void) {
     return enabled ? [enabled boolValue] : NO;
 }
 
+static NSDictionary *PXReadCurrentDeviceIdsForFingerprint(void) {
+    @try {
+        NSArray *possibleProfilesPaths = @[@"/var/mobile/Library/WeaponX/Profiles",
+                                          @"/private/var/mobile/Library/WeaponX/Profiles",
+                                          @"/var/mobile/Library/WeaponX/Profiles"];
+        NSFileManager *fm = [NSFileManager defaultManager];
+        for (NSString *profilesPath in possibleProfilesPaths) {
+            if (![fm fileExistsAtPath:profilesPath]) continue;
+            NSString *centralInfoPath = [profilesPath stringByAppendingPathComponent:@"current_profile_info.plist"];
+            NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
+            NSString *profileId = centralInfo[@"ProfileId"];
+            if (!profileId.length) continue;
+            NSString *identityDir = [[profilesPath stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"identity"];
+            NSString *deviceIdsPath = [identityDir stringByAppendingPathComponent:@"device_ids.plist"];
+            NSDictionary *deviceIds = [NSDictionary dictionaryWithContentsOfFile:deviceIdsPath];
+            if ([deviceIds isKindOfClass:[NSDictionary class]] && deviceIds.count) {
+                return deviceIds;
+            }
+        }
+    } @catch (__unused NSException *e) {
+    }
+    return nil;
+}
+
+static uint32_t PXStableSeedForBundle(NSString *bundleID, NSDictionary *deviceIds) {
+    // FNV-1a 32-bit
+    uint32_t h = 2166136261u;
+    NSString *model = [deviceIds[@"DeviceModel"] isKindOfClass:[NSString class]] ? deviceIds[@"DeviceModel"] : @"";
+    NSString *build = [deviceIds[@"IOSBuild"] isKindOfClass:[NSString class]] ? deviceIds[@"IOSBuild"] : @"";
+    NSString *s = [NSString stringWithFormat:@"%@|%@|%@", bundleID ?: @"", model, build];
+    NSData *data = [s dataUsingEncoding:NSUTF8StringEncoding];
+    const uint8_t *bytes = (const uint8_t *)data.bytes;
+    for (NSUInteger i = 0; i < data.length; i++) {
+        h ^= bytes[i];
+        h *= 16777619u;
+    }
+    if (h == 0) h = 1;
+    return h;
+}
+
+static BOOL PXParseResolutionString(NSString *res, NSInteger *outW, NSInteger *outH) {
+    if (!outW || !outH) return NO;
+    *outW = 0; *outH = 0;
+    if (![res isKindOfClass:[NSString class]] || res.length == 0) return NO;
+    NSArray *parts = [res componentsSeparatedByString:@"x"];
+    if (parts.count != 2) return NO;
+    NSInteger w = [parts[0] integerValue];
+    NSInteger h = [parts[1] integerValue];
+    if (w <= 0 || h <= 0) return NO;
+    *outW = w; *outH = h;
+    return YES;
+}
+
+static NSString *PXBuildWebScreenSpoofScript(NSDictionary *deviceIds) {
+    if (!PXDisplayWebScreenSpoofEnabled()) return nil;
+
+    NSString *viewportRes = [deviceIds[@"ViewportResolution"] isKindOfClass:[NSString class]] ? deviceIds[@"ViewportResolution"] : nil;
+    NSNumber *dprNum = [deviceIds[@"DevicePixelRatio"] isKindOfClass:[NSNumber class]] ? deviceIds[@"DevicePixelRatio"] : nil;
+    CGFloat dpr = dprNum ? [dprNum floatValue] : 0.0;
+    if (dpr <= 0.0) dpr = 1.0;
+
+    NSInteger vwPx = 0, vhPx = 0;
+    if (!PXParseResolutionString(viewportRes, &vwPx, &vhPx)) {
+        return nil;
+    }
+
+    // Convert pixels -> CSS pixels/points.
+    NSInteger wPt = (NSInteger)llround((double)vwPx / (double)dpr);
+    NSInteger hPt = (NSInteger)llround((double)vhPx / (double)dpr);
+    NSInteger sw = MIN(wPt, hPt);
+    NSInteger sh = MAX(wPt, hPt);
+
+    return [NSString stringWithFormat:
+            @"(function(){try{\n"
+             "if(window.__weaponx_screen_spoof__)return;\n"
+             "window.__weaponx_screen_spoof__=true;\n"
+             "const dpr=%.6g;const sw=%ld;const sh=%ld;\n"
+             "function def(obj,prop,val){try{Object.defineProperty(obj,prop,{get:function(){return val;},configurable:true});}catch(e){}}\n"
+             "def(window,'devicePixelRatio',dpr);\n"
+             "try{if(window.screen){def(screen,'width',sw);def(screen,'height',sh);def(screen,'availWidth',sw);def(screen,'availHeight',sh);} }catch(e){}\n"
+             "def(window,'innerWidth',sw);def(window,'innerHeight',sh);\n"
+             "def(window,'outerWidth',sw);def(window,'outerHeight',sh);\n"
+             "try{if(window.visualViewport){def(visualViewport,'width',sw);def(visualViewport,'height',sh);def(visualViewport,'scale',1);} }catch(e){}\n"
+             "}catch(e){}})();",
+            dpr, (long)sw, (long)sh];
+}
+
+static NSString *PXBuildSeededFingerprintProtectionScript(NSString *bundleID) {
+    NSDictionary *deviceIds = PXReadCurrentDeviceIdsForFingerprint();
+    if (!deviceIds) return nil;
+
+    uint32_t seed = PXStableSeedForBundle(bundleID, deviceIds);
+
+    NSString *unmaskedVendor = @"Apple Inc.";
+    NSString *unmaskedRenderer = [deviceIds[@"GPUFamily"] isKindOfClass:[NSString class]] ? deviceIds[@"GPUFamily"] : nil;
+    if (!unmaskedRenderer.length) {
+        unmaskedRenderer = [deviceIds[@"WebGLRenderer"] isKindOfClass:[NSString class]] ? deviceIds[@"WebGLRenderer"] : @"Apple GPU";
+    }
+
+    // NOTE: This script is intended for test builds. It is deterministic per bundle/profile.
+    return [NSString stringWithFormat:
+            @"(function(){try{\n"
+             "if(window.__weaponx_fp_spoof__)return;\n"
+             "window.__weaponx_fp_spoof__=true;\n"
+             "let __wxSeed=%u>>>0;\n"
+             "function __wxRand(){__wxSeed^=(__wxSeed<<13);__wxSeed>>>=0;__wxSeed^=(__wxSeed>>>17);__wxSeed>>>=0;__wxSeed^=(__wxSeed<<5);__wxSeed>>>=0;return(__wxSeed>>>0)/4294967296;}\n"
+             "function __wxShuffle(a){for(let i=a.length-1;i>0;i--){const j=Math.floor(__wxRand()*(i+1));const t=a[i];a[i]=a[j];a[j]=t;}return a;}\n"
+             "const origToDataURL=HTMLCanvasElement&&HTMLCanvasElement.prototype?HTMLCanvasElement.prototype.toDataURL:null;\n"
+             "const origToBlob=HTMLCanvasElement&&HTMLCanvasElement.prototype?HTMLCanvasElement.prototype.toBlob:null;\n"
+             "const origGetImageData=window.CanvasRenderingContext2D?CanvasRenderingContext2D.prototype.getImageData:null;\n"
+             "function addNoise(canvas){try{const ctx=canvas.getContext('2d');if(!ctx)return;const imageData=ctx.getImageData(0,0,canvas.width,canvas.height);const pixels=imageData.data;for(let i=0;i<pixels.length;i+=4){if(__wxRand()<0.02){const s=(__wxRand()<0.5?-1:1);pixels[i]=Math.max(0,Math.min(255,pixels[i]+s));pixels[i+1]=Math.max(0,Math.min(255,pixels[i+1]+s));pixels[i+2]=Math.max(0,Math.min(255,pixels[i+2]+s));}}ctx.putImageData(imageData,0,0);}catch(e){}}\n"
+             "if(origToDataURL){HTMLCanvasElement.prototype.toDataURL=function(){addNoise(this);return origToDataURL.apply(this,arguments);};}\n"
+             "if(origToBlob){HTMLCanvasElement.prototype.toBlob=function(callback){addNoise(this);return origToBlob.apply(this,arguments);};}\n"
+             "if(origGetImageData){CanvasRenderingContext2D.prototype.getImageData=function(){const imageData=origGetImageData.apply(this,arguments);try{const pixels=imageData.data;for(let i=0;i<pixels.length;i+=4){if(__wxRand()<0.02){const s=(__wxRand()<0.5?-1:1);pixels[i]=Math.max(0,Math.min(255,pixels[i]+s));pixels[i+1]=Math.max(0,Math.min(255,pixels[i+1]+s));pixels[i+2]=Math.max(0,Math.min(255,pixels[i+2]+s));}}}catch(e){}return imageData;};}\n"
+             "if(window.WebGLRenderingContext){\n"
+             "const spoofedVendor='%@';const spoofedRenderer='%@';\n"
+             "const origGetParameter=WebGLRenderingContext.prototype.getParameter;\n"
+             "WebGLRenderingContext.prototype.getParameter=function(param){if(param===37445)return spoofedVendor;if(param===37446)return spoofedRenderer;return origGetParameter.call(this,param);};\n"
+             "const origGetSupportedExtensions=WebGLRenderingContext.prototype.getSupportedExtensions;\n"
+             "WebGLRenderingContext.prototype.getSupportedExtensions=function(){const exts=origGetSupportedExtensions.call(this)||[];return __wxShuffle(exts.slice());};\n"
+             "const origGetShaderPrecisionFormat=WebGLRenderingContext.prototype.getShaderPrecisionFormat;\n"
+             "WebGLRenderingContext.prototype.getShaderPrecisionFormat=function(){const res=origGetShaderPrecisionFormat.apply(this,arguments);try{if(res&&typeof res==='object'){res.precision+=Math.floor(__wxRand()*2);}}catch(e){}return res;};\n"
+             "}\n"
+             "if(window.AnalyserNode){const orig=AnalyserNode.prototype.getFloatFrequencyData;AnalyserNode.prototype.getFloatFrequencyData=function(array){orig.call(this,array);for(let i=0;i<array.length;i++){array[i]+=(__wxRand()-0.5)*0.1;}};}\n"
+             "if(window.AudioBuffer){const orig=AudioBuffer.prototype.getChannelData;AudioBuffer.prototype.getChannelData=function(){const data=orig.apply(this,arguments);for(let i=0;i<data.length;i+=100){data[i]+=(__wxRand()-0.5)*0.0001;}return data;};}\n"
+             "if(window.CanvasRenderingContext2D){const orig=CanvasRenderingContext2D.prototype.measureText;CanvasRenderingContext2D.prototype.measureText=function(text){const r=orig.apply(this,arguments);try{Object.defineProperty(r,'width',{value:r.width*(1+(__wxRand()-0.5)*0.01)});}catch(e){}return r;};}\n"
+             "if(window.navigator&&window.navigator.fonts&&window.navigator.fonts.query){const orig=window.navigator.fonts.query;window.navigator.fonts.query=function(){return orig.apply(this,arguments).then(function(fonts){try{return __wxShuffle(fonts.slice());}catch(e){return fonts;}});};}\n"
+             "}catch(e){}})();",
+            seed, unmaskedVendor, unmaskedRenderer];
+}
+
 // Update shouldProtectBundle to use only the new function
 static BOOL shouldProtectBundle(NSString *bundleID) {
     if (!bundleID) return NO;
@@ -53,7 +184,7 @@ static BOOL shouldProtectBundle(NSString *bundleID) {
             return [cachedDecision boolValue];
         }
     }
-    BOOL shouldProtect = isCanvasFingerprintProtectionEnabledForCurrentApp();
+    BOOL shouldProtect = isCanvasFingerprintProtectionEnabledForCurrentApp() || PXFullSpoofTestModeEnabled();
     cachedBundleDecisions[bundleID] = @(shouldProtect);
     cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
     return shouldProtect;
@@ -138,117 +269,13 @@ static BOOL isInScopedAppsList(void) {
 // Helper: Re-inject JS into all live WKWebViews
 static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID || !shouldProtectBundle(bundleID)) return;
-    // The JS string must match the one injected in WKWebView hook
-    NSString *canvasProtectionScript =
-        @"(function() {"
-        // --- Canvas 2D & WebGL Pixel Noise (existing) ---
-        "    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;"
-        "    const origToBlob = HTMLCanvasElement.prototype.toBlob;"
-        "    const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;"
-        "    function addNoise(canvas) {"
-        "        try {"
-        "            const ctx = canvas.getContext('2d');"
-        "            if (!ctx) return;"
-        "            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);"
-        "            const pixels = imageData.data;"
-        "            for (let i = 0; i < pixels.length; i += 4) {"
-        "                if (Math.random() < 0.02) {"
-        "                    pixels[i] = Math.max(0, Math.min(255, pixels[i] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                    pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                    pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                }"
-        "            }"
-        "            ctx.putImageData(imageData, 0, 0);"
-        "        } catch (e) {}"
-        "    }"
-        "    HTMLCanvasElement.prototype.toDataURL = function() { addNoise(this); return origToDataURL.apply(this, arguments); };"
-        "    HTMLCanvasElement.prototype.toBlob = function(callback) { addNoise(this); return origToBlob.apply(this, arguments); };"
-        "    CanvasRenderingContext2D.prototype.getImageData = function() {"
-        "        const imageData = origGetImageData.apply(this, arguments);"
-        "        const pixels = imageData.data;"
-        "        for (let i = 0; i < pixels.length; i += 4) {"
-        "            if (Math.random() < 0.02) {"
-        "                pixels[i] = Math.max(0, Math.min(255, pixels[i] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (Math.random() < 0.5 ? -1 : 1)));"
-        "            }"
-        "        }"
-        "        return imageData;"
-        "    };"
-        "    const origReadPixels = WebGLRenderingContext.prototype.readPixels;"
-        "    WebGLRenderingContext.prototype.readPixels = function(x, y, width, height, format, type, pixels) {"
-        "        origReadPixels.apply(this, arguments);"
-        "        if (pixels instanceof Uint8Array) {"
-        "            for (let i = 0; i < pixels.length; i += 4) {"
-        "                if (Math.random() < 0.02) {"
-        "                    pixels[i] = Math.max(0, Math.min(255, pixels[i] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                    pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                    pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                }"
-        "            }"
-        "        }"
-        "    };"
-        // --- Audio Fingerprinting Protection ---
-        "    if (window.AnalyserNode) {"
-        "        const origGetFloatFrequencyData = AnalyserNode.prototype.getFloatFrequencyData;"
-        "        AnalyserNode.prototype.getFloatFrequencyData = function(array) {"
-        "            origGetFloatFrequencyData.call(this, array);"
-        "            for (let i = 0; i < array.length; i++) {"
-        "                array[i] += (Math.random() - 0.5) * 0.1;"
-        "            }"
-        "        };"
-        "    }"
-        "    if (window.AudioBuffer) {"
-        "        const origGetChannelData = AudioBuffer.prototype.getChannelData;"
-        "        AudioBuffer.prototype.getChannelData = function() {"
-        "            const data = origGetChannelData.apply(this, arguments);"
-        "            for (let i = 0; i < data.length; i += 100) {"
-        "                data[i] += (Math.random() - 0.5) * 0.0001;"
-        "            }"
-        "            return data;"
-        "        };"
-        "    }"
-        // --- WebGL Advanced Fingerprinting Protection ---
-        "    const spoofedVendor = 'Apple Inc.';"
-        "    const spoofedRenderer = 'Apple GPU';"
-        "    const origGetParameter = WebGLRenderingContext.prototype.getParameter;"
-        "    WebGLRenderingContext.prototype.getParameter = function(param) {"
-        "        if (param === 37445) return spoofedVendor;"
-        "        if (param === 37446) return spoofedRenderer;"
-        "        if (param === this.MAX_TEXTURE_SIZE) return 4096 + Math.floor(Math.random() * 10);"
-        "        return origGetParameter.call(this, param);"
-        "    };"
-        "    const origGetSupportedExtensions = WebGLRenderingContext.prototype.getSupportedExtensions;"
-        "    WebGLRenderingContext.prototype.getSupportedExtensions = function() {"
-        "        const exts = origGetSupportedExtensions.call(this) || [];"
-        "        return exts.slice().sort(() => Math.random() - 0.5);"
-        "    };"
-        "    const origGetShaderPrecisionFormat = WebGLRenderingContext.prototype.getShaderPrecisionFormat;"
-        "    WebGLRenderingContext.prototype.getShaderPrecisionFormat = function() {"
-        "        const res = origGetShaderPrecisionFormat.apply(this, arguments);"
-        "        if (res && typeof res === 'object') { res.precision += Math.floor(Math.random() * 2); }"
-        "        return res;"
-        "    };"
-        // --- Font Fingerprinting Protection ---
-        "    if (window.CanvasRenderingContext2D) {"
-        "        const origMeasureText = CanvasRenderingContext2D.prototype.measureText;"
-        "        CanvasRenderingContext2D.prototype.measureText = function(text) {"
-        "            const result = origMeasureText.apply(this, arguments);"
-        "            Object.defineProperty(result, 'width', { value: result.width * (1 + (Math.random() - 0.5) * 0.01) });"
-        "            return result;"
-        "        };"
-        "    }"
-        "    if (window.navigator && window.navigator.fonts && window.navigator.fonts.query) {"
-        "        const origAvailableFonts = window.navigator.fonts.query;"
-        "        window.navigator.fonts.query = function() {"
-        "            return origAvailableFonts.apply(this, arguments).then(fonts => {"
-        "                return fonts.slice().sort(() => Math.random() - 0.5);"
-        "            });"
-        "        };"
-        "    }"
-        "    console.log('[WeaponX] Canvas, Audio, WebGL, and Font fingerprinting protection enabled');"
-        "})();";
+    if (!bundleID) return;
+
+    NSDictionary *deviceIds = PXReadCurrentDeviceIdsForFingerprint();
+    NSString *fpScript = shouldProtectBundle(bundleID) ? PXBuildSeededFingerprintProtectionScript(bundleID) : nil;
+    NSString *screenScript = deviceIds ? PXBuildWebScreenSpoofScript(deviceIds) : nil;
+    if (!fpScript && !screenScript) return;
+
     // Modern iOS 15+ way: enumerate all UIWindowScene windows
     for (UIScene *scene in [UIApplication sharedApplication].connectedScenes) {
         if (![scene isKindOfClass:[UIWindowScene class]]) continue;
@@ -257,7 +284,8 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
             for (UIView *view in window.subviews) {
                 if ([view isKindOfClass:[WKWebView class]]) {
                     WKWebView *webView = (WKWebView *)view;
-                    [webView evaluateJavaScript:canvasProtectionScript completionHandler:nil];
+                    if (screenScript) [webView evaluateJavaScript:screenScript completionHandler:nil];
+                    if (fpScript) [webView evaluateJavaScript:fpScript completionHandler:nil];
                 }
                 // Recursively search subviews
                 NSMutableArray *stack = [NSMutableArray arrayWithArray:view.subviews];
@@ -266,7 +294,8 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
                     [stack removeLastObject];
                     if ([subview isKindOfClass:[WKWebView class]]) {
                         WKWebView *webView = (WKWebView *)subview;
-                        [webView evaluateJavaScript:canvasProtectionScript completionHandler:nil];
+                        if (screenScript) [webView evaluateJavaScript:screenScript completionHandler:nil];
+                        if (fpScript) [webView evaluateJavaScript:fpScript completionHandler:nil];
                     }
                     [stack addObjectsFromArray:subview.subviews];
                 }
@@ -283,135 +312,36 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
 - (void)setUserContentController:(WKUserContentController *)userContentController {
     %orig;
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID || !shouldProtectBundle(bundleID)) return;
-    // Only inject if not already present
-    BOOL alreadyInjected = NO;
+    if (!bundleID) return;
+
+    NSDictionary *deviceIds = PXReadCurrentDeviceIdsForFingerprint();
+    BOOL wantFP = shouldProtectBundle(bundleID);
+    BOOL wantScreen = (deviceIds != nil) && PXDisplayWebScreenSpoofEnabled();
+    if (!wantFP && !wantScreen) return;
+
+    BOOL hasFP = NO;
+    BOOL hasScreen = NO;
     for (WKUserScript *script in userContentController.userScripts) {
-        if ([script.source containsString:@"[WeaponX] Canvas, Audio, WebGL, and Font fingerprinting protection enabled"]) {
-            alreadyInjected = YES;
-            break;
+        NSString *src = script.source;
+        if ([src containsString:@"__weaponx_fp_spoof__"]) hasFP = YES;
+        if ([src containsString:@"__weaponx_screen_spoof__"]) hasScreen = YES;
+    }
+
+    if (wantScreen && !hasScreen) {
+        NSString *screenScript = PXBuildWebScreenSpoofScript(deviceIds);
+        if (screenScript.length) {
+            WKUserScript *s = [[NSClassFromString(@"WKUserScript") alloc] initWithSource:screenScript injectionTime:0 forMainFrameOnly:NO];
+            [userContentController addUserScript:s];
         }
     }
-    if (alreadyInjected) return;
-    // JS with MutationObserver for iframes
-    NSString *canvasProtectionScript =
-        @"(function() {"
-        "console.log('[WeaponX] Canvas, Audio, WebGL, and Font fingerprinting protection enabled');"
-        // --- Canvas 2D & WebGL Pixel Noise (existing) ---
-        "    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;"
-        "    const origToBlob = HTMLCanvasElement.prototype.toBlob;"
-        "    const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;"
-        "    function addNoise(canvas) {"
-        "        try {"
-        "            const ctx = canvas.getContext('2d');"
-        "            if (!ctx) return;"
-        "            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);"
-        "            const pixels = imageData.data;"
-        "            for (let i = 0; i < pixels.length; i += 4) {"
-        "                if (Math.random() < 0.02) {"
-        "                    pixels[i] = Math.max(0, Math.min(255, pixels[i] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                    pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                    pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                }"
-        "            }"
-        "            ctx.putImageData(imageData, 0, 0);"
-        "        } catch (e) {}"
-        "    }"
-        "    HTMLCanvasElement.prototype.toDataURL = function() { addNoise(this); return origToDataURL.apply(this, arguments); };"
-        "    HTMLCanvasElement.prototype.toBlob = function(callback) { addNoise(this); return origToBlob.apply(this, arguments); };"
-        "    CanvasRenderingContext2D.prototype.getImageData = function() {"
-        "        const imageData = origGetImageData.apply(this, arguments);"
-        "        const pixels = imageData.data;"
-        "        for (let i = 0; i < pixels.length; i += 4) {"
-        "            if (Math.random() < 0.02) {"
-        "                pixels[i] = Math.max(0, Math.min(255, pixels[i] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (Math.random() < 0.5 ? -1 : 1)));"
-        "            }"
-        "        }"
-        "        return imageData;"
-        "    };"
-        // --- Audio Fingerprinting Protection ---
-        "    if (window.AnalyserNode) {"
-        "        const origGetFloatFrequencyData = AnalyserNode.prototype.getFloatFrequencyData;"
-        "        AnalyserNode.prototype.getFloatFrequencyData = function(array) {"
-        "            origGetFloatFrequencyData.call(this, array);"
-        "            for (let i = 0; i < array.length; i++) {"
-        "                array[i] += (Math.random() - 0.5) * 0.1;"
-        "            }"
-        "        };"
-        "    }"
-        "    if (window.AudioBuffer) {"
-        "        const origGetChannelData = AudioBuffer.prototype.getChannelData;"
-        "        AudioBuffer.prototype.getChannelData = function() {"
-        "            const data = origGetChannelData.apply(this, arguments);"
-        "            for (let i = 0; i < data.length; i += 100) {"
-        "                data[i] += (Math.random() - 0.5) * 0.0001;"
-        "            }"
-        "            return data;"
-        "        };"
-        "    }"
-        // --- WebGL Advanced Fingerprinting Protection ---
-        "    const spoofedVendor = 'Apple Inc.';"
-        "    const spoofedRenderer = 'Apple GPU';"
-        "    const origGetParameter = WebGLRenderingContext.prototype.getParameter;"
-        "    WebGLRenderingContext.prototype.getParameter = function(param) {"
-        "        if (param === 37445) return spoofedVendor;"
-        "        if (param === 37446) return spoofedRenderer;"
-        "        if (param === this.MAX_TEXTURE_SIZE) return 4096 + Math.floor(Math.random() * 10);"
-        "        return origGetParameter.call(this, param);"
-        "    };"
-        "    const origGetSupportedExtensions = WebGLRenderingContext.prototype.getSupportedExtensions;"
-        "    WebGLRenderingContext.prototype.getSupportedExtensions = function() {"
-        "        const exts = origGetSupportedExtensions.call(this) || [];"
-        "        return exts.slice().sort(() => Math.random() - 0.5);"
-        "    };"
-        "    const origGetShaderPrecisionFormat = WebGLRenderingContext.prototype.getShaderPrecisionFormat;"
-        "    WebGLRenderingContext.prototype.getShaderPrecisionFormat = function() {"
-        "        const res = origGetShaderPrecisionFormat.apply(this, arguments);"
-        "        if (res && typeof res === 'object') { res.precision += Math.floor(Math.random() * 2); }"
-        "        return res;"
-        "    };"
-        // --- Font Fingerprinting Protection ---
-        "    if (window.CanvasRenderingContext2D) {"
-        "        const origMeasureText = CanvasRenderingContext2D.prototype.measureText;"
-        "        CanvasRenderingContext2D.prototype.measureText = function(text) {"
-        "            const result = origMeasureText.apply(this, arguments);"
-        "            Object.defineProperty(result, 'width', { value: result.width * (1 + (Math.random() - 0.5) * 0.01) });"
-        "            return result;"
-        "        };"
-        "    }"
-        "    if (window.navigator && window.navigator.fonts && window.navigator.fonts.query) {"
-        "        const origAvailableFonts = window.navigator.fonts.query;"
-        "        window.navigator.fonts.query = function() {"
-        "            return origAvailableFonts.apply(this, arguments).then(fonts => {"
-        "                return fonts.slice().sort(() => Math.random() - 0.5);"
-        "            });"
-        "        };"
-        "    }"
-        // MutationObserver for iframes
-        "    function injectAllFrames(win) {"
-        "        try {"
-        "            win.eval('(' + arguments.callee.toString() + ')(window)');"
-        "        } catch (e) {}"
-        "        for (let i = 0; i < win.frames.length; i++) {"
-        "            try { injectAllFrames(win.frames[i]); } catch (e) {}"
-        "        }"
-        "    }"
-        "    injectAllFrames(window);"
-        "    const observer = new MutationObserver(function(mutations) {"
-        "        mutations.forEach(function(mutation) {"
-        "            mutation.addedNodes.forEach(function(node) {"
-        "                if (node.tagName === 'IFRAME') {"
-        "                    try { injectAllFrames(node.contentWindow); } catch (e) {}"
-        "                }"
-        "            });"
-        "        });"
-        "    });"
-        "    observer.observe(document, { childList: true, subtree: true });"
-        "})();";
-    WKUserScript *script = [[NSClassFromString(@"WKUserScript") alloc] initWithSource:canvasProtectionScript injectionTime:1 forMainFrameOnly:NO];
-    [userContentController addUserScript:script];
+
+    if (wantFP && !hasFP) {
+        NSString *fpScript = PXBuildSeededFingerprintProtectionScript(bundleID);
+        if (fpScript.length) {
+            WKUserScript *s = [[NSClassFromString(@"WKUserScript") alloc] initWithSource:fpScript injectionTime:0 forMainFrameOnly:NO];
+            [userContentController addUserScript:s];
+        }
+    }
 }
 
 %end
@@ -425,132 +355,23 @@ static void reinjectFingerprintProtectionScriptToAllWKWebViews() {
     %orig;
     
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-    if (!bundleID || !shouldProtectBundle(bundleID)) {
-        return;
+    if (!bundleID) return;
+
+    NSDictionary *deviceIds = PXReadCurrentDeviceIdsForFingerprint();
+    NSString *screenScript = deviceIds ? PXBuildWebScreenSpoofScript(deviceIds) : nil;
+    NSString *fpScript = shouldProtectBundle(bundleID) ? PXBuildSeededFingerprintProtectionScript(bundleID) : nil;
+    if (!screenScript && !fpScript) return;
+
+    if (screenScript.length) {
+        [self evaluateJavaScript:screenScript completionHandler:nil];
     }
-    
-    // JavaScript to protect against canvas, audio, WebGL, and font fingerprinting
-    NSString *canvasProtectionScript = 
-        @"(function() {"
-        // --- Canvas 2D & WebGL Pixel Noise (existing) ---
-        "    const origToDataURL = HTMLCanvasElement.prototype.toDataURL;"
-        "    const origToBlob = HTMLCanvasElement.prototype.toBlob;"
-        "    const origGetImageData = CanvasRenderingContext2D.prototype.getImageData;"
-        "    function addNoise(canvas) {"
-        "        try {"
-        "            const ctx = canvas.getContext('2d');"
-        "            if (!ctx) return;"
-        "            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);"
-        "            const pixels = imageData.data;"
-        "            for (let i = 0; i < pixels.length; i += 4) {"
-        "                if (Math.random() < 0.02) {"
-        "                    pixels[i] = Math.max(0, Math.min(255, pixels[i] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                    pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                    pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                }"
-        "            }"
-        "            ctx.putImageData(imageData, 0, 0);"
-        "        } catch (e) {}"
-        "    }"
-        "    HTMLCanvasElement.prototype.toDataURL = function() { addNoise(this); return origToDataURL.apply(this, arguments); };"
-        "    HTMLCanvasElement.prototype.toBlob = function(callback) { addNoise(this); return origToBlob.apply(this, arguments); };"
-        "    CanvasRenderingContext2D.prototype.getImageData = function() {"
-        "        const imageData = origGetImageData.apply(this, arguments);"
-        "        const pixels = imageData.data;"
-        "        for (let i = 0; i < pixels.length; i += 4) {"
-        "            if (Math.random() < 0.02) {"
-        "                pixels[i] = Math.max(0, Math.min(255, pixels[i] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (Math.random() < 0.5 ? -1 : 1)));"
-        "            }"
-        "        }"
-        "        return imageData;"
-        "    };"
-        "    const origReadPixels = WebGLRenderingContext.prototype.readPixels;"
-        "    WebGLRenderingContext.prototype.readPixels = function(x, y, width, height, format, type, pixels) {"
-        "        origReadPixels.apply(this, arguments);"
-        "        if (pixels instanceof Uint8Array) {"
-        "            for (let i = 0; i < pixels.length; i += 4) {"
-        "                if (Math.random() < 0.02) {"
-        "                    pixels[i] = Math.max(0, Math.min(255, pixels[i] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                    pixels[i+1] = Math.max(0, Math.min(255, pixels[i+1] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                    pixels[i+2] = Math.max(0, Math.min(255, pixels[i+2] + (Math.random() < 0.5 ? -1 : 1)));"
-        "                }"
-        "            }"
-        "        }"
-        "    };"
-        // --- Audio Fingerprinting Protection ---
-        "    if (window.AnalyserNode) {"
-        "        const origGetFloatFrequencyData = AnalyserNode.prototype.getFloatFrequencyData;"
-        "        AnalyserNode.prototype.getFloatFrequencyData = function(array) {"
-        "            origGetFloatFrequencyData.call(this, array);"
-        "            for (let i = 0; i < array.length; i++) {"
-        "                array[i] += (Math.random() - 0.5) * 0.1;"
-        "            }"
-        "        };"
-        "    }"
-        "    if (window.AudioBuffer) {"
-        "        const origGetChannelData = AudioBuffer.prototype.getChannelData;"
-        "        AudioBuffer.prototype.getChannelData = function() {"
-        "            const data = origGetChannelData.apply(this, arguments);"
-        "            for (let i = 0; i < data.length; i += 100) {"
-        "                data[i] += (Math.random() - 0.5) * 0.0001;"
-        "            }"
-        "            return data;"
-        "        };"
-        "    }"
-        // --- WebGL Advanced Fingerprinting Protection ---
-        "    const spoofedVendor = 'Apple Inc.';"
-        "    const spoofedRenderer = 'Apple GPU';"
-        "    const origGetParameter = WebGLRenderingContext.prototype.getParameter;"
-        "    WebGLRenderingContext.prototype.getParameter = function(param) {"
-        "        if (param === 37445) return spoofedVendor;"
-        "        if (param === 37446) return spoofedRenderer;"
-        "        if (param === this.MAX_TEXTURE_SIZE) return 4096 + Math.floor(Math.random() * 10);"
-        "        return origGetParameter.call(this, param);"
-        "    };"
-        "    const origGetSupportedExtensions = WebGLRenderingContext.prototype.getSupportedExtensions;"
-        "    WebGLRenderingContext.prototype.getSupportedExtensions = function() {"
-        "        const exts = origGetSupportedExtensions.call(this) || [];"
-        "        return exts.slice().sort(() => Math.random() - 0.5);"
-        "    };"
-        "    const origGetShaderPrecisionFormat = WebGLRenderingContext.prototype.getShaderPrecisionFormat;"
-        "    WebGLRenderingContext.prototype.getShaderPrecisionFormat = function() {"
-        "        const res = origGetShaderPrecisionFormat.apply(this, arguments);"
-        "        if (res && typeof res === 'object') { res.precision += Math.floor(Math.random() * 2); }"
-        "        return res;"
-        "    };"
-        // --- Font Fingerprinting Protection ---
-        "    if (window.CanvasRenderingContext2D) {"
-        "        const origMeasureText = CanvasRenderingContext2D.prototype.measureText;"
-        "        CanvasRenderingContext2D.prototype.measureText = function(text) {"
-        "            const result = origMeasureText.apply(this, arguments);"
-        "            Object.defineProperty(result, 'width', { value: result.width * (1 + (Math.random() - 0.5) * 0.01) });"
-        "            return result;"
-        "        };"
-        "    }"
-        "    if (window.navigator && window.navigator.fonts && window.navigator.fonts.query) {"
-        "        const origAvailableFonts = window.navigator.fonts.query;"
-        "        window.navigator.fonts.query = function() {"
-        "            return origAvailableFonts.apply(this, arguments).then(fonts => {"
-        "                return fonts.slice().sort(() => Math.random() - 0.5);"
-        "            });"
-        "        };"
-        "    }"
-        "    console.log('[WeaponX] Canvas, Audio, WebGL, and Font fingerprinting protection enabled');"
-        "})();";
-    
-    [self evaluateJavaScript:canvasProtectionScript completionHandler:^(id result, NSError *error) {
-        if (error) {
-            PXLog(@"[CanvasFingerprint] Error injecting canvas/audio/webgl/font protection script: %@", error);
-        } else {
-            static BOOL loggedInjection = NO;
-            if (!loggedInjection) {
-                PXLog(@"[CanvasFingerprint] Successfully injected canvas/audio/webgl/font fingerprinting protection for %@", bundleID);
-                loggedInjection = YES;
+    if (fpScript.length) {
+        [self evaluateJavaScript:fpScript completionHandler:^(id result, NSError *error) {
+            if (error) {
+                PXLog(@"[CanvasFingerprint] Error injecting fingerprint protection script: %@", error);
             }
-        }
-    }];
+        }];
+    }
 }
 
 %end
@@ -634,7 +455,7 @@ static void refreshSettings(CFNotificationCenterRef center, void *observer, CFSt
 %ctor {
     @autoreleasepool {
         PXLog(@"[CanvasFingerprint] Initializing Canvas Fingerprint Protection hooks");
-        BOOL allowSafari = PXAllowUnscopedSafariStack() && isCanvasFingerprintProtectionEnabledForCurrentApp();
+        BOOL allowSafari = PXAllowUnscopedSafariStack() && (isCanvasFingerprintProtectionEnabledForCurrentApp() || PXFullSpoofTestModeEnabled() || PXDisplayWebScreenSpoofEnabled());
         if (!isInScopedAppsList() && !allowSafari) {
             PXLog(@"[CanvasFingerprint] App is not scoped, skipping hook installation");
             return;

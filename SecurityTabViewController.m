@@ -328,6 +328,14 @@
 @property (nonatomic, strong) UILabel *webCompatIOSRangeLabel;
 @property (nonatomic, strong) UISwitch *webCompatIOSRangeToggleSwitch;
 @property (nonatomic, strong) UILabel *webCompatIOSRangeWarningLabel;
+
+@property (nonatomic, strong) UILabel *fullSpoofTestModeLabel;
+@property (nonatomic, strong) UISwitch *fullSpoofTestModeToggleSwitch;
+
+@property (nonatomic, strong) UILabel *displayUIScaleSpoofLabel;
+@property (nonatomic, strong) UISwitch *displayUIScaleSpoofToggleSwitch;
+
+@property (nonatomic, strong) NSLayoutConstraint *webCompatIOSRangeWarningHeightConstraint;
 - (void)setupIPMonitorControl:(UIView *)contentView;
 // Any private properties go here
 @property (nonatomic, strong) UILabel *copyrightLabel;
@@ -676,7 +684,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1190],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1260],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -2601,7 +2609,7 @@
 
     // Position above Setup Alert Checks (e.g., top: 790)
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1340],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1410],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:60],
@@ -2801,7 +2809,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1650],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1720],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:140],
@@ -3008,7 +3016,7 @@
     [NSLayoutConstraint activateConstraints:@[
         [self.copyrightLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
         [self.copyrightLabel.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
-        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2090], // Positioned after Canvas Fingerprinting
+        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2160], // Positioned after Canvas Fingerprinting
         [self.copyrightLabel.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-30] // More bottom padding
     ]];
     
@@ -3313,6 +3321,47 @@
     self.webCompatIOSRangeWarningLabel.numberOfLines = 2;
     self.webCompatIOSRangeWarningLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [controlView.contentView addSubview:self.webCompatIOSRangeWarningLabel];
+
+    // Full spoof test mode row (forces Safari/Auth stack spoofing for testing)
+    UIView *fullSpoofRow = [[UIView alloc] init];
+    fullSpoofRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:fullSpoofRow];
+
+    self.fullSpoofTestModeLabel = [[UILabel alloc] init];
+    self.fullSpoofTestModeLabel.text = @"Full Spoof Test Mode";
+    self.fullSpoofTestModeLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    self.fullSpoofTestModeLabel.textColor = [UIColor secondaryLabelColor];
+    self.fullSpoofTestModeLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [fullSpoofRow addSubview:self.fullSpoofTestModeLabel];
+
+    self.fullSpoofTestModeToggleSwitch = [[UISwitch alloc] init];
+    self.fullSpoofTestModeToggleSwitch.onTintColor = [UIColor systemRedColor];
+    self.fullSpoofTestModeToggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    BOOL fullSpoofEnabled = [self.securitySettings boolForKey:@"fullSpoofTestModeEnabled"];
+    [self.fullSpoofTestModeToggleSwitch setOn:fullSpoofEnabled animated:NO];
+    [self.fullSpoofTestModeToggleSwitch addTarget:self action:@selector(fullSpoofTestModeToggleChanged:) forControlEvents:UIControlEventValueChanged];
+    [fullSpoofRow addSubview:self.fullSpoofTestModeToggleSwitch];
+
+    // UI scale spoof row (can cause UI zoom)
+    UIView *uiScaleRow = [[UIView alloc] init];
+    uiScaleRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:uiScaleRow];
+
+    self.displayUIScaleSpoofLabel = [[UILabel alloc] init];
+    self.displayUIScaleSpoofLabel.text = @"UI Scale Spoof (Zoom UI)";
+    self.displayUIScaleSpoofLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+    self.displayUIScaleSpoofLabel.textColor = [UIColor secondaryLabelColor];
+    self.displayUIScaleSpoofLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [uiScaleRow addSubview:self.displayUIScaleSpoofLabel];
+
+    self.displayUIScaleSpoofToggleSwitch = [[UISwitch alloc] init];
+    self.displayUIScaleSpoofToggleSwitch.onTintColor = [UIColor systemBlueColor];
+    self.displayUIScaleSpoofToggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    id uiScalePref = [self.securitySettings objectForKey:@"displayUIScaleSpoofEnabled"]; // may be nil
+    BOOL uiScaleEnabled = uiScalePref ? [uiScalePref boolValue] : YES;
+    [self.displayUIScaleSpoofToggleSwitch setOn:uiScaleEnabled animated:NO];
+    [self.displayUIScaleSpoofToggleSwitch addTarget:self action:@selector(displayUIScaleSpoofToggleChanged:) forControlEvents:UIControlEventValueChanged];
+    [uiScaleRow addSubview:self.displayUIScaleSpoofToggleSwitch];
     
     // Enable/disable access button based on toggle state
     self.deviceSpoofingAccessButton.enabled = deviceSpoofingEnabled;
@@ -3335,7 +3384,7 @@
         [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:520], // Increased spacing below Network Connection Type
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
-        [controlView.heightAnchor constraintEqualToConstant:170], // Extra rows for Safari/Auth stack + WebCompat
+        [controlView.heightAnchor constraintEqualToConstant:240], // Extra rows for Safari/Auth stack + WebCompat + Test toggles
         
         // Position label at the top
         [self.deviceSpoofingLabel.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
@@ -3384,6 +3433,30 @@
         [self.webCompatIOSRangeWarningLabel.leadingAnchor constraintEqualToAnchor:webCompatRow.leadingAnchor],
         [self.webCompatIOSRangeWarningLabel.trailingAnchor constraintEqualToAnchor:webCompatRow.trailingAnchor],
 
+        // Full spoof row
+        [fullSpoofRow.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
+        [fullSpoofRow.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
+        [fullSpoofRow.topAnchor constraintEqualToAnchor:self.webCompatIOSRangeWarningLabel.bottomAnchor constant:8],
+        [fullSpoofRow.heightAnchor constraintEqualToConstant:30],
+
+        [self.fullSpoofTestModeLabel.leadingAnchor constraintEqualToAnchor:fullSpoofRow.leadingAnchor],
+        [self.fullSpoofTestModeLabel.centerYAnchor constraintEqualToAnchor:fullSpoofRow.centerYAnchor],
+
+        [self.fullSpoofTestModeToggleSwitch.trailingAnchor constraintEqualToAnchor:fullSpoofRow.trailingAnchor],
+        [self.fullSpoofTestModeToggleSwitch.centerYAnchor constraintEqualToAnchor:fullSpoofRow.centerYAnchor],
+
+        // UI scale row
+        [uiScaleRow.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
+        [uiScaleRow.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
+        [uiScaleRow.topAnchor constraintEqualToAnchor:fullSpoofRow.bottomAnchor constant:8],
+        [uiScaleRow.heightAnchor constraintEqualToConstant:30],
+
+        [self.displayUIScaleSpoofLabel.leadingAnchor constraintEqualToAnchor:uiScaleRow.leadingAnchor],
+        [self.displayUIScaleSpoofLabel.centerYAnchor constraintEqualToAnchor:uiScaleRow.centerYAnchor],
+
+        [self.displayUIScaleSpoofToggleSwitch.trailingAnchor constraintEqualToAnchor:uiScaleRow.trailingAnchor],
+        [self.displayUIScaleSpoofToggleSwitch.centerYAnchor constraintEqualToAnchor:uiScaleRow.centerYAnchor],
+
         // Position elements inside bottom row container
         [appleBgView.leadingAnchor constraintEqualToAnchor:bottomRowContainer.leadingAnchor],
         [appleBgView.centerYAnchor constraintEqualToAnchor:bottomRowContainer.centerYAnchor],
@@ -3413,10 +3486,19 @@
     self.webCompatIOSRangeToggleSwitch.enabled = deviceSpoofingEnabled;
     self.webCompatIOSRangeToggleSwitch.alpha = deviceSpoofingEnabled ? 1.0 : 0.5;
 
+    self.fullSpoofTestModeToggleSwitch.enabled = deviceSpoofingEnabled;
+    self.fullSpoofTestModeToggleSwitch.alpha = deviceSpoofingEnabled ? 1.0 : 0.5;
+
+    self.displayUIScaleSpoofToggleSwitch.enabled = deviceSpoofingEnabled;
+    self.displayUIScaleSpoofToggleSwitch.alpha = deviceSpoofingEnabled ? 1.0 : 0.5;
+
     // Initial warning visibility
     NSString *currentIOSVersion = [[IdentifierManager sharedManager] currentValueForIdentifier:@"IOSVersion"];
     BOOL showWarning = deviceSpoofingEnabled && webCompatEnabled && currentIOSVersion.length && (PXCompareVersions(currentIOSVersion, @"16.3.1") == NSOrderedDescending);
     self.webCompatIOSRangeWarningLabel.hidden = !showWarning;
+
+    self.webCompatIOSRangeWarningHeightConstraint = [self.webCompatIOSRangeWarningLabel.heightAnchor constraintEqualToConstant:(showWarning ? 24.0 : 0.0)];
+    self.webCompatIOSRangeWarningHeightConstraint.active = YES;
 }
 
 - (void)webCompatIOSRangeToggleChanged:(UISwitch *)sender {
@@ -3429,8 +3511,44 @@
     BOOL deviceSpoofingEnabled = [self.securitySettings boolForKey:@"deviceSpoofingEnabled"];
     BOOL showWarning = deviceSpoofingEnabled && enabled && currentIOSVersion.length && (PXCompareVersions(currentIOSVersion, @"16.3.1") == NSOrderedDescending);
     self.webCompatIOSRangeWarningLabel.hidden = !showWarning;
+    if (self.webCompatIOSRangeWarningHeightConstraint) {
+        self.webCompatIOSRangeWarningHeightConstraint.constant = showWarning ? 24.0 : 0.0;
+    }
 
     // Broadcast changes so generators/tweaks can react.
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    if (darwinCenter) {
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.settings.changed"), NULL, NULL, YES);
+    }
+}
+
+- (void)fullSpoofTestModeToggleChanged:(UISwitch *)sender {
+    BOOL enabled = sender.isOn;
+
+    [self.securitySettings setBool:enabled forKey:@"fullSpoofTestModeEnabled"];
+
+    // In test mode, we want Safari/Auth stack spoofing ON for consistency.
+    if (enabled) {
+        [self.securitySettings setBool:YES forKey:@"safariStackSpoofEnabled"];
+        if (self.safariStackSpoofingToggleSwitch) {
+            [self.safariStackSpoofingToggleSwitch setOn:YES animated:YES];
+        }
+    }
+
+    [self.securitySettings synchronize];
+
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    if (darwinCenter) {
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.safariStackSpoofToggleChanged"), NULL, NULL, YES);
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.settings.changed"), NULL, NULL, YES);
+    }
+}
+
+- (void)displayUIScaleSpoofToggleChanged:(UISwitch *)sender {
+    BOOL enabled = sender.isOn;
+    [self.securitySettings setBool:enabled forKey:@"displayUIScaleSpoofEnabled"];
+    [self.securitySettings synchronize];
+
     CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
     if (darwinCenter) {
         CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.settings.changed"), NULL, NULL, YES);
@@ -3496,6 +3614,19 @@
         BOOL webCompatEnabled = [self.securitySettings boolForKey:@"webCompatIOSRangeEnabled"];
         BOOL showWarning = enabled && webCompatEnabled && currentIOSVersion.length && (PXCompareVersions(currentIOSVersion, @"16.3.1") == NSOrderedDescending);
         self.webCompatIOSRangeWarningLabel.hidden = !showWarning;
+        if (self.webCompatIOSRangeWarningHeightConstraint) {
+            self.webCompatIOSRangeWarningHeightConstraint.constant = showWarning ? 24.0 : 0.0;
+        }
+    }
+
+    if (self.fullSpoofTestModeToggleSwitch) {
+        self.fullSpoofTestModeToggleSwitch.enabled = enabled;
+        self.fullSpoofTestModeToggleSwitch.alpha = enabled ? 1.0 : 0.5;
+    }
+
+    if (self.displayUIScaleSpoofToggleSwitch) {
+        self.displayUIScaleSpoofToggleSwitch.enabled = enabled;
+        self.displayUIScaleSpoofToggleSwitch.alpha = enabled ? 1.0 : 0.5;
     }
     
     // Enable/disable access button based on toggle state
@@ -3680,7 +3811,7 @@
     
     // Position control under the device specific spoofing control
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:710], // Increased spacing below Device Specific Spoofing
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:780], // Increased spacing below Device Specific Spoofing
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:100], // Increased height to accommodate vertical layout
@@ -3811,7 +3942,7 @@
     [bottomRowContainer addSubview:self.fixVersionToggleSwitch];
 
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1070],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1140],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:100],
@@ -3916,7 +4047,7 @@
     [bottomRowContainer addSubview:self.deepCleanToggleSwitch];
 
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:830],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:900],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:100],
@@ -4002,7 +4133,7 @@
     [bottomRowContainer addSubview:self.systemKeychainWipeToggleSwitch];
 
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:950],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1020],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:100],
@@ -4622,7 +4753,7 @@
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
         // Control view
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1810], // Position between App Version Spoofing and Canvas Fingerprinting
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1880], // Position between App Version Spoofing and Canvas Fingerprinting
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -4798,7 +4929,7 @@
     
     // Position control between Domain Blocking and Copyright label
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1950], // Moved down to be below Domain Blocking
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2020], // Moved down to be below Domain Blocking
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
