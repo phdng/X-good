@@ -731,7 +731,7 @@
         [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1260],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
-        [controlView.heightAnchor constraintEqualToConstant:180],
+        [controlView.heightAnchor constraintEqualToConstant:200],
 
         [titleLabel.topAnchor constraintEqualToAnchor:controlView.contentView.topAnchor constant:16],
         [titleLabel.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
@@ -741,10 +741,11 @@
         [ipInfoButton.heightAnchor constraintEqualToConstant:24],
         [ipInfoButton.trailingAnchor constraintLessThanOrEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
 
-        // Center the container horizontally and vertically in the lower 2/3 of the card
+        // Keep the container near the top so extra rows fit.
         [centerContainer.centerXAnchor constraintEqualToAnchor:controlView.contentView.centerXAnchor],
-        [centerContainer.centerYAnchor constraintEqualToAnchor:controlView.contentView.centerYAnchor constant:16],
+        [centerContainer.topAnchor constraintEqualToAnchor:titleLabel.bottomAnchor constant:12],
         [centerContainer.heightAnchor constraintEqualToConstant:44],
+        [centerContainer.widthAnchor constraintLessThanOrEqualToAnchor:controlView.contentView.widthAnchor constant:-40],
 
         // Icon, button, and toggle inside container
         [ipIconView.leadingAnchor constraintEqualToAnchor:centerContainer.leadingAnchor],
@@ -779,6 +780,7 @@
         // Sync button at bottom
         [self.targetRegionSyncButton.topAnchor constraintEqualToAnchor:targetRegionRow.bottomAnchor constant:8],
         [self.targetRegionSyncButton.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
+        [self.targetRegionSyncButton.bottomAnchor constraintEqualToAnchor:controlView.contentView.bottomAnchor constant:-12],
     ]];
 }
 
