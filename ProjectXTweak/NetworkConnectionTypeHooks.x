@@ -14,6 +14,8 @@
 #import <arpa/inet.h>
 #import "NetworkManager.h"
 
+#import "PXScope.h"
+
 // Constants for connection types
 typedef NS_ENUM(NSInteger, NetworkConnectionType) {
     NetworkConnectionTypeAuto = 0,
@@ -62,6 +64,11 @@ static NSString *cachedMobileNetworkCode = nil;
 static NSDate *carrierDetailsCacheTimestamp = nil;
 static const NSTimeInterval kCarrierDetailsCacheValidDuration = 60.0; // 60 seconds
 
+// Cache for TargetRegion pinned overrides
+static NSDate *targetRegionCacheTimestamp = nil;
+static NSDictionary *cachedTargetRegion = nil;
+static const NSTimeInterval kTargetRegionCacheValidDuration = 5.0;
+
 // Constants for signal strength
 static const int kWiFiSignalStrengthExcellent = -45;  // -45 dBm (Excellent)
 static const int kWiFiSignalStrengthGood = -60;       // -60 dBm (Good)
@@ -106,6 +113,19 @@ static NSString *getCurrentISOCountryCode() {
     
     // Read from security settings
     NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:kSecuritySettingsPath];
+
+    // TargetRegion follows IP override
+    if ([settings[@"targetRegionFollowsIPEnabled"] boolValue]) {
+        NSString *pinnedISO = settings[@"targetRegionPinnedCarrierISO"];
+        if ([pinnedISO isKindOfClass:[NSString class]] && pinnedISO.length) {
+            NSString *isoCode = [pinnedISO lowercaseString];
+            cachedISOCountryCode = isoCode;
+            isoCountryCodeCacheTimestamp = [NSDate date];
+            PXLog(@"[NetworkHook] Using pinned TargetRegion ISO country code: %@", isoCode);
+            return isoCode;
+        }
+    }
+
     NSString *isoCode = [settings objectForKey:@"networkISOCountryCode"];
     
     // Use default if not set
@@ -119,6 +139,57 @@ static NSString *getCurrentISOCountryCode() {
     
     PXLog(@"[NetworkHook] Read ISO country code: %@", isoCode);
     return isoCode;
+}
+
+static NSDictionary *getTargetRegionPinnedOverrides(void) {
+    // Return cached if fresh
+    if (cachedTargetRegion && targetRegionCacheTimestamp &&
+        [[NSDate date] timeIntervalSinceDate:targetRegionCacheTimestamp] < kTargetRegionCacheValidDuration) {
+        return cachedTargetRegion;
+    }
+    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:kSecuritySettingsPath];
+    if (![settings isKindOfClass:[NSDictionary class]]) {
+        cachedTargetRegion = nil;
+        targetRegionCacheTimestamp = [NSDate date];
+        return nil;
+    }
+    if (![settings[@"targetRegionFollowsIPEnabled"] boolValue]) {
+        cachedTargetRegion = nil;
+        targetRegionCacheTimestamp = [NSDate date];
+        return nil;
+    }
+
+    NSString *mcc = settings[@"targetRegionPinnedCarrierMCC"];
+    NSString *mnc = settings[@"targetRegionPinnedCarrierMNC"];
+    NSString *iso = settings[@"targetRegionPinnedCarrierISO"];
+    NSString *name = settings[@"targetRegionPinnedCarrierName"];
+    if (![mcc isKindOfClass:[NSString class]] || !mcc.length) mcc = nil;
+    if (![mnc isKindOfClass:[NSString class]] || !mnc.length) mnc = nil;
+    if (![iso isKindOfClass:[NSString class]] || !iso.length) iso = nil;
+    if (![name isKindOfClass:[NSString class]] || !name.length) name = nil;
+
+    if (!mcc.length || !mnc.length) {
+        cachedTargetRegion = nil;
+        targetRegionCacheTimestamp = [NSDate date];
+        return nil;
+    }
+
+    cachedTargetRegion = @{
+        @"carrierName": name ?: kFakeCarrierName,
+        @"mobileCountryCode": mcc,
+        @"mobileNetworkCode": mnc,
+        @"carrierISO": (iso ?: @"")
+    };
+    targetRegionCacheTimestamp = [NSDate date];
+    return cachedTargetRegion;
+}
+
+static BOOL shouldForceCarrierSpoof(void) {
+    NSDictionary *settings = [NSDictionary dictionaryWithContentsOfFile:kSecuritySettingsPath];
+    if (![settings isKindOfClass:[NSDictionary class]]) return NO;
+    if ([settings[@"targetRegionFollowsIPEnabled"] boolValue]) return YES;
+    if ([settings[@"fullSpoofTestModeEnabled"] boolValue]) return YES;
+    return NO;
 }
 
 // Get the path to the current profile's identity directory
@@ -414,6 +485,20 @@ static BOOL shouldShowAsCellular() {
 
 // Get carrier details from the current profile
 static NSDictionary *getCarrierDetailsFromProfile() {
+    // TargetRegion follows IP override (pinned)
+    NSDictionary *pinned = getTargetRegionPinnedOverrides();
+    if (pinned) {
+        cachedCarrierName = pinned[@"carrierName"];
+        cachedMobileCountryCode = pinned[@"mobileCountryCode"];
+        cachedMobileNetworkCode = pinned[@"mobileNetworkCode"];
+        carrierDetailsCacheTimestamp = [NSDate date];
+        return @{
+            @"carrierName": cachedCarrierName ?: kFakeCarrierName,
+            @"mobileCountryCode": cachedMobileCountryCode ?: kFakeMobileCountryCode,
+            @"mobileNetworkCode": cachedMobileNetworkCode ?: kFakeMobileNetworkCode
+        };
+    }
+
     // Check cache validity
     if (cachedCarrierName && cachedMobileCountryCode && cachedMobileNetworkCode && carrierDetailsCacheTimestamp && 
         [[NSDate date] timeIntervalSinceDate:carrierDetailsCacheTimestamp] < kCarrierDetailsCacheValidDuration) {
@@ -815,36 +900,48 @@ Boolean hooked_SCNetworkReachabilityGetFlags(SCNetworkReachabilityRef target, SC
 %hook CTCarrier
 
 - (NSString *)carrierName {
-    if (shouldShowAsWiFi()) {
+    if (shouldShowAsWiFi() && !shouldForceCarrierSpoof()) {
         return %orig;
     } else if (shouldShowAsCellular()) {
+        return getCarrierDetailsFromProfile()[@"carrierName"];
+    }
+    if (shouldForceCarrierSpoof()) {
         return getCarrierDetailsFromProfile()[@"carrierName"];
     }
     return %orig;
 }
 
 - (NSString *)mobileCountryCode {
-    if (shouldShowAsWiFi()) {
+    if (shouldShowAsWiFi() && !shouldForceCarrierSpoof()) {
         return %orig;
     } else if (shouldShowAsCellular()) {
+        return getCarrierDetailsFromProfile()[@"mobileCountryCode"];
+    }
+    if (shouldForceCarrierSpoof()) {
         return getCarrierDetailsFromProfile()[@"mobileCountryCode"];
     }
     return %orig;
 }
 
 - (NSString *)mobileNetworkCode {
-    if (shouldShowAsWiFi()) {
+    if (shouldShowAsWiFi() && !shouldForceCarrierSpoof()) {
         return %orig;
     } else if (shouldShowAsCellular()) {
+        return getCarrierDetailsFromProfile()[@"mobileNetworkCode"];
+    }
+    if (shouldForceCarrierSpoof()) {
         return getCarrierDetailsFromProfile()[@"mobileNetworkCode"];
     }
     return %orig;
 }
 
 - (NSString *)isoCountryCode {
-    if (shouldShowAsWiFi()) {
+    if (shouldShowAsWiFi() && !shouldForceCarrierSpoof()) {
         return %orig;
     } else if (shouldShowAsCellular()) {
+        return getCurrentISOCountryCode();
+    }
+    if (shouldForceCarrierSpoof()) {
         return getCurrentISOCountryCode();
     }
     return %orig;
@@ -1117,9 +1214,9 @@ static CFDictionaryRef hooked_CNCopyCurrentNetworkInfo(CFStringRef interfaceName
         
         PXLog(@"[NetworkHook] Initializing network connection type hooks");
         
-        // Check if the current app is a scoped app
+        // Check if the current app is a scoped app (or Safari/Auth stack when enabled)
         NSString *bundleID = getCurrentBundleID();
-        BOOL isScoped = isInScopedAppsList();
+        BOOL isScoped = isInScopedAppsList() || PXAllowUnscopedSafariStack();
         
         PXLog(@"[NetworkHook] Current app: %@, is scoped: %@", 
               bundleID ?: @"(unknown)", isScoped ? @"YES" : @"NO");

@@ -741,11 +741,17 @@ static int uname_hook(struct utsname *buf) {
     
     PXLog(@"MGCopyAnswer requested for property: %@ by app: %@", propertyString, currentBundleID);
     
-    if (![manager isApplicationEnabled:currentBundleID]) {
-        // Only log verbose if needed to avoid spam
-        // PXLog(@"App not in scope or disabled, passing through original value");
+    // Allow spoofing for Safari/Auth stack when enabled.
+    BOOL safariAllowed = PXAllowUnscopedSafariStack();
+    if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
         return %orig;
     }
+
+    NSDictionary *securitySettings = [NSDictionary dictionaryWithContentsOfFile:@"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist"];
+    BOOL targetRegionFollowsIP = [securitySettings[@"targetRegionFollowsIPEnabled"] boolValue];
+    NSString *pinnedCountryCode = [securitySettings[@"targetRegionPinnedCountryCode"] isKindOfClass:[NSString class]] ? securitySettings[@"targetRegionPinnedCountryCode"] : nil;
+    NSString *pinnedMCC = [securitySettings[@"targetRegionPinnedCarrierMCC"] isKindOfClass:[NSString class]] ? securitySettings[@"targetRegionPinnedCarrierMCC"] : nil;
+    NSString *pinnedMNC = [securitySettings[@"targetRegionPinnedCarrierMNC"] isKindOfClass:[NSString class]] ? securitySettings[@"targetRegionPinnedCarrierMNC"] : nil;
     
     // Device model / hardware identifiers (keep consistent across sysctl/IOKit/MobileGestalt)
     if (propertyString) {
@@ -876,6 +882,19 @@ static int uname_hook(struct utsname *buf) {
     if (!safariAllowed && ![manager isApplicationEnabled:currentBundleID]) {
         PXLog(@"App not in scope or disabled, passing through original IDFA");
         return %orig;
+    }
+
+    // TargetRegion (pinned from IP) - keep Region/Subscriber fields consistent.
+    if (propertyString && targetRegionFollowsIP) {
+        if ([propertyString isEqualToString:@"RegionCode"] && pinnedCountryCode.length) {
+            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)[pinnedCountryCode uppercaseString]);
+        }
+        if ([propertyString isEqualToString:@"MobileSubscriberCountryCode"] && pinnedMCC.length) {
+            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)pinnedMCC);
+        }
+        if ([propertyString isEqualToString:@"MobileSubscriberNetworkCode"] && pinnedMNC.length) {
+            return CFStringCreateCopy(kCFAllocatorDefault, (__bridge CFStringRef)pinnedMNC);
+        }
     }
     
     if ([manager isIdentifierEnabled:@"IDFA"]) {

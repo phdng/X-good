@@ -14,6 +14,7 @@
 #import <notify.h>  // Add this import for Darwin notification functions
 #import "common/UIButton+SafeConfiguration.h"
 #import "common/VersionCompare.h"
+#import "common/IPStatusCacheManager.h"
 #import <CoreLocation/CoreLocation.h>
 #import <ifaddrs.h>
 #import <arpa/inet.h>
@@ -321,6 +322,8 @@
 
 @property (nonatomic, strong) UIButton *ipMonitorCheckButton;
 @property (nonatomic, strong) UISwitch *ipMonitorToggleSwitch;
+@property (nonatomic, strong) UISwitch *targetRegionFollowsIPToggleSwitch;
+@property (nonatomic, strong) UIButton *targetRegionSyncButton;
 
 @property (nonatomic, strong) UILabel *safariStackSpoofingLabel;
 @property (nonatomic, strong) UISwitch *safariStackSpoofingToggleSwitch;
@@ -682,12 +685,53 @@
     ipMonitorInfoLabel.translatesAutoresizingMaskIntoConstraints = NO;
     [controlView.contentView addSubview:ipMonitorInfoLabel];
 
+    // TargetRegion follows IP (pinned) row
+    UIView *targetRegionRow = [[UIView alloc] init];
+    targetRegionRow.translatesAutoresizingMaskIntoConstraints = NO;
+    [controlView.contentView addSubview:targetRegionRow];
+
+    UILabel *targetRegionLabel = [[UILabel alloc] init];
+    targetRegionLabel.text = @"TargetRegion follows IP";
+    targetRegionLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    targetRegionLabel.textColor = [UIColor secondaryLabelColor];
+    targetRegionLabel.translatesAutoresizingMaskIntoConstraints = NO;
+    [targetRegionRow addSubview:targetRegionLabel];
+
+    self.targetRegionFollowsIPToggleSwitch = [[UISwitch alloc] init];
+    self.targetRegionFollowsIPToggleSwitch.onTintColor = [UIColor systemBlueColor];
+    self.targetRegionFollowsIPToggleSwitch.translatesAutoresizingMaskIntoConstraints = NO;
+    BOOL followsEnabled = [self.securitySettings boolForKey:@"targetRegionFollowsIPEnabled"];
+    [self.targetRegionFollowsIPToggleSwitch setOn:followsEnabled animated:NO];
+    [self.targetRegionFollowsIPToggleSwitch addTarget:self action:@selector(targetRegionFollowsIPToggleChanged:) forControlEvents:UIControlEventValueChanged];
+    [targetRegionRow addSubview:self.targetRegionFollowsIPToggleSwitch];
+
+    self.targetRegionSyncButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    if ([UIButton buttonConfigurationClassExists]) {
+        UIButtonConfiguration *cfg = [UIButtonConfiguration tintedButtonConfiguration];
+        cfg.title = @"Sync from IP now";
+        cfg.titleTextAttributesTransformer = ^NSDictionary *(NSDictionary *attributes) {
+            NSMutableDictionary *newAttributes = [attributes mutableCopy];
+            newAttributes[NSFontAttributeName] = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+            return newAttributes;
+        };
+        cfg.baseForegroundColor = [UIColor systemBlueColor];
+        cfg.background.cornerRadius = 12;
+        cfg.contentInsets = NSDirectionalEdgeInsetsMake(4, 10, 4, 10);
+        [self.targetRegionSyncButton safeSetConfiguration:cfg];
+    } else {
+        [self.targetRegionSyncButton setTitle:@"Sync from IP now" forState:UIControlStateNormal];
+        self.targetRegionSyncButton.titleLabel.font = [UIFont systemFontOfSize:12 weight:UIFontWeightSemibold];
+    }
+    self.targetRegionSyncButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.targetRegionSyncButton addTarget:self action:@selector(syncTargetRegionFromIPTapped:) forControlEvents:UIControlEventTouchUpInside];
+    [controlView.contentView addSubview:self.targetRegionSyncButton];
+
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
         [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1260],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
-        [controlView.heightAnchor constraintEqualToConstant:120],
+        [controlView.heightAnchor constraintEqualToConstant:180],
 
         [titleLabel.topAnchor constraintEqualToAnchor:controlView.contentView.topAnchor constant:16],
         [titleLabel.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
@@ -719,6 +763,22 @@
         [ipMonitorInfoLabel.topAnchor constraintEqualToAnchor:centerContainer.bottomAnchor constant:6],
         [ipMonitorInfoLabel.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
         [ipMonitorInfoLabel.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
+
+        // TargetRegion row below info label
+        [targetRegionRow.topAnchor constraintEqualToAnchor:ipMonitorInfoLabel.bottomAnchor constant:10],
+        [targetRegionRow.leadingAnchor constraintEqualToAnchor:controlView.contentView.leadingAnchor constant:20],
+        [targetRegionRow.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
+        [targetRegionRow.heightAnchor constraintEqualToConstant:28],
+
+        [targetRegionLabel.leadingAnchor constraintEqualToAnchor:targetRegionRow.leadingAnchor],
+        [targetRegionLabel.centerYAnchor constraintEqualToAnchor:targetRegionRow.centerYAnchor],
+
+        [self.targetRegionFollowsIPToggleSwitch.trailingAnchor constraintEqualToAnchor:targetRegionRow.trailingAnchor],
+        [self.targetRegionFollowsIPToggleSwitch.centerYAnchor constraintEqualToAnchor:targetRegionRow.centerYAnchor],
+
+        // Sync button at bottom
+        [self.targetRegionSyncButton.topAnchor constraintEqualToAnchor:targetRegionRow.bottomAnchor constant:8],
+        [self.targetRegionSyncButton.trailingAnchor constraintEqualToAnchor:controlView.contentView.trailingAnchor constant:-20],
     ]];
 }
 
@@ -1286,6 +1346,192 @@
     
     // Add HYDRA copyright at bottom
     [self setupCopyrightLabel:contentView];
+}
+
+static NSString *PXFlagEmojiFromCountryCode(NSString *cc) {
+    if (![cc isKindOfClass:[NSString class]] || cc.length != 2) return @"";
+    NSString *u = [cc uppercaseString];
+    unichar c1 = [u characterAtIndex:0];
+    unichar c2 = [u characterAtIndex:1];
+    if (c1 < 'A' || c1 > 'Z' || c2 < 'A' || c2 > 'Z') return @"";
+    // Regional indicator symbols start at U+1F1E6 for 'A'
+    uint32_t base = 0x1F1E6;
+    uint32_t r1 = base + (uint32_t)(c1 - 'A');
+    uint32_t r2 = base + (uint32_t)(c2 - 'A');
+    NSString *s1 = [[NSString alloc] initWithBytes:&r1 length:4 encoding:NSUTF32LittleEndianStringEncoding];
+    NSString *s2 = [[NSString alloc] initWithBytes:&r2 length:4 encoding:NSUTF32LittleEndianStringEncoding];
+    if (!s1.length || !s2.length) return @"";
+    return [s1 stringByAppendingString:s2];
+}
+
+- (NSDictionary *)targetRegionDefaultsForCountryCode:(NSString *)countryCode {
+    NSString *cc = [[countryCode ?: @"" uppercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (cc.length != 2) cc = @"US";
+
+    // Minimal mapping table. Extend as needed.
+    if ([cc isEqualToString:@"VN"]) {
+        return @{
+            @"carrierISO": @"vn",
+            @"mcc": @"452",
+            @"mnc": @"01",
+            @"carrierName": @"ProjectX",
+            @"localeIdentifier": @"vi_VN",
+            @"preferredLanguages": @[ @"vi-VN", @"en-US" ]
+        };
+    }
+    if ([cc isEqualToString:@"US"]) {
+        return @{
+            @"carrierISO": @"us",
+            @"mcc": @"310",
+            @"mnc": @"260",
+            @"carrierName": @"ProjectX",
+            @"localeIdentifier": @"en_US",
+            @"preferredLanguages": @[ @"en-US" ]
+        };
+    }
+
+    // Fallback: keep defaults sane.
+    return @{
+        @"carrierISO": [[cc lowercaseString] copy],
+        @"mcc": @"310",
+        @"mnc": @"260",
+        @"carrierName": @"ProjectX",
+        @"localeIdentifier": [NSString stringWithFormat:@"en_%@", cc],
+        @"preferredLanguages": @[ @"en-US" ]
+    };
+}
+
+- (void)targetRegionFollowsIPToggleChanged:(UISwitch *)sender {
+    BOOL enabled = sender.isOn;
+    [self.securitySettings setBool:enabled forKey:@"targetRegionFollowsIPEnabled"];
+    [self.securitySettings synchronize];
+
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    if (darwinCenter) {
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.settings.changed"), NULL, NULL, YES);
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.carrierDetailsChanged"), NULL, NULL, YES);
+        CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.networkISOCountryCodeChanged"), NULL, NULL, YES);
+    }
+}
+
+- (void)syncTargetRegionFromIPTapped:(id)sender {
+    // Fetch geo from IP and pin it. We intentionally do NOT auto-update on IP change.
+    NSURL *url = [NSURL URLWithString:@"https://ip-api.com/json/?fields=status,message,countryCode,lat,lon,timezone,query"];
+    if (!url) {
+        [self showToastWithMessage:@"Invalid IP API URL"]; 
+        return;
+    }
+
+    NSURLSessionConfiguration *cfg = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+    cfg.timeoutIntervalForRequest = 10.0;
+    cfg.timeoutIntervalForResource = 15.0;
+    NSURLSession *session = [NSURLSession sessionWithConfiguration:cfg];
+
+    [self showToastWithMessage:@"Syncing TargetRegion from IP..."];
+    [[session dataTaskWithURL:url completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+        if (error || !data.length) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self showToastWithMessage:@"IP geo fetch failed"]; 
+            });
+            return;
+        }
+
+        NSDictionary *json = nil;
+        @try {
+            json = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+        } @catch (__unused NSException *e) {
+        }
+
+        if (![json isKindOfClass:[NSDictionary class]]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self showToastWithMessage:@"IP geo parse failed"]; 
+            });
+            return;
+        }
+
+        NSString *status = [json[@"status"] isKindOfClass:[NSString class]] ? json[@"status"] : @"";
+        if (![status isEqualToString:@"success"]) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self showToastWithMessage:@"IP geo service error"]; 
+            });
+            return;
+        }
+
+        NSString *cc = [json[@"countryCode"] isKindOfClass:[NSString class]] ? json[@"countryCode"] : nil;
+        NSNumber *latN = [json[@"lat"] isKindOfClass:[NSNumber class]] ? json[@"lat"] : nil;
+        NSNumber *lonN = [json[@"lon"] isKindOfClass:[NSNumber class]] ? json[@"lon"] : nil;
+        NSString *tz = [json[@"timezone"] isKindOfClass:[NSString class]] ? json[@"timezone"] : nil;
+        NSString *ip = [json[@"query"] isKindOfClass:[NSString class]] ? json[@"query"] : nil;
+
+        if (!cc.length || !latN || !lonN || !tz.length) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self showToastWithMessage:@"IP geo missing fields"]; 
+            });
+            return;
+        }
+
+        NSDictionary *defaults = [self targetRegionDefaultsForCountryCode:cc];
+        NSString *carrierISO = defaults[@"carrierISO"];
+        NSString *mcc = defaults[@"mcc"];
+        NSString *mnc = defaults[@"mnc"];
+        NSString *carrierName = defaults[@"carrierName"];
+        NSString *localeId = defaults[@"localeIdentifier"];
+        NSArray *langs = defaults[@"preferredLanguages"];
+
+        // Persist pinned TargetRegion in security settings.
+        [self.securitySettings setBool:YES forKey:@"targetRegionFollowsIPEnabled"]; 
+        [self.securitySettings setObject:[cc uppercaseString] forKey:@"targetRegionPinnedCountryCode"]; 
+        [self.securitySettings setObject:tz forKey:@"targetRegionPinnedTimeZoneName"]; 
+        [self.securitySettings setObject:localeId forKey:@"targetRegionPinnedLocaleIdentifier"]; 
+        if ([langs isKindOfClass:[NSArray class]]) {
+            [self.securitySettings setObject:langs forKey:@"targetRegionPinnedPreferredLanguages"]; 
+        }
+        [self.securitySettings setObject:carrierISO forKey:@"targetRegionPinnedCarrierISO"]; 
+        [self.securitySettings setObject:mcc forKey:@"targetRegionPinnedCarrierMCC"]; 
+        [self.securitySettings setObject:mnc forKey:@"targetRegionPinnedCarrierMNC"]; 
+        [self.securitySettings setObject:carrierName forKey:@"targetRegionPinnedCarrierName"]; 
+        [self.securitySettings setDouble:[latN doubleValue] forKey:@"targetRegionPinnedLatitude"]; 
+        [self.securitySettings setDouble:[lonN doubleValue] forKey:@"targetRegionPinnedLongitude"]; 
+        [self.securitySettings setDouble:[[NSDate date] timeIntervalSince1970] forKey:@"targetRegionPinnedTimestamp"]; 
+        if (ip.length) {
+            [self.securitySettings setObject:ip forKey:@"targetRegionPinnedSourceIP"]; 
+        }
+
+        // Keep legacy key used by NetworkConnectionTypeHooks.
+        if (carrierISO.length) {
+            [self.securitySettings setObject:carrierISO forKey:@"networkISOCountryCode"]; 
+        }
+
+        [self.securitySettings synchronize];
+
+        // Update pinned GPS location (so CLLocation spoof stays consistent with IP region).
+        CLLocationCoordinate2D coord = CLLocationCoordinate2DMake([latN doubleValue], [lonN doubleValue]);
+        NSString *flag = PXFlagEmojiFromCountryCode(cc);
+        [IPStatusCacheManager savePinnedLocation:coord countryCode:[cc uppercaseString] flagEmoji:flag timestamp:[NSDate date]];
+
+        // Also write to the GPS spoofing plist used by LocationSpoofingManager.
+        NSString *gpsPlist = @"/var/mobile/Library/Preferences/com.weaponx.gpsspoofing.plist";
+        NSMutableDictionary *gpsSettings = [NSMutableDictionary dictionaryWithContentsOfFile:gpsPlist];
+        if (!gpsSettings) gpsSettings = [NSMutableDictionary dictionary];
+        gpsSettings[@"PinnedLocation"] = @{ @"latitude": @([latN doubleValue]), @"longitude": @([lonN doubleValue]) };
+        gpsSettings[@"GPSSpoofingToggleEnabled"] = @YES;
+        [gpsSettings writeToFile:gpsPlist atomically:YES];
+
+        // Notify tweak.
+        CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+        if (darwinCenter) {
+            CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.settings.changed"), NULL, NULL, YES);
+            CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.carrierDetailsChanged"), NULL, NULL, YES);
+            CFNotificationCenterPostNotification(darwinCenter, CFSTR("com.hydra.projectx.networkISOCountryCodeChanged"), NULL, NULL, YES);
+        }
+
+        dispatch_async(dispatch_get_main_queue(), ^{
+            if (self.targetRegionFollowsIPToggleSwitch) {
+                [self.targetRegionFollowsIPToggleSwitch setOn:YES animated:YES];
+            }
+            [self showToastWithMessage:[NSString stringWithFormat:@"Pinned %@ (%@)", [cc uppercaseString], tz]];
+        });
+    }] resume];
 }
 
 - (void)fixVersionAppsChanged:(NSNotification *)note {
@@ -2609,7 +2855,7 @@
 
     // Position above Setup Alert Checks (e.g., top: 790)
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1410],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1470],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:60],
@@ -2809,7 +3055,7 @@
 
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1720],
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1780],
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:140],
@@ -3016,7 +3262,7 @@
     [NSLayoutConstraint activateConstraints:@[
         [self.copyrightLabel.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor],
         [self.copyrightLabel.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor],
-        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2160], // Positioned after Canvas Fingerprinting
+        [self.copyrightLabel.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2220], // Positioned after Canvas Fingerprinting
         [self.copyrightLabel.bottomAnchor constraintEqualToAnchor:contentView.bottomAnchor constant:-30] // More bottom padding
     ]];
     
@@ -4753,7 +4999,7 @@
     // Layout constraints
     [NSLayoutConstraint activateConstraints:@[
         // Control view
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1880], // Position between App Version Spoofing and Canvas Fingerprinting
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:1940], // Position between App Version Spoofing and Canvas Fingerprinting
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
@@ -4929,7 +5175,7 @@
     
     // Position control between Domain Blocking and Copyright label
     [NSLayoutConstraint activateConstraints:@[
-        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2020], // Moved down to be below Domain Blocking
+        [controlView.topAnchor constraintEqualToAnchor:contentView.topAnchor constant:2080], // Moved down to be below Domain Blocking
         [controlView.leadingAnchor constraintEqualToAnchor:contentView.leadingAnchor constant:20],
         [controlView.trailingAnchor constraintEqualToAnchor:contentView.trailingAnchor constant:-20],
         [controlView.heightAnchor constraintEqualToConstant:120],
