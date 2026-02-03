@@ -506,6 +506,7 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
     
     // Get the viewport resolution and device pixel ratio from specs
     NSString *viewportResString = specs[@"viewportResolution"];
+    NSString *screenResString = specs[@"screenResolution"];
     CGFloat pixelRatio = [specs[@"devicePixelRatio"] floatValue];
     
     if (!viewportResString || pixelRatio <= 0) {
@@ -517,21 +518,37 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
     if (CGSizeEqualToSize(viewportSize, CGSizeZero)) {
         return originalBounds;
     }
+
+    // Some profiles store viewportResolution in points/CSS pixels already.
+    // If we divide by DPR again, bounds become unrealistically small.
+    BOOL viewportIsPoints = NO;
+    CGSize screenSize = parseResolution(screenResString);
+    if (!CGSizeEqualToSize(screenSize, CGSizeZero)) {
+        CGFloat screenMax = MAX(screenSize.width, screenSize.height);
+        CGFloat viewportMax = MAX(viewportSize.width, viewportSize.height);
+        if (screenMax > 1500.0 && viewportMax > 0.0 && viewportMax < 1500.0) {
+            viewportIsPoints = YES;
+        }
+    }
     
     // Calculate bounds in points (logical pixels)
-    CGFloat width = viewportSize.width / pixelRatio;
-    CGFloat height = viewportSize.height / pixelRatio;
+    CGFloat width = viewportIsPoints ? viewportSize.width : (viewportSize.width / pixelRatio);
+    CGFloat height = viewportIsPoints ? viewportSize.height : (viewportSize.height / pixelRatio);
+
+    // Normalize to portrait-style bounds (UIScreen reports portrait coordinate space).
+    CGFloat normW = MIN(width, height);
+    CGFloat normH = MAX(width, height);
     
     // Log the change the first time
     static BOOL loggedScreenBounds = NO;
     if (!loggedScreenBounds) {
         PXLog(@"[DeviceSpec] Spoofing UIScreen bounds from %@ to %@",
              NSStringFromCGRect(originalBounds),
-             NSStringFromCGRect(CGRectMake(0, 0, width, height)));
+             NSStringFromCGRect(CGRectMake(0, 0, normW, normH)));
         loggedScreenBounds = YES;
     }
     
-    return CGRectMake(0, 0, width, height);
+    return CGRectMake(0, 0, normW, normH);
 }
 
 // Hook for nativeBounds (actual pixels)
@@ -558,17 +575,21 @@ static BOOL shouldSpoofResolutionForCurrentProcess() {
     if (CGSizeEqualToSize(screenSize, CGSizeZero)) {
         return originalNativeBounds;
     }
+
+    // Normalize to portrait-style native bounds.
+    CGFloat normW = MIN(screenSize.width, screenSize.height);
+    CGFloat normH = MAX(screenSize.width, screenSize.height);
     
     // Log the change the first time
     static BOOL loggedNativeBounds = NO;
     if (!loggedNativeBounds) {
         PXLog(@"[DeviceSpec] Spoofing UIScreen nativeBounds from %@ to %@",
              NSStringFromCGRect(originalNativeBounds),
-             NSStringFromCGRect(CGRectMake(0, 0, screenSize.width, screenSize.height)));
+             NSStringFromCGRect(CGRectMake(0, 0, normW, normH)));
         loggedNativeBounds = YES;
     }
     
-    return CGRectMake(0, 0, screenSize.width, screenSize.height);
+    return CGRectMake(0, 0, normW, normH);
 }
 
 // Hook for scale (affects UI element sizes)

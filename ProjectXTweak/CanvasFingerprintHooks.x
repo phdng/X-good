@@ -96,6 +96,7 @@ static NSString *PXBuildWebScreenSpoofScript(NSDictionary *deviceIds) {
     if (!PXDisplayWebScreenSpoofEnabled()) return nil;
 
     NSString *viewportRes = [deviceIds[@"ViewportResolution"] isKindOfClass:[NSString class]] ? deviceIds[@"ViewportResolution"] : nil;
+    NSString *screenRes = [deviceIds[@"ScreenResolution"] isKindOfClass:[NSString class]] ? deviceIds[@"ScreenResolution"] : nil;
     NSNumber *dprNum = [deviceIds[@"DevicePixelRatio"] isKindOfClass:[NSNumber class]] ? deviceIds[@"DevicePixelRatio"] : nil;
     CGFloat dpr = dprNum ? [dprNum floatValue] : 0.0;
     if (dpr <= 0.0) dpr = 1.0;
@@ -105,9 +106,25 @@ static NSString *PXBuildWebScreenSpoofScript(NSDictionary *deviceIds) {
         return nil;
     }
 
-    // Convert pixels -> CSS pixels/points.
-    NSInteger wPt = (NSInteger)llround((double)vwPx / (double)dpr);
-    NSInteger hPt = (NSInteger)llround((double)vhPx / (double)dpr);
+    NSInteger swPx = 0, shPx = 0;
+    BOOL hasScreenRes = PXParseResolutionString(screenRes, &swPx, &shPx);
+
+    // Some profiles store ViewportResolution in CSS pixels/points (e.g. 375x812) instead of hardware pixels.
+    // If we divide by DPR again, we end up with tiny values like 125x271.
+    BOOL viewportIsPoints = NO;
+    if (hasScreenRes) {
+        NSInteger screenMax = MAX(swPx, shPx);
+        NSInteger viewportMax = MAX(vwPx, vhPx);
+        if (screenMax > 1500 && viewportMax > 0 && viewportMax < 1500) {
+            viewportIsPoints = YES;
+        }
+    }
+
+    // Convert to CSS pixels/points.
+    NSInteger wPt = viewportIsPoints ? vwPx : (NSInteger)llround((double)vwPx / (double)dpr);
+    NSInteger hPt = viewportIsPoints ? vhPx : (NSInteger)llround((double)vhPx / (double)dpr);
+
+    // Normalize to portrait-style reporting for consistency.
     NSInteger sw = MIN(wPt, hPt);
     NSInteger sh = MAX(wPt, hPt);
 
