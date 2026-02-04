@@ -167,7 +167,6 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
     }
     
     // Skip spoofing for system apps, except Safari/Auth stack when enabled.
-    NSString *proc = [NSProcessInfo processInfo].processName;
     if ([bundleID hasPrefix:@"com.apple."] &&
         !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc))) {
         cachedBundleDecisions[bundleID] = @NO;
