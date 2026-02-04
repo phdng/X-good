@@ -1326,22 +1326,21 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
 
 // FINAL SWEEP: Recursively remove all files/folders except .com.apple* or system files
 - (void)finalSweepForContainer:(NSString *)containerPath {
-    NSFileManager *fm = [NSFileManager defaultManager];
+    if (![containerPath isKindOfClass:[NSString class]] || containerPath.length == 0) return;
+    if (![[NSFileManager defaultManager] fileExistsAtPath:containerPath]) return;
 
-    NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:containerPath];
-    NSString *item;
-    while ((item = [enumerator nextObject])) {
-        if (![item.lastPathComponent hasPrefix:@".com.apple"]) {
-            NSString *fullPath = [containerPath stringByAppendingPathComponent:item];
-            BOOL isDir = NO;
-            [fm fileExistsAtPath:fullPath isDirectory:&isDir];
-            NSLog(@"[AppDataCleaner][FinalSweep] Deleting: %@", fullPath);
-            [self fixPermissionsAndRemovePath:fullPath];
-            if ([fm fileExistsAtPath:fullPath]) {
-                NSLog(@"[AppDataCleaner][FinalSweep] Could not delete: %@", fullPath);
-            }
-        }
-    }
+    // Fast final sweep: avoid per-file chmod/chflags/rm.
+    // Preserve all .com.apple* entries to keep container metadata stable.
+    BOOL deep = [self _deepCleanEnabled];
+    int timeout = deep ? (20 * 60) : (8 * 60);
+
+    NSString *quoted = PXShellQuote(containerPath);
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"chflags -R nouchg,noschg,nohidden %@ 2>/dev/null || true", quoted] timeoutSec:timeout];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod -R 0777 %@ 2>/dev/null || true", quoted] timeoutSec:timeout];
+
+    // One traversal. -prune skips any .com.apple* anywhere in tree.
+    NSString *wipe = [NSString stringWithFormat:@"find %@ -mindepth 1 -path '*/.com.apple*' -prune -o -exec rm -rf {} + 2>/dev/null || true", quoted];
+    [self runCommandWithPrivileges:wipe timeoutSec:timeout];
 }
 
 // Remove crash logs and system logs for this bundleID
@@ -2588,6 +2587,28 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     }
 }
 
+- (void)fastWipeDirectoryContents:(NSString *)path keepDirectoryStructure:(BOOL)keepStructure timeoutSec:(int)timeoutSec {
+    if (![path isKindOfClass:[NSString class]] || path.length == 0) return;
+    if (![_fileManager fileExistsAtPath:path]) return;
+
+    if (timeoutSec <= 0) {
+        timeoutSec = 8 * 60;
+    }
+
+    NSString *quoted = PXShellQuote(path);
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"chflags -R nouchg,noschg,nohidden %@ 2>/dev/null || true", quoted] timeoutSec:timeoutSec];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod -R 0777 %@ 2>/dev/null || true", quoted] timeoutSec:timeoutSec];
+
+    NSString *cmd = nil;
+    if (keepStructure) {
+        // Keep .com.apple* metadata in this directory.
+        cmd = [NSString stringWithFormat:@"find %@ -mindepth 1 -maxdepth 1 -path '*/.com.apple*' -prune -o -exec rm -rf {} + 2>/dev/null || true", quoted];
+    } else {
+        cmd = [NSString stringWithFormat:@"rm -rf %@/* 2>/dev/null || true", quoted];
+    }
+    [self runCommandWithPrivileges:cmd timeoutSec:timeoutSec];
+}
+
 - (void)clearSystemLogs:(NSString *)bundleID {
     NSArray *logPaths = @[
         [NSString stringWithFormat:@"/var/mobile/Library/Logs/CrashReporter/%@*", bundleID],
@@ -2744,6 +2765,116 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
 
 - (void)runCommandWithPrivileges:(NSString *)command {
     [self runCommandWithPrivileges:command timeoutSec:60];
+}
+
+// Optimized: find files/dirs under root matching any basename pattern (single traversal).
+- (NSArray<NSString *> *)findPathsUnderRoot:(NSString *)root
+                               directories:(BOOL)directories
+                              namePatterns:(NSArray<NSString *> *)namePatterns {
+    if (![root isKindOfClass:[NSString class]] || root.length == 0) return @[];
+    if (![namePatterns isKindOfClass:[NSArray class]] || namePatterns.count == 0) return @[];
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    BOOL isDir = NO;
+    if (![fm fileExistsAtPath:root isDirectory:&isDir] || !isDir) return @[];
+
+    NSMutableArray<NSString *> *patterns = [NSMutableArray array];
+    for (id p in namePatterns) {
+        if (![p isKindOfClass:[NSString class]]) continue;
+        NSString *s = (NSString *)p;
+        if (s.length) [patterns addObject:s];
+    }
+    if (patterns.count == 0) return @[];
+
+    // Create a pipe to read command output
+    int pipefds[2];
+    if (pipe(pipefds) != 0) {
+        return @[];
+    }
+
+    // Build argv for: find -L <root> -type f|d ( -name p1 -o -name p2 ... ) -print
+    // Reserve: find -L root -type X ( -name p1 -o -name p2 ... ) -print NULL
+    NSUInteger argc = 0;
+    argc += 1; // find
+    argc += 1; // -L
+    argc += 1; // root
+    argc += 2; // -type f|d
+    argc += 1; // (
+    argc += patterns.count * 2; // -name pat
+    if (patterns.count > 1) {
+        argc += (patterns.count - 1) * 1; // -o
+    }
+    argc += 1; // )
+    argc += 1; // -print
+    argc += 1; // NULL
+
+    char **argv = (char **)calloc(argc, sizeof(char *));
+    if (!argv) {
+        close(pipefds[0]);
+        close(pipefds[1]);
+        return @[];
+    }
+
+    NSUInteger idx = 0;
+    argv[idx++] = (char *)"find";
+    argv[idx++] = (char *)"-L";
+    argv[idx++] = (char *)[root UTF8String];
+    argv[idx++] = (char *)"-type";
+    argv[idx++] = (char *)(directories ? "d" : "f");
+    argv[idx++] = (char *)"(";
+    for (NSUInteger i = 0; i < patterns.count; i++) {
+        if (i > 0) {
+            argv[idx++] = (char *)"-o";
+        }
+        argv[idx++] = (char *)"-name";
+        argv[idx++] = (char *)[patterns[i] UTF8String];
+    }
+    argv[idx++] = (char *)")";
+    argv[idx++] = (char *)"-print";
+    argv[idx++] = NULL;
+
+    // Set up the find command and arguments
+    pid_t pid = 0;
+    const char *findPath = "/usr/bin/find";
+
+    posix_spawn_file_actions_t actions;
+    posix_spawn_file_actions_init(&actions);
+    posix_spawn_file_actions_addclose(&actions, pipefds[0]);
+    posix_spawn_file_actions_adddup2(&actions, pipefds[1], STDOUT_FILENO);
+    posix_spawn_file_actions_addclose(&actions, pipefds[1]);
+
+    int spawnStatus = posix_spawn(&pid, findPath, &actions, NULL, (char *const *)argv, NULL);
+    posix_spawn_file_actions_destroy(&actions);
+    free(argv);
+
+    if (spawnStatus != 0 || pid <= 0) {
+        close(pipefds[0]);
+        close(pipefds[1]);
+        return @[];
+    }
+
+    close(pipefds[1]);
+
+    NSMutableData *data = [NSMutableData data];
+    char buffer[2048];
+    ssize_t bytesRead;
+    while ((bytesRead = read(pipefds[0], buffer, sizeof(buffer))) > 0) {
+        [data appendBytes:buffer length:(NSUInteger)bytesRead];
+    }
+    close(pipefds[0]);
+
+    int status = 0;
+    waitpid(pid, &status, 0);
+
+    NSString *output = [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding];
+    if (!output.length) return @[];
+
+    NSArray *parts = [output componentsSeparatedByCharactersInSet:[NSCharacterSet newlineCharacterSet]];
+    NSPredicate *pred = [NSPredicate predicateWithBlock:^BOOL(id obj, NSDictionary *bindings) {
+        (void)bindings;
+        return [obj isKindOfClass:[NSString class]] && [(NSString *)obj length] > 0;
+    }];
+    return [parts filteredArrayUsingPredicate:pred];
 }
 
 - (void)runCommandWithPrivileges:(NSString *)command timeoutSec:(int)timeoutSec {
@@ -3817,12 +3948,19 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         [self securelyWipeFile:path];
     }
     
-    // 2. Also check rootless paths
-    NSArray *rootlessEncryptedPrefs = [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@*.enc*", bundleID]];
-    rootlessEncryptedPrefs = [rootlessEncryptedPrefs arrayByAddingObjectsFromArray:
-                             [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@*.encrypted*", bundleID]]];
-    rootlessEncryptedPrefs = [rootlessEncryptedPrefs arrayByAddingObjectsFromArray:
-                             [self findPathsMatchingPattern:[NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@*.secure*", bundleID]]];
+    // 2. Also check alternate preference locations
+    NSArray<NSString *> *prefBases = @[
+        @"/private/var/mobile/Library/Preferences",
+        @"/var/jb/var/mobile/Library/Preferences",
+        @"/private/var/jb/var/mobile/Library/Preferences"
+    ];
+    NSMutableArray *rootlessEncryptedPrefs = [NSMutableArray array];
+    for (NSString *base in prefBases) {
+        if (![_fileManager fileExistsAtPath:base]) continue;
+        [rootlessEncryptedPrefs addObjectsFromArray:[self findPathsMatchingPattern:[NSString stringWithFormat:@"%@/%@*.enc*", base, bundleID]]];
+        [rootlessEncryptedPrefs addObjectsFromArray:[self findPathsMatchingPattern:[NSString stringWithFormat:@"%@/%@*.encrypted*", base, bundleID]]];
+        [rootlessEncryptedPrefs addObjectsFromArray:[self findPathsMatchingPattern:[NSString stringWithFormat:@"%@/%@*.secure*", base, bundleID]]];
+    }
     
     for (NSString *path in rootlessEncryptedPrefs) {
         [self securelyWipeFile:path];
@@ -3848,33 +3986,32 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
             @"*firebase*", @"*google*auth*", @"*oauth*", @"*jwt*"
         ];
         
-        for (NSString *pattern in encryptionPatterns) {
-            NSArray *matches = [self findPathsMatchingPattern:[NSString stringWithFormat:@"%@/**/%@", dataPath, pattern]];
+        // Single traversal for all patterns (major perf win).
+        NSArray<NSString *> *matches = [self findPathsUnderRoot:dataPath directories:NO namePatterns:encryptionPatterns];
         for (NSString *path in matches) {
-                NSLog(@"[AppDataCleaner] Wiping encrypted file: %@", path);
+            NSLog(@"[AppDataCleaner] Wiping encrypted file: %@", path);
             [self securelyWipeFile:path];
         }
-    }
         
         // 5. Specifically target Google/Firebase auth folders
-        NSArray *googlePaths = [self findPathsMatchingPattern:[NSString stringWithFormat:@"%@/**/Google*/", dataPath]];
+        NSArray *googlePaths = [self findPathsUnderRoot:dataPath directories:YES namePatterns:@[@"Google*", @"google*"]];
         for (NSString *path in googlePaths) {
             NSLog(@"[AppDataCleaner] Wiping Google auth directory: %@", path);
-            [self wipeDirectoryContents:path keepDirectoryStructure:YES];
+            [self fastWipeDirectoryContents:path keepDirectoryStructure:YES timeoutSec:8 * 60];
         }
         
         // 6. Target Firebase-related files
-        NSArray *firebasePaths = [self findPathsMatchingPattern:[NSString stringWithFormat:@"%@/**/Firebase*/", dataPath]];
+        NSArray *firebasePaths = [self findPathsUnderRoot:dataPath directories:YES namePatterns:@[@"Firebase*", @"firebase*"]];
         for (NSString *path in firebasePaths) {
             NSLog(@"[AppDataCleaner] Wiping Firebase directory: %@", path);
-            [self wipeDirectoryContents:path keepDirectoryStructure:YES];
+            [self fastWipeDirectoryContents:path keepDirectoryStructure:YES timeoutSec:8 * 60];
         }
         
         // 7. Target OAuth directories
-        NSArray *oauthPaths = [self findPathsMatchingPattern:[NSString stringWithFormat:@"%@/**/*oauth*/", dataPath]];
+        NSArray *oauthPaths = [self findPathsUnderRoot:dataPath directories:YES namePatterns:@[@"*oauth*", @"*OAuth*"]];
         for (NSString *path in oauthPaths) {
             NSLog(@"[AppDataCleaner] Wiping OAuth directory: %@", path);
-            [self wipeDirectoryContents:path keepDirectoryStructure:YES];
+            [self fastWipeDirectoryContents:path keepDirectoryStructure:YES timeoutSec:8 * 60];
         }
         
         // 8. Uber-specific directories (other apps use similar patterns)
@@ -3893,7 +4030,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
             NSString *fullPath = [dataPath stringByAppendingPathComponent:dir];
             if ([_fileManager fileExistsAtPath:fullPath]) {
                 NSLog(@"[AppDataCleaner] Wiping auth directory: %@", fullPath);
-                [self wipeDirectoryContents:fullPath keepDirectoryStructure:YES];
+                [self fastWipeDirectoryContents:fullPath keepDirectoryStructure:YES timeoutSec:10 * 60];
             }
         }
     }
@@ -3909,14 +4046,12 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
             @"*Auth*", @"*auth*", @"*cred*", @"*Cred*", @"*secret*", @"*Secret*"
         ];
         
-        for (NSString *pattern in encryptionPatterns) {
-            NSArray *matches = [self findPathsMatchingPattern:[NSString stringWithFormat:@"%@/**/%@", groupPath, pattern]];
+        NSArray<NSString *> *matches = [self findPathsUnderRoot:groupPath directories:NO namePatterns:encryptionPatterns];
         for (NSString *path in matches) {
-                NSLog(@"[AppDataCleaner] Wiping encrypted file in group: %@", path);
+            NSLog(@"[AppDataCleaner] Wiping encrypted file in group: %@", path);
             [self securelyWipeFile:path];
         }
     }
-}
 }
 
 // Override the existing clearEncryptedData method to call our internal implementation
