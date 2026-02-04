@@ -146,9 +146,11 @@ static BOOL isInScopedAppsList(void) {
 static BOOL shouldSpoofForBundle(NSString *bundleID) {
     if (!bundleID) return NO;
 
-    // Allow unscoped spoofing for Safari/Auth stack when enabled.
-    if (PXAllowUnscopedSafariStack()) {
-        return YES;
+    // SKIP theme spoofing for Safari/Auth stack to avoid text color conflicts
+    // Safari WebKit has its own color management that conflicts with UIKit theme changes
+    NSString *proc = [NSProcessInfo processInfo].processName;
+    if (PXIsSafariStackProcess(bundleID, proc)) {
+        return NO;  // Don't spoof theme for Safari - causes invisible text
     }
     
     // Check cache first
@@ -474,17 +476,16 @@ static void themeSettingsChanged(CFNotificationCenterRef center, void *observer,
                 return;
             }
 
-            // Don't hook system processes, except Safari/Auth stack when enabled.
-            NSString *proc = [NSProcessInfo processInfo].processName;
-            if ([bundleID hasPrefix:@"com.apple."] &&
-                !(PXSafariStackSpoofEnabled() && PXIsSafariStackProcess(bundleID, proc))) {
+            // Don't hook system processes - including Safari (theme spoofing causes text issues)
+            // Note: We deliberately skip Safari for theme hooks even if Safari Spoofing is enabled, 
+            // because theme spoofing causes invisible text in WebKit forms (Dark mode text on Light mode background).
+            if ([bundleID hasPrefix:@"com.apple."]) {
                 PXLog(@"[ThemeHooks] Not hooking system process: %@", bundleID);
                 return;
             }
             
-            // Only install hooks if this app is scoped, OR if Safari/Auth stack spoof is enabled.
-            if (!isInScopedAppsList() && !PXAllowUnscopedSafariStack()) {
-                // App is NOT scoped - no hooks, no interference, no crashes
+            // Only install hooks if this app is scoped
+            if (!isInScopedAppsList()) {
                 PXLog(@"[ThemeHooks] App %@ is not scoped, skipping hook installation", bundleID);
                 return;
             }
