@@ -15,6 +15,8 @@
 
 #import "PXScope.h"
 
+#import "AppVersionHooks.h"
+
 // Path to scoped apps plist
 static NSString *const kScopedAppsPath = @"/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
 static NSString *const kScopedAppsPathAlt1 = @"/private/var/mobile/Library/Preferences/com.hydra.projectx.global_scope.plist";
@@ -1819,6 +1821,23 @@ int hooked_sysctlbyname(const char *name, void *oldp, size_t *oldlenp, void *new
     @try {
         NSString *bundleID = [self bundleIdentifier];
         if (shouldSpoofForBundle(bundleID)) {
+            // App-specific version/build spoofing (only for main bundle)
+            if ([key isEqualToString:@"CFBundleShortVersionString"] || [key isEqualToString:@"CFBundleVersion"]) {
+                NSString *mainBundleID = getCurrentBundleID();
+                if (mainBundleID.length && [bundleID isEqualToString:mainBundleID]) {
+                    NSString *spoofVer = nil;
+                    NSString *spoofBuild = nil;
+                    if (PXGetSpoofedAppVersionForBundle(mainBundleID, &spoofVer, &spoofBuild)) {
+                        if ([key isEqualToString:@"CFBundleShortVersionString"] && spoofVer.length) {
+                            return spoofVer;
+                        }
+                        if ([key isEqualToString:@"CFBundleVersion"] && spoofBuild.length) {
+                            return spoofBuild;
+                        }
+                    }
+                }
+            }
+
             // Handle system version info in Info.plist queries
             if ([key isEqualToString:@"MinimumOSVersion"] || 
                 [key isEqualToString:@"DTPlatformVersion"] ||
@@ -1860,6 +1879,23 @@ CFTypeRef replaced_CFBundleGetValueForInfoDictionaryKey(CFBundleRef bundle, CFSt
         NSString *nsBundleID = bundleID ? (__bridge NSString*)bundleID : nil;
         
         if (shouldSpoofForBundle(nsBundleID)) {
+            // App-specific version/build spoofing (only for main bundle)
+            if (CFEqual(key, CFSTR("CFBundleShortVersionString")) || CFEqual(key, CFSTR("CFBundleVersion"))) {
+                NSString *mainBundleID = getCurrentBundleID();
+                if (mainBundleID.length && [nsBundleID isEqualToString:mainBundleID]) {
+                    NSString *spoofVer = nil;
+                    NSString *spoofBuild = nil;
+                    if (PXGetSpoofedAppVersionForBundle(mainBundleID, &spoofVer, &spoofBuild)) {
+                        if (CFEqual(key, CFSTR("CFBundleShortVersionString")) && spoofVer.length) {
+                            return CFStringCreateWithCString(NULL, [spoofVer UTF8String], kCFStringEncodingUTF8);
+                        }
+                        if (CFEqual(key, CFSTR("CFBundleVersion")) && spoofBuild.length) {
+                            return CFStringCreateWithCString(NULL, [spoofBuild UTF8String], kCFStringEncodingUTF8);
+                        }
+                    }
+                }
+            }
+
             // Check for system version keys
             if (CFEqual(key, CFSTR("MinimumOSVersion")) || 
                 CFEqual(key, CFSTR("DTPlatformVersion")) ||
@@ -1926,6 +1962,9 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
 
     // Clear UA sync toggle cache
     PXUASyncInvalidate();
+
+    // Clear app version spoof cache
+    PXAppVersionHooksInvalidateCache();
 
     // Clear sync mapping (avoid stale UA across tests)
     PXUASyncInitIfNeeded();
