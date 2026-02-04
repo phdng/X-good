@@ -12,6 +12,7 @@
 #import "CommandRunner.h"
 
 #import <CommonCrypto/CommonDigest.h>
+#import <notify.h>
 
 static NSString * const PXBackupErrorDomain = @"com.hydra.projectx.backup";
 
@@ -582,6 +583,64 @@ static void PXDarwinNotifyPost(NSString *name) {
     CFNotificationCenterPostNotification(c, (__bridge CFStringRef)name, NULL, NULL, true);
 }
 
+static NSDictionary *PXReadKeychainBridgeResponseIfValid(NSFileManager *fm, NSString *respPath, NSString *nonce) {
+    if (!fm || !respPath.length || !nonce.length) return nil;
+    if (![fm fileExistsAtPath:respPath]) return nil;
+    NSDictionary *candidate = [NSDictionary dictionaryWithContentsOfFile:respPath];
+    if (![candidate isKindOfClass:[NSDictionary class]]) return nil;
+    NSString *n = [candidate[@"nonce"] isKindOfClass:[NSString class]] ? candidate[@"nonce"] : nil;
+    if (!n.length || ![n isEqualToString:nonce]) return nil;
+    return candidate;
+}
+
+static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSString *respPath, NSString *nonce, NSTimeInterval timeoutSec) {
+    if (!safeBundle.length || !respPath.length || !nonce.length) return nil;
+    if (timeoutSec <= 0) timeoutSec = 20.0;
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDictionary *immediate = PXReadKeychainBridgeResponseIfValid(fm, respPath, nonce);
+    if (immediate) return immediate;
+
+    NSString *notifyName = [NSString stringWithFormat:@"com.hydra.weaponx.keychain.resp.%@", safeBundle];
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    dispatch_queue_t q = dispatch_queue_create("com.weaponx.keychainbridge.wait.backup", DISPATCH_QUEUE_SERIAL);
+    __block NSDictionary *resp = nil;
+
+    int token = 0;
+    uint32_t st = notify_register_dispatch([notifyName UTF8String], &token, q, ^(int t) {
+        (void)t;
+        if (resp) return;
+        NSDictionary *r = PXReadKeychainBridgeResponseIfValid(fm, respPath, nonce);
+        if (r) {
+            resp = r;
+            dispatch_semaphore_signal(sema);
+        }
+    });
+
+    if (st != NOTIFY_STATUS_OK) {
+        CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
+        while ((CFAbsoluteTimeGetCurrent() - start) < timeoutSec) {
+            NSDictionary *r = PXReadKeychainBridgeResponseIfValid(fm, respPath, nonce);
+            if (r) return r;
+            [NSThread sleepForTimeInterval:0.2];
+        }
+        return nil;
+    }
+
+    NSDictionary *afterReg = PXReadKeychainBridgeResponseIfValid(fm, respPath, nonce);
+    if (afterReg) {
+        notify_cancel(token);
+        return afterReg;
+    }
+
+    dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeoutSec * NSEC_PER_SEC));
+    (void)dispatch_semaphore_wait(sema, deadline);
+    notify_cancel(token);
+
+    if (resp) return resp;
+    return PXReadKeychainBridgeResponseIfValid(fm, respPath, nonce);
+}
+
 - (BOOL)_inAppKeychainBackupForBundleID:(NSString *)bundleID
                           containerPath:(NSString *)dataContainerPath
                                  groups:(NSArray<NSString *> *)groups
@@ -628,23 +687,18 @@ static void PXDarwinNotifyPost(NSString *name) {
     PXDarwinNotifyPost([NSString stringWithFormat:@"com.hydra.weaponx.keychain.req.%@", safeBundle]);
 
     __block BOOL opened = NO;
-    dispatch_sync(dispatch_get_main_queue(), ^{
+    if ([NSThread isMainThread]) {
         opened = PXOpenApplication(bundleID);
-    });
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            opened = PXOpenApplication(bundleID);
+        });
+    }
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"openApplication=%@", opened ? @"YES" : @"NO"]);
 
-    // Wait up to ~20s for response (1 try).
-    NSDictionary *resp = nil;
-    for (int i = 0; i < 80; i++) {
-        if ([fm fileExistsAtPath:respPath]) {
-            NSDictionary *candidate = [NSDictionary dictionaryWithContentsOfFile:respPath];
-            if ([candidate isKindOfClass:[NSDictionary class]] && [candidate[@"nonce"] isKindOfClass:[NSString class]] && [candidate[@"nonce"] isEqualToString:nonce]) {
-                resp = candidate;
-                break;
-            }
-        }
-        [NSThread sleepForTimeInterval:0.25];
-    }
+    // Wait via Darwin notify (avoid polling). Use shorter timeout if open failed.
+    NSTimeInterval waitSec = opened ? 30.0 : 6.0;
+    NSDictionary *resp = PXWaitForKeychainBridgeResponse(safeBundle, respPath, nonce, waitSec);
 
     // Always capture bridge log + tmp dir state (best-effort)
     {
@@ -748,22 +802,17 @@ static void PXDarwinNotifyPost(NSString *name) {
     PXDarwinNotifyPost([NSString stringWithFormat:@"com.hydra.weaponx.keychain.req.%@", safeBundle]);
 
     __block BOOL opened = NO;
-    dispatch_sync(dispatch_get_main_queue(), ^{
+    if ([NSThread isMainThread]) {
         opened = PXOpenApplication(bundleID);
-    });
+    } else {
+        dispatch_sync(dispatch_get_main_queue(), ^{
+            opened = PXOpenApplication(bundleID);
+        });
+    }
     PXDebugAppendLine(debugKeychain, [NSString stringWithFormat:@"openApplication=%@", opened ? @"YES" : @"NO"]);
 
-    NSDictionary *resp = nil;
-    for (int i = 0; i < 80; i++) {
-        if ([fm fileExistsAtPath:respPath]) {
-            NSDictionary *candidate = [NSDictionary dictionaryWithContentsOfFile:respPath];
-            if ([candidate isKindOfClass:[NSDictionary class]] && [candidate[@"nonce"] isKindOfClass:[NSString class]] && [candidate[@"nonce"] isEqualToString:nonce]) {
-                resp = candidate;
-                break;
-            }
-        }
-        [NSThread sleepForTimeInterval:0.25];
-    }
+    NSTimeInterval waitSec = opened ? 30.0 : 6.0;
+    NSDictionary *resp = PXWaitForKeychainBridgeResponse(safeBundle, respPath, nonce, waitSec);
 
     // Always capture bridge log + tmp dir state (best-effort)
     {

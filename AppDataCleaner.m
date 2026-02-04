@@ -10,6 +10,7 @@
 #import <sys/stat.h>
 #import <signal.h>
 #import <sqlite3.h>
+#import <notify.h>
 
 #import "AppEntitlementsReader.h"
 #import "CommandRunner.h"
@@ -396,6 +397,64 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     return [NSString stringWithFormat:@"dataCleanerKeychainWipeGroups_%@", bundleID ?: @""];
 }
 
+static NSDictionary *PXReadKeychainBridgeResponseIfValid(NSFileManager *fm, NSString *respPath, NSString *nonce) {
+    if (!fm || !respPath.length || !nonce.length) return nil;
+    if (![fm fileExistsAtPath:respPath]) return nil;
+    NSDictionary *candidate = [NSDictionary dictionaryWithContentsOfFile:respPath];
+    if (![candidate isKindOfClass:[NSDictionary class]]) return nil;
+    NSString *n = [candidate[@"nonce"] isKindOfClass:[NSString class]] ? candidate[@"nonce"] : nil;
+    if (!n.length || ![n isEqualToString:nonce]) return nil;
+    return candidate;
+}
+
+static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSString *respPath, NSString *nonce, NSTimeInterval timeoutSec) {
+    if (!safeBundle.length || !respPath.length || !nonce.length) return nil;
+    if (timeoutSec <= 0) timeoutSec = 20.0;
+
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDictionary *immediate = PXReadKeychainBridgeResponseIfValid(fm, respPath, nonce);
+    if (immediate) return immediate;
+
+    NSString *notifyName = [NSString stringWithFormat:@"com.hydra.weaponx.keychain.resp.%@", safeBundle];
+    dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+    dispatch_queue_t q = dispatch_queue_create("com.weaponx.keychainbridge.wait.cleaner", DISPATCH_QUEUE_SERIAL);
+    __block NSDictionary *resp = nil;
+
+    int token = 0;
+    uint32_t st = notify_register_dispatch([notifyName UTF8String], &token, q, ^(int t) {
+        (void)t;
+        if (resp) return;
+        NSDictionary *r = PXReadKeychainBridgeResponseIfValid(fm, respPath, nonce);
+        if (r) {
+            resp = r;
+            dispatch_semaphore_signal(sema);
+        }
+    });
+
+    if (st != NOTIFY_STATUS_OK) {
+        CFAbsoluteTime start = CFAbsoluteTimeGetCurrent();
+        while ((CFAbsoluteTimeGetCurrent() - start) < timeoutSec) {
+            NSDictionary *r = PXReadKeychainBridgeResponseIfValid(fm, respPath, nonce);
+            if (r) return r;
+            [NSThread sleepForTimeInterval:0.2];
+        }
+        return nil;
+    }
+
+    NSDictionary *afterReg = PXReadKeychainBridgeResponseIfValid(fm, respPath, nonce);
+    if (afterReg) {
+        notify_cancel(token);
+        return afterReg;
+    }
+
+    dispatch_time_t deadline = dispatch_time(DISPATCH_TIME_NOW, (int64_t)(timeoutSec * NSEC_PER_SEC));
+    (void)dispatch_semaphore_wait(sema, deadline);
+    notify_cancel(token);
+
+    if (resp) return resp;
+    return PXReadKeychainBridgeResponseIfValid(fm, respPath, nonce);
+}
+
 + (instancetype)sharedManager {
     static AppDataCleaner *sharedManager = nil;
     static dispatch_once_t onceToken;
@@ -562,10 +621,11 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
                                             (__bridge CFStringRef)[NSString stringWithFormat:@"com.hydra.weaponx.keychain.req.%@", safeBundle],
                                             NULL, NULL, true);
         Class wsCls = NSClassFromString(@"LSApplicationWorkspace");
+        BOOL opened = NO;
         if (wsCls) {
             id ws = [wsCls performSelector:@selector(defaultWorkspace)];
             if (ws && [ws respondsToSelector:@selector(openApplicationWithBundleID:)]) {
-                ((BOOL (*)(id, SEL, id))objc_msgSend)(ws, @selector(openApplicationWithBundleID:), bundleID);
+                opened = ((BOOL (*)(id, SEL, id))objc_msgSend)(ws, @selector(openApplicationWithBundleID:), bundleID);
 
                 // Immediately bring ProjectX back to foreground (best-effort).
                 NSString *selfBundle = [[NSBundle mainBundle] bundleIdentifier] ?: @"";
@@ -575,17 +635,8 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
             }
         }
 
-        NSDictionary *resp = nil;
-        for (int i = 0; i < 80; i++) {
-            if ([[NSFileManager defaultManager] fileExistsAtPath:respPath]) {
-                NSDictionary *candidate = [NSDictionary dictionaryWithContentsOfFile:respPath];
-                if ([candidate isKindOfClass:[NSDictionary class]] && [candidate[@"nonce"] isKindOfClass:[NSString class]] && [candidate[@"nonce"] isEqualToString:nonce]) {
-                    resp = candidate;
-                    break;
-                }
-            }
-            [NSThread sleepForTimeInterval:0.25];
-        }
+        NSTimeInterval waitSec = opened ? 30.0 : 6.0;
+        NSDictionary *resp = PXWaitForKeychainBridgeResponse(safeBundle, respPath, nonce, waitSec);
 
         // Kill app after bridge (may be SIGSTOP'd)
         PXKillAppProcessBestEffort(self, bundleID);

@@ -300,6 +300,7 @@ static void WXProcessRequestForCurrentApp(void) {
         if (!bundleID.length) return;
         NSString *safe = WXSafeBundle(bundleID);
         NSString *reqPath = [NSString stringWithFormat:@"/tmp/weaponx_keychain_request_%@.plist", safe];
+        NSString *respNotify = [NSString stringWithFormat:@"com.hydra.weaponx.keychain.resp.%@", safe];
 
         NSDictionary *req = [NSDictionary dictionaryWithContentsOfFile:reqPath];
         if (![req isKindOfClass:[NSDictionary class]]) return;
@@ -383,6 +384,13 @@ static void WXProcessRequestForCurrentApp(void) {
 
         WXWritePlistAtomic(resp, respPath);
         WXAppendLog(logPath, [NSString stringWithFormat:@"wrote response=%@", respPath]);
+
+        // Notify waiting caller (Darwin notify) to avoid polling.
+        CFNotificationCenterPostNotification(CFNotificationCenterGetDarwinNotifyCenter(),
+                                            (__bridge CFStringRef)respNotify,
+                                            NULL,
+                                            NULL,
+                                            true);
 
         // Remove request after processing.
         [[NSFileManager defaultManager] removeItemAtPath:reqPath error:nil];
