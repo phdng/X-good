@@ -976,6 +976,11 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     
     [self logMessage:@"[AppDataCleaner] Found UUIDs - Bundle: %@, Data: %@, RootlessData: %@, Groups=%lu RootlessGroups=%lu", 
           bundleUUID ?: @"nil", dataUUID ?: @"nil", rootlessDataUUID ?: @"nil", (unsigned long)groupUUIDs.count, (unsigned long)rootlessGroupUUIDs.count];
+
+     BOOL deep = [self _deepCleanEnabled];
+     BOOL isSystemApp = [bundleID hasPrefix:@"com.apple."];
+     int rmTimeout = (deep || isSystemApp) ? (15 * 60) : (5 * 60);
+     int findTimeout = (deep || isSystemApp) ? (20 * 60) : (8 * 60);
     
     // Clear data container
     if (dataUUID) {
@@ -992,14 +997,14 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         NSArray *subDirs = @[@"Documents", @"Library", @"tmp", @"StoreKit", @"SystemData"]; 
         for (NSString *dir in subDirs) {
             NSString *fullPath = [dataContainerPath stringByAppendingPathComponent:dir];
-            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@' 2>/dev/null || true", fullPath]];
+            [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@' 2>/dev/null || true", fullPath] timeoutSec:rmTimeout];
         }
         // Recreate minimal structure to avoid app/iOS assumptions.
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"mkdir -p '%@/Documents' '%@/Library/Caches' '%@/Library/Preferences' '%@/tmp' 2>/dev/null || true",
-                                      dataContainerPath, dataContainerPath, dataContainerPath, dataContainerPath]];
+                                      dataContainerPath, dataContainerPath, dataContainerPath, dataContainerPath] timeoutSec:60];
         
         // Also wipe any hidden directories and files at root level
-        [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -name '.*' ! -name '.com.apple*' -exec rm -rf {} \\; 2>/dev/null || true", dataContainerPath]];
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -name '.*' ! -name '.com.apple*' -exec rm -rf {} \\; 2>/dev/null || true", dataContainerPath] timeoutSec:findTimeout];
         
         // DEBUG: Count files after
         NSArray *afterContents = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:[dataContainerPath stringByAppendingPathComponent:@"Library"] error:nil];
@@ -1028,7 +1033,7 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     // Process rootless bundle container
     NSString *rootlessBundlePath = [NSString stringWithFormat:@"/containers/Bundle/Application/%@", bundleUUID];
     if ([[NSFileManager defaultManager] fileExistsAtPath:rootlessBundlePath]) {
-        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/*", rootlessBundlePath]];
+        [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/*", rootlessBundlePath] timeoutSec:rmTimeout];
     }
     
     // Process group containers - DIRECT wipe using fast rm -rf
@@ -1038,9 +1043,9 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         [self logMessage:@"[AppDataCleaner] Fast wiping group: %@", groupUUID];
         // Wipe everything except container metadata (critical for stable mapping).
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -not -name '.com.apple.mobile_container_manager.metadata.plist' -not -name '.com.apple.containermanagerd.metadata.plist' -exec rm -rf {} + 2>/dev/null || true",
-                                      groupPath]];
+                                      groupPath] timeoutSec:findTimeout];
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"mkdir -p '%@/Documents' '%@/Library/Caches' '%@/Library/Preferences' '%@/tmp' 2>/dev/null || true",
-                                      groupPath, groupPath, groupPath, groupPath]];
+                                      groupPath, groupPath, groupPath, groupPath] timeoutSec:60];
     }
     
     // Process rootless group containers
@@ -1048,9 +1053,9 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         NSString *groupPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", groupUUID];
         [self logMessage:@"[AppDataCleaner] Fast wiping rootless group: %@", groupUUID];
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -not -name '.com.apple.mobile_container_manager.metadata.plist' -not -name '.com.apple.containermanagerd.metadata.plist' -exec rm -rf {} + 2>/dev/null || true",
-                                      groupPath]];
+                                      groupPath] timeoutSec:findTimeout];
         [self runCommandWithPrivileges:[NSString stringWithFormat:@"mkdir -p '%@/Documents' '%@/Library/Caches' '%@/Library/Preferences' '%@/tmp' 2>/dev/null || true",
-                                      groupPath, groupPath, groupPath, groupPath]];
+                                      groupPath, groupPath, groupPath, groupPath] timeoutSec:60];
     }
     
     [self logMessage:@"[AppDataCleaner] Group containers wiped successfully"];
@@ -2476,6 +2481,7 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 
     BOOL deep = [self _deepCleanEnabled];
     int maxDepth = deep ? 8 : 2;
+    int findTimeout = deep ? (25 * 60) : (8 * 60);
 
     NSArray *bundleComponents = [bundleID componentsSeparatedByString:@"."];
     NSString *tildeID = [[bundleID stringByReplacingOccurrencesOfString:@"." withString:@"~"] stringByReplacingOccurrencesOfString:@"-" withString:@"~"]; 
@@ -2526,7 +2532,7 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
         NSString *cmd = [NSString stringWithFormat:
                          @"find '%@' -mindepth 1 -maxdepth %d \\( %@ \\) -exec rm -rf {} + 2>/dev/null || true",
                          basePath, maxDepth, expr];
-        [self runCommandWithPrivileges:cmd];
+        [self runCommandWithPrivileges:cmd timeoutSec:findTimeout];
     }
 
     // Clear iCloud accounts info (batch, in-process sqlite to avoid missing sqlite3 tool)
@@ -2730,31 +2736,52 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
 }
 
 - (void)runCommandWithPrivileges:(NSString *)command {
+    [self runCommandWithPrivileges:command timeoutSec:60];
+}
+
+- (void)runCommandWithPrivileges:(NSString *)command timeoutSec:(int)timeoutSec {
+    if (![command isKindOfClass:[NSString class]] || command.length == 0) {
+        return;
+    }
+
+    if (timeoutSec <= 0) {
+        timeoutSec = 60;
+    }
+
     pid_t pid;
     const char *args[] = {"/bin/sh", "-c", [command UTF8String], NULL};
-    int spawnResult = posix_spawn(&pid, args[0], NULL, NULL, (char* const*)args, NULL);
-    
+    int spawnResult = posix_spawn(&pid, args[0], NULL, NULL, (char * const *)args, NULL);
     if (spawnResult != 0) {
         return;
     }
-    
-    // Use non-blocking wait with 60 second timeout
-    const int maxWaitIterations = 600; // 600 * 100ms = 60 seconds
+
+    // Best-effort: isolate command in its own process group so we can kill the whole tree.
+    (void)setpgid(pid, pid);
+
+    const int maxWaitIterations = timeoutSec * 10; // 10 * 100ms = 1s
     int iterations = 0;
-    int status;
-    pid_t result;
-    
+    int status = 0;
+
     while (iterations < maxWaitIterations) {
-        result = waitpid(pid, &status, WNOHANG);
+        pid_t result = waitpid(pid, &status, WNOHANG);
         if (result == pid || result == -1) {
             return;
         }
         usleep(100000); // 100ms
         iterations++;
     }
-    
-    // Timeout reached, kill the process
-    kill(pid, SIGKILL);
+
+    // Timeout reached: try graceful kill, then force kill.
+    NSString *shortCmd = command;
+    if (shortCmd.length > 240) {
+        shortCmd = [shortCmd substringToIndex:240];
+    }
+    NSLog(@"[AppDataCleaner] Command timed out after %d sec, killing: %@", timeoutSec, shortCmd);
+
+    // Kill process group (includes /bin/sh children).
+    kill(-pid, SIGTERM);
+    usleep(250000);
+    kill(-pid, SIGKILL);
     waitpid(pid, &status, 0);
 }
 
@@ -4522,10 +4549,14 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     }
     
     NSLog(@"[AppDataCleaner] Completely wiping container: %@", containerPath);
-    
+
+    BOOL deep = [self _deepCleanEnabled];
+    int chmodTimeout = deep ? (10 * 60) : (3 * 60);
+    int findTimeout = deep ? (20 * 60) : (8 * 60);
+
     // Set all permissions before removal
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod -R 777 '%@'", containerPath]];
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -type d -exec chmod 777 {} \\;", containerPath]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod -R 777 '%@'", containerPath] timeoutSec:chmodTimeout];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -type d -exec chmod 777 {} \\;", containerPath] timeoutSec:chmodTimeout];
     
     // Preserve iOS container metadata files (do not rewrite them).
     // Modifying these can break MCM/LaunchServices container mapping and cause "Data container not found".
@@ -4541,22 +4572,22 @@ static NSString *PXKeychainWipeGroupsKey(NSString *bundleID) {
     }
     
     // Remove all non-system files first (preserve .com.apple.mobile_container_manager* and .com.apple.containermanagerd*)
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -type f -not -name '.com.apple.mobile_container_manager*' -not -name '.com.apple.containermanagerd*' -exec rm -f {} \\;", containerPath]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -type f -not -name '.com.apple.mobile_container_manager*' -not -name '.com.apple.containermanagerd*' -exec rm -f {} \\;", containerPath] timeoutSec:findTimeout];
     
     // Then remove empty non-system directories from bottom up
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -depth -type d -not -name '.com.apple.mobile_container_manager*' -not -name '.com.apple.containermanagerd*' -empty -delete", containerPath]];
+    [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -depth -type d -not -name '.com.apple.mobile_container_manager*' -not -name '.com.apple.containermanagerd*' -empty -delete", containerPath] timeoutSec:findTimeout];
     
     // Create minimal structure to avoid iOS crashes
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"mkdir -p '%@/Documents' '%@/Library/Caches' '%@/Library/Preferences' '%@/tmp'", 
-        containerPath, containerPath, containerPath, containerPath]];
+        containerPath, containerPath, containerPath, containerPath] timeoutSec:60];
     
     // Set proper permissions on the directories
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"chmod 755 '%@/Documents' '%@/Library' '%@/Library/Caches' '%@/Library/Preferences' '%@/tmp'", 
-        containerPath, containerPath, containerPath, containerPath, containerPath]];
+        containerPath, containerPath, containerPath, containerPath, containerPath] timeoutSec:60];
     
     // Touch standard files that apps might expect
     [self runCommandWithPrivileges:[NSString stringWithFormat:@"touch '%@/Documents/.nomedia' '%@/Library/Preferences/.initialized'", 
-        containerPath, containerPath]];
+        containerPath, containerPath] timeoutSec:60];
 }
 
 // NEW: Method to clean IconState.plist
