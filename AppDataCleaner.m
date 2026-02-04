@@ -15,6 +15,7 @@
 #import "AppEntitlementsReader.h"
 #import "CommandRunner.h"
 #import "AppGroupContainerResolver.h"
+#import "common/PXProcessKiller.h"
 
 // Add SearchableIndex framework if available
 #import <CoreSpotlight/CoreSpotlight.h>
@@ -265,10 +266,7 @@ static void PXKillAppProcessBestEffort(AppDataCleaner *selfRef, NSString *bundle
             exe = [proxy performSelector:@selector(bundleExecutable)];
         }
         if ([exe isKindOfClass:[NSString class]] && exe.length) {
-            // Try graceful terminate first to reduce crash reports.
-            [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -TERM '%@' 2>/dev/null || true", exe]];
-            [NSThread sleepForTimeInterval:0.15];
-            [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", exe]];
+            PXKillallTermThenKill(exe, 0.15);
         }
     } @catch (__unused NSException *e) {
     }
@@ -284,21 +282,11 @@ static void PXKillAppProcessBestEffort(AppDataCleaner *selfRef, NSString *bundle
                 NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:plistPath];
                 NSString *exeName = [info[@"CFBundleExecutable"] isKindOfClass:[NSString class]] ? info[@"CFBundleExecutable"] : nil;
                 if (exeName.length) {
-                    [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -TERM '%@' 2>/dev/null || true", exeName]];
-                    [NSThread sleepForTimeInterval:0.15];
-                    [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", exeName]];
+                    PXKillallTermThenKill(exeName, 0.15);
                 }
                 break;
             }
         }
-    }
-
-    // 2) Fallback: kill by last bundle component (often matches process name)
-    NSString *name = [bundleID componentsSeparatedByString:@"."].lastObject;
-    if (name.length > 2) {
-        [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -TERM '%@' 2>/dev/null || true", name]];
-        [NSThread sleepForTimeInterval:0.15];
-        [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", name]];
     }
 }
 
@@ -317,8 +305,8 @@ static void PXStopMailDaemonsBestEffort(AppDataCleaner *selfRef) {
     }
 
     // Fallback to process kills.
-    [selfRef runCommandWithPrivileges:@"killall -TERM maild 2>/dev/null || true"]; 
-    [selfRef runCommandWithPrivileges:@"killall -TERM Mail 2>/dev/null || true"]; 
+    PXKillallByName(@"maild", SIGTERM);
+    PXKillallByName(@"Mail", SIGTERM);
 }
 
 static void PXStopSafariDaemonsBestEffort(AppDataCleaner *selfRef) {
@@ -334,13 +322,8 @@ static void PXStopSafariDaemonsBestEffort(AppDataCleaner *selfRef) {
         @"accountsd",
         @"webbookmarksd"
     ];
-    for (NSString *name in names) {
-        [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -TERM '%@' 2>/dev/null || true", name]];
-    }
-    [NSThread sleepForTimeInterval:0.2];
-    for (NSString *name in names) {
-        [selfRef runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", name]];
-    }
+    (void)selfRef;
+    PXKillallTermThenKillMany(names, 0.2);
 }
 
 static NSString *PXFirstExistingPath(NSFileManager *fm, NSArray<NSString *> *paths) {
@@ -900,35 +883,10 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
 
                 [strongSelf logMessage:@"[AppDataCleaner] Deep Clean (verify scan) = %@", [strongSelf _deepCleanEnabled] ? @"ON" : @"OFF"];
                 
-                // 1. Kill by partial bundle ID matches (e.g. "Facebook" from "com.facebook.Facebook")
-                NSArray *comps = [bundleID componentsSeparatedByString:@"."];
-                if (comps.count > 0) {
-                    NSString *name = [comps lastObject];
-                    if (name.length > 2) {
-                        [strongSelf runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", name]];
-                    }
-                }
-                
-                // 2. Kill by accurate Executable Name finding
-                NSString *bundleUUID = [strongSelf findBundleContainerUUID:bundleID];
-                if (bundleUUID) {
-                    NSString *bundleRoot = [NSString stringWithFormat:@"/var/mobile/Containers/Bundle/Application/%@", bundleUUID];
-                    NSArray *items = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:bundleRoot error:nil];
-                    for (NSString *item in items) {
-                        if ([item hasSuffix:@".app"]) {
-                            NSString *plistPath = [[bundleRoot stringByAppendingPathComponent:item] stringByAppendingPathComponent:@"Info.plist"];
-                            NSDictionary *info = [NSDictionary dictionaryWithContentsOfFile:plistPath];
-                            NSString *exeName = info[@"CFBundleExecutable"];
-                            if (exeName) {
-                                [strongSelf logMessage:@"[AppDataCleaner] Killing process: %@", exeName];
-                                [strongSelf runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 '%@' 2>/dev/null || true", exeName]];
-                            }
-                            break;
-                        }
-                    }
-                }
-                
-                 [NSThread sleepForTimeInterval:0.5]; // Wait for process to die
+                // Kill by executable name (no shell) to release file locks.
+                PXKillAppProcessBestEffort(strongSelf, bundleID);
+
+                [NSThread sleepForTimeInterval:0.5]; // Wait for process to die
 
                  // Safari: also stop WebKit helper processes to fully release cookie/session DBs.
                  if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
@@ -1119,7 +1077,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         PXStopMailDaemonsBestEffort(self);
         if (!PXWaitForProcessExit(self, @"maild", 5.0)) {
             [self logMessage:@"[AppDataCleaner] MobileMail: maild still running; forcing kill"]; 
-            [self runCommandWithPrivileges:@"killall -9 maild 2>/dev/null || true"]; 
+            PXKillallByName(@"maild", SIGKILL);
             (void)PXWaitForProcessExit(self, @"maild", 2.0);
         }
         (void)PXWaitForProcessExit(self, @"Mail", 2.0);
@@ -1147,9 +1105,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         if ([_fileManager fileExistsAtPath:accountsDB]) {
             // Stop accountsd before touching DB (avoid "database is locked").
             // Use TERM first to reduce crash reports.
-            [self runCommandWithPrivileges:@"killall -TERM accountsd 2>/dev/null || true"]; 
-            [NSThread sleepForTimeInterval:0.15];
-            [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
+            PXKillallTermThenKill(@"accountsd", 0.15);
             [NSThread sleepForTimeInterval:0.2];
 
             // Use one RW connection for before/delete/after to avoid transient CANTOPEN.
@@ -1231,11 +1187,11 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         }
 
         // Restart accounts daemons (best-effort) so UI reflects removal.
-        [self runCommandWithPrivileges:@"killall -TERM accountsd 2>/dev/null || true"]; 
-        [self runCommandWithPrivileges:@"killall -TERM Mail 2>/dev/null || true"]; 
+        PXKillallByName(@"accountsd", SIGTERM);
+        PXKillallByName(@"Mail", SIGTERM);
         [NSThread sleepForTimeInterval:0.15];
-        [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
-        [self runCommandWithPrivileges:@"killall -9 Mail 2>/dev/null || true"]; 
+        PXKillallByName(@"accountsd", SIGKILL);
+        PXKillallByName(@"Mail", SIGKILL);
 
         // Do not auto-restart maild; let launchd bring it back when needed.
 
@@ -4315,7 +4271,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     NSLog(@"[AppDataCleaner] Performing aggressive cleanup for %@", bundleID);
     
     // Kill the app first to ensure no files are in use
-    [self runCommandWithPrivileges:[NSString stringWithFormat:@"killall -9 %@ 2>/dev/null || true", bundleID]];
+    PXKillallByName(bundleID, SIGKILL);
     
     // Get the data container
     NSString *dataUUID = [self findDataContainerUUID:bundleID];
@@ -4768,10 +4724,10 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     [self runCommandWithPrivileges:@"sync; echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true"];
     
     // Enhanced: Clear application launch cache (Safe to restart cfprefsd)
-    [self runCommandWithPrivileges:@"killall -TERM cfprefsd 2>/dev/null || true"];
+    PXKillallByName(@"cfprefsd", SIGTERM);
     
     // Enhanced: Clear system connectivity caches
-    [self runCommandWithPrivileges:@"killall -TERM nsurlsessiond 2>/dev/null || true"];
+    PXKillallByName(@"nsurlsessiond", SIGTERM);
     
     // REMOVED: Force cache regen in filesystem - MAY CAUSE RESPRING
     // [self runCommandWithPrivileges:@"rm -rf /var/mobile/Library/Caches/com.apple.LaunchServices-* 2>/dev/null || true"];
@@ -5142,9 +5098,9 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
             [self logMessage:@"[AppDataCleaner] MobileSafari: removing Google accounts from Accounts3 (shared) ..."]; 
 
             // Stop accountsd before touching DB (avoid "database is locked").
-            [self runCommandWithPrivileges:@"killall -TERM accountsd 2>/dev/null || true"]; 
+            PXKillallByName(@"accountsd", SIGTERM);
             [NSThread sleepForTimeInterval:0.2];
-            [self runCommandWithPrivileges:@"killall -9 accountsd 2>/dev/null || true"]; 
+            PXKillallByName(@"accountsd", SIGKILL);
             [NSThread sleepForTimeInterval:0.2];
 
             sqlite3 *db = NULL;
@@ -5242,7 +5198,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
             }
 
             // Restart accountsd so UI refreshes.
-            [self runCommandWithPrivileges:@"killall -TERM accountsd 2>/dev/null || true"]; 
+            PXKillallByName(@"accountsd", SIGTERM);
         } else {
             [self logMessage:@"[AppDataCleaner] MobileSafari: Accounts3.sqlite not found; skipping Google accounts cleanup"]; 
         }
@@ -5315,8 +5271,8 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     }
 
     // Flush preference/caches used by Safari.
-    [self runCommandWithPrivileges:@"killall -TERM cfprefsd 2>/dev/null || true"]; 
-    [self runCommandWithPrivileges:@"killall -TERM webbookmarksd 2>/dev/null || true"]; 
+    PXKillallByName(@"cfprefsd", SIGTERM);
+    PXKillallByName(@"webbookmarksd", SIGTERM);
 
     // Also wipe data containers for WebKit helper services; cookies/session can live there.
     [self _wipeRelatedDataContainersForBundleIDs:@[

@@ -10,6 +10,7 @@
 #import "AppEntitlementsReader.h"
 #import "AppGroupContainerResolver.h"
 #import "CommandRunner.h"
+#import "common/PXProcessKiller.h"
 
 #import <CommonCrypto/CommonDigest.h>
 #import <notify.h>
@@ -251,8 +252,7 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
                 exe = [proxy performSelector:@selector(bundleExecutable)];
             }
             if ([exe isKindOfClass:[NSString class]] && exe.length) {
-                CommandRunner *runner = [CommandRunner shared];
-                [runner run:[NSString stringWithFormat:@"killall -9 %@ 2>/dev/null || true", PXShellQuote(exe)]];
+                PXKillallByName(exe, SIGKILL);
             }
         }
     } @catch (__unused NSException *e) {
@@ -260,16 +260,13 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
 
     // Safari has multiple helper processes that can keep databases open.
     if ([bundleID isEqualToString:@"com.apple.mobilesafari"]) {
-        CommandRunner *runner = [CommandRunner shared];
         NSArray<NSString *> *names = @[
             @"MobileSafari",
             @"SafariViewService",
             @"com.apple.WebKit.WebContent",
             @"com.apple.WebKit.Networking"
         ];
-        for (NSString *name in names) {
-            [runner run:[NSString stringWithFormat:@"killall -9 %@ 2>/dev/null || true", PXShellQuote(name)]];
-        }
+        PXKillallTermThenKillMany(names, 0.1);
     }
 
     // Generic extra stopping for system apps: many have an associated daemon named <exe> + "d".
@@ -286,18 +283,9 @@ static NSString *PXFindDataContainerUUIDByMetadata(NSFileManager *fm, NSString *
 
         BOOL isSystem = ([appType isKindOfClass:[NSString class]] && [(NSString *)appType isEqualToString:@"System"]);
         if (isSystem && [exe isKindOfClass:[NSString class]] && exe.length) {
-            CommandRunner *runner = [CommandRunner shared];
             NSString *daemon = [[(NSString *)exe lowercaseString] stringByAppendingString:@"d"]; 
             NSArray<NSString *> *names = @[ (NSString *)exe, daemon ];
-            for (NSString *name in names) {
-                if (![name isKindOfClass:[NSString class]] || !name.length) continue;
-                [runner run:[NSString stringWithFormat:@"killall -TERM %@ 2>/dev/null || true", PXShellQuote(name)]];
-            }
-            [NSThread sleepForTimeInterval:0.15];
-            for (NSString *name in names) {
-                if (![name isKindOfClass:[NSString class]] || !name.length) continue;
-                [runner run:[NSString stringWithFormat:@"killall -9 %@ 2>/dev/null || true", PXShellQuote(name)]];
-            }
+            PXKillallTermThenKillMany(names, 0.15);
         }
     } @catch (__unused NSException *e) {
     }
@@ -1444,10 +1432,10 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
 
                     // Best-effort stop associated daemons first.
                     [self _killRelatedProcessesForBundleID:bundleID];
-                    [runner run:@"killall -TERM accountsd 2>/dev/null || true"]; 
-                    [runner run:@"killall -TERM calaccessd 2>/dev/null || true"]; 
-                    [runner run:@"killall -TERM imagent 2>/dev/null || true"]; 
-                    [runner run:@"killall -TERM MobileSMS 2>/dev/null || true"]; 
+                    PXKillallByName(@"accountsd", SIGTERM);
+                    PXKillallByName(@"calaccessd", SIGTERM);
+                    PXKillallByName(@"imagent", SIGTERM);
+                    PXKillallByName(@"MobileSMS", SIGTERM);
                     [NSThread sleepForTimeInterval:0.15];
 
                     PXDebugAppendLine(debugBefore, [NSString stringWithFormat:@"copy %@ -> %@", src, dstRel]);
@@ -1916,7 +1904,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
 
         // Post-restore hygiene: refresh preferences daemon caches.
         // Some apps read state via cfprefsd and may not notice external file writes immediately.
-        [runner run:@"killall -TERM cfprefsd 2>/dev/null || true"]; 
+        PXKillallByName(@"cfprefsd", SIGTERM);
 
         // Cleanup staging best-effort
         [fm removeItemAtPath:stagingRoot error:nil];
@@ -2101,15 +2089,15 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
             NSString *libBase = [self _mobileLibraryBasePath];
 
             // Stop common daemons that may hold these DBs.
-            [runner run:@"killall -TERM accountsd 2>/dev/null || true"]; 
-            [runner run:@"killall -TERM calaccessd 2>/dev/null || true"]; 
-            [runner run:@"killall -TERM imagent 2>/dev/null || true"]; 
-            [runner run:@"killall -TERM MobileSMS 2>/dev/null || true"]; 
+            PXKillallByName(@"accountsd", SIGTERM);
+            PXKillallByName(@"calaccessd", SIGTERM);
+            PXKillallByName(@"imagent", SIGTERM);
+            PXKillallByName(@"MobileSMS", SIGTERM);
             [NSThread sleepForTimeInterval:0.2];
-            [runner run:@"killall -9 accountsd 2>/dev/null || true"]; 
-            [runner run:@"killall -9 calaccessd 2>/dev/null || true"]; 
-            [runner run:@"killall -9 imagent 2>/dev/null || true"]; 
-            [runner run:@"killall -9 MobileSMS 2>/dev/null || true"]; 
+            PXKillallByName(@"accountsd", SIGKILL);
+            PXKillallByName(@"calaccessd", SIGKILL);
+            PXKillallByName(@"imagent", SIGKILL);
+            PXKillallByName(@"MobileSMS", SIGKILL);
 
             for (NSDictionary *it in (NSArray *)dbFiles) {
                 if (![it isKindOfClass:[NSDictionary class]]) continue;
@@ -2140,10 +2128,10 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
             [warnings addObject:@"Restored shared system DBs (this may affect multiple apps)"];
 
             // Restart daemons best-effort.
-            [runner run:@"killall -TERM accountsd 2>/dev/null || true"]; 
-            [runner run:@"killall -TERM calaccessd 2>/dev/null || true"]; 
-            [runner run:@"killall -TERM imagent 2>/dev/null || true"]; 
-            [runner run:@"killall -TERM MobileSMS 2>/dev/null || true"]; 
+            PXKillallByName(@"accountsd", SIGTERM);
+            PXKillallByName(@"calaccessd", SIGTERM);
+            PXKillallByName(@"imagent", SIGTERM);
+            PXKillallByName(@"MobileSMS", SIGTERM);
         }
 
         // Preferences restore
@@ -2159,7 +2147,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
                 [runner run:[NSString stringWithFormat:@"cp -f %@ %@ 2>/dev/null || true", PXShellQuote(prefBackup), PXShellQuote(prefDest)]];
                 [runner run:[NSString stringWithFormat:@"chown mobile:mobile %@ 2>/dev/null || true", PXShellQuote(prefDest)]];
                 [runner run:[NSString stringWithFormat:@"chmod 644 %@ 2>/dev/null || true", PXShellQuote(prefDest)]];
-                [runner run:@"killall -TERM cfprefsd 2>/dev/null || true"]; 
+                PXKillallByName(@"cfprefsd", SIGTERM);
             } else {
                 [warnings addObject:@"Preferences archive missing; skipping"];
             }
