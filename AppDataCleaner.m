@@ -121,15 +121,67 @@ static BOOL PXSQLiteTableHasColumn(sqlite3 *db, NSString *table, NSString *colum
     return found;
 }
 
+static BOOL PXSQLiteIsSafeIdentifier(NSString *s) {
+    if (![s isKindOfClass:[NSString class]] || s.length == 0) return NO;
+    NSCharacterSet *allowed = [NSCharacterSet characterSetWithCharactersInString:@"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_"];
+    return ([[s stringByTrimmingCharactersInSet:allowed] length] == 0);
+}
+
+static NSSet<NSString *> *PXSQLiteColumnsForTableCached(sqlite3 *db,
+                                                        NSString *table,
+                                                        NSMutableDictionary<NSString *, NSSet<NSString *> *> *cache) {
+    if (!db || !table.length) return [NSSet set];
+    if (!cache) return [NSSet set];
+    NSSet *cached = cache[table];
+    if ([cached isKindOfClass:[NSSet class]]) return cached;
+
+    if (!PXSQLiteIsSafeIdentifier(table)) {
+        cache[table] = [NSSet set];
+        return cache[table];
+    }
+
+    NSString *sql = [NSString stringWithFormat:@"PRAGMA table_info('%@');", table];
+    sqlite3_stmt *st = NULL;
+    int rc = sqlite3_prepare_v2(db, sql.UTF8String, -1, &st, NULL);
+    if (rc != SQLITE_OK || !st) {
+        if (st) sqlite3_finalize(st);
+        cache[table] = [NSSet set];
+        return cache[table];
+    }
+
+    NSMutableSet<NSString *> *cols = [NSMutableSet set];
+    while (sqlite3_step(st) == SQLITE_ROW) {
+        const unsigned char *name = sqlite3_column_text(st, 1);
+        if (name) {
+            NSString *n = [NSString stringWithUTF8String:(const char *)name];
+            if (n.length) [cols addObject:n];
+        }
+    }
+    sqlite3_finalize(st);
+
+    cache[table] = [cols copy];
+    return cache[table];
+}
+
+static BOOL PXSQLiteTableHasColumnCached(sqlite3 *db,
+                                        NSString *table,
+                                        NSString *column,
+                                        NSMutableDictionary<NSString *, NSSet<NSString *> *> *cache) {
+    if (!db || !table.length || !column.length) return NO;
+    NSSet<NSString *> *cols = PXSQLiteColumnsForTableCached(db, table, cache);
+    return [cols containsObject:column];
+}
+
 static void PXSQLiteLogAccountsSample(AppDataCleaner *selfRef, sqlite3 *db, NSString *label) {
     if (!selfRef || !db) return;
 
+    NSMutableDictionary<NSString *, NSSet<NSString *> *> *colCache = [NSMutableDictionary dictionary];
     NSMutableArray<NSString *> *cols = [NSMutableArray array];
     // Always include primary key if present.
-    if (PXSQLiteTableHasColumn(db, @"ZACCOUNT", @"Z_PK")) [cols addObject:@"Z_PK"]; 
-    if (PXSQLiteTableHasColumn(db, @"ZACCOUNT", @"ZACCOUNTTYPE")) [cols addObject:@"ZACCOUNTTYPE"]; 
+    if (PXSQLiteTableHasColumnCached(db, @"ZACCOUNT", @"Z_PK", colCache)) [cols addObject:@"Z_PK"]; 
+    if (PXSQLiteTableHasColumnCached(db, @"ZACCOUNT", @"ZACCOUNTTYPE", colCache)) [cols addObject:@"ZACCOUNTTYPE"]; 
     for (NSString *c in @[@"ZIDENTIFIER", @"ZUSERNAME", @"ZEMAILADDRESS", @"ZDISPLAYNAME", @"ZACCOUNTDESCRIPTION", @"ZOWNINGBUNDLEID"]) {
-        if (PXSQLiteTableHasColumn(db, @"ZACCOUNT", c)) [cols addObject:c];
+        if (PXSQLiteTableHasColumnCached(db, @"ZACCOUNT", c, colCache)) [cols addObject:c];
     }
     if (!cols.count) return;
 
@@ -2574,9 +2626,10 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
             sqlite3_busy_timeout(db, 3000);
 
             // Build a predicate using only columns that exist on this iOS schema.
+            NSMutableDictionary<NSString *, NSSet<NSString *> *> *colCache = [NSMutableDictionary dictionary];
             NSMutableArray<NSString *> *cols = [NSMutableArray array];
             for (NSString *c in @[@"ZIDENTIFIER", @"ZOWNINGBUNDLEID", @"ZUSERNAME", @"ZACCOUNTDESCRIPTION", @"ZDISPLAYNAME", @"ZEMAILADDRESS"]) {
-                if (PXSQLiteTableHasColumn(db, @"ZACCOUNT", c)) {
+                if (PXSQLiteTableHasColumnCached(db, @"ZACCOUNT", c, colCache)) {
                     [cols addObject:c];
                 }
             }
@@ -5280,7 +5333,8 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
                     [self logMessage:@"[AppDataCleaner] MobileSafari: google-ish account types=%@", typeCount];
                 }
 
-                BOOL hasZAccountType = PXSQLiteTableHasColumn(db, @"ZACCOUNT", @"ZACCOUNTTYPE");
+                NSMutableDictionary<NSString *, NSSet<NSString *> *> *colCache = [NSMutableDictionary dictionary];
+                BOOL hasZAccountType = PXSQLiteTableHasColumnCached(db, @"ZACCOUNT", @"ZACCOUNTTYPE", colCache);
 
                 NSMutableArray<NSString *> *preds = [NSMutableArray array];
                 if (hasZAccountType) {
@@ -5296,7 +5350,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
                     @"ZOWNINGBUNDLEID"
                 ];
                 for (NSString *c in maybeCols) {
-                    if (PXSQLiteTableHasColumn(db, @"ZACCOUNT", c)) {
+                    if (PXSQLiteTableHasColumnCached(db, @"ZACCOUNT", c, colCache)) {
                         [preds addObject:[NSString stringWithFormat:@"%@ LIKE '%%google%%' OR %@ LIKE '%%gmail%%'", c, c]];
                     }
                 }
