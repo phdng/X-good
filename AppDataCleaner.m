@@ -15,6 +15,7 @@
 #import "AppEntitlementsReader.h"
 #import "CommandRunner.h"
 #import "AppGroupContainerResolver.h"
+#import "FreezeManager.h"
 #import "common/PXProcessKiller.h"
 
 // Add SearchableIndex framework if available
@@ -801,6 +802,11 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     // Use __block to track if completion was called
     __block BOOL completionCalled = NO;
     __block dispatch_semaphore_t completionLock = dispatch_semaphore_create(1);
+
+    // Freeze/unfreeze around destructive wipes to prevent relaunch mid-clean.
+    FreezeManager *freezer = [FreezeManager sharedManager];
+    __block BOOL wasFrozen = [freezer isApplicationFrozen:bundleID];
+    __block BOOL frozeForThisClear = NO;
     
     // Capture self for logging in blocks
     __weak typeof(self) weakSelf = self;
@@ -822,6 +828,14 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         if (!completionCalled) {
             completionCalled = YES;
             dispatch_semaphore_signal(completionLock);
+
+            // Unfreeze only if we froze it in this operation.
+            if (frozeForThisClear) {
+                @try {
+                    [freezer unfreezeApplication:bundleID];
+                } @catch (__unused NSException *e) {
+                }
+            }
 
             if (watchdogTimer) {
                 dispatch_source_cancel(watchdogTimer);
@@ -906,10 +920,20 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
                 // Step 3: Clear app state data (login sessions)
                 [strongSelf logMessage:@"[AppDataCleaner] Step 3: Clearing app state data..."];
                 [strongSelf _internalClearAppStateData:bundleID];
-                
-                // Step 4: Use completeAppDataWipe for comprehensive data wiping
-                [strongSelf logMessage:@"[AppDataCleaner] Step 4: Running completeAppDataWipe..."];
-                [strongSelf completeAppDataWipe:bundleID];
+
+                 // Freeze now (after any in-app keychain bridge launch) to prevent relaunch mid-wipe.
+                 if (!wasFrozen) {
+                     [strongSelf logMessage:@"[AppDataCleaner] Freezing app launch to prevent relaunch during wipe..."];
+                     @try {
+                         [freezer freezeApplication:bundleID];
+                     } @catch (__unused NSException *e) {
+                     }
+                     frozeForThisClear = [freezer isApplicationFrozen:bundleID];
+                 }
+                 
+                 // Step 4: Use completeAppDataWipe for comprehensive data wiping
+                 [strongSelf logMessage:@"[AppDataCleaner] Step 4: Running completeAppDataWipe..."];
+                 [strongSelf completeAppDataWipe:bundleID];
                 
                 // Step 5: Clear HTTP cookie storage in memory  
                 [strongSelf logMessage:@"[AppDataCleaner] Step 5: Clearing HTTP cookies from memory..."];
