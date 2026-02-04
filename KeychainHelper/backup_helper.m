@@ -89,6 +89,37 @@ static void logSuccess(NSString *format, ...) {
     fprintf(stdout, "[OK] %s\n", [message UTF8String]);
 }
 
+static NSString *PXHexStringFromData(NSData *data) {
+    if (![data isKindOfClass:[NSData class]] || data.length == 0) return @"";
+    const unsigned char *bytes = (const unsigned char *)data.bytes;
+    NSUInteger len = data.length;
+    // Cap to avoid huge logs
+    NSUInteger maxLen = MIN(len, 32);
+    NSMutableString *hex = [NSMutableString stringWithCapacity:maxLen * 2];
+    for (NSUInteger i = 0; i < maxLen; i++) {
+        [hex appendFormat:@"%02x", bytes[i]];
+    }
+    if (len > maxLen) {
+        [hex appendString:@"..." ];
+    }
+    return hex;
+}
+
+static NSString *PXSafeString(id v) {
+    if (!v || v == (id)kCFNull) return @"";
+    if ([v isKindOfClass:[NSString class]]) return (NSString *)v;
+    if ([v isKindOfClass:[NSData class]]) {
+        NSString *s = [[NSString alloc] initWithData:(NSData *)v encoding:NSUTF8StringEncoding];
+        if (s.length) return s;
+        return [NSString stringWithFormat:@"<data:%@>", PXHexStringFromData((NSData *)v)];
+    }
+    if ([v respondsToSelector:@selector(stringValue)]) {
+        NSString *s = [v performSelector:@selector(stringValue)];
+        if ([s isKindOfClass:[NSString class]] && s.length) return s;
+    }
+    return [[v description] ?: @"" copy];
+}
+
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         // Parse arguments.
@@ -166,8 +197,9 @@ int main(int argc, const char *argv[]) {
                           (unsigned long)result.itemsSucceeded,
                           (unsigned long)result.itemsFailed);
                 
-                for (NSString *warning in result.warnings) {
-                    fprintf(stderr, "[WARN] %s\n", [warning UTF8String]);
+                for (id warningObj in result.warnings) {
+                    NSString *warning = PXSafeString(warningObj);
+                    fprintf(stderr, "[WARN] %s\n", [warning UTF8String] ?: "");
                 }
                 break;
             }
@@ -194,11 +226,13 @@ int main(int argc, const char *argv[]) {
                           (unsigned long)result.itemsSucceeded,
                           (unsigned long)result.itemsFailed);
                 
-                for (NSString *warning in result.warnings) {
-                    fprintf(stderr, "[WARN] %s\n", [warning UTF8String]);
+                for (id warningObj in result.warnings) {
+                    NSString *warning = PXSafeString(warningObj);
+                    fprintf(stderr, "[WARN] %s\n", [warning UTF8String] ?: "");
                 }
-                for (NSString *err in result.errors) {
-                    fprintf(stderr, "[ERR] %s\n", [err UTF8String]);
+                for (id errObj in result.errors) {
+                    NSString *err = PXSafeString(errObj);
+                    fprintf(stderr, "[ERR] %s\n", [err UTF8String] ?: "");
                 }
                 break;
             }
@@ -222,8 +256,9 @@ int main(int argc, const char *argv[]) {
                 logSuccess(@"Wipe complete: %lu items deleted",
                           (unsigned long)result.itemsSucceeded);
                 
-                for (NSString *warning in result.warnings) {
-                    fprintf(stderr, "[WARN] %s\n", [warning UTF8String]);
+                for (id warningObj in result.warnings) {
+                    NSString *warning = PXSafeString(warningObj);
+                    fprintf(stderr, "[WARN] %s\n", [warning UTF8String] ?: "");
                 }
                 break;
             }
@@ -254,10 +289,13 @@ int main(int argc, const char *argv[]) {
                 
                 fprintf(stdout, "Found %lu keychain items:\n", (unsigned long)items.count);
                 for (NSDictionary *item in items) {
+                    NSString *cls = PXSafeString(item[@"class"]);
+                    NSString *svc = PXSafeString(item[@"service"]);
+                    NSString *acc = PXSafeString(item[@"account"]);
                     fprintf(stdout, "  - [%s] %s/%s\n",
-                           [item[@"class"] UTF8String] ?: "?",
-                           [item[@"service"] UTF8String] ?: "",
-                           [item[@"account"] UTF8String] ?: "");
+                           cls.length ? [cls UTF8String] : "?",
+                           [svc UTF8String] ?: "",
+                           [acc UTF8String] ?: "");
                 }
                 break;
             }
