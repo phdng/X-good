@@ -48,6 +48,7 @@ struct dl_phdr_info {
 #define PT_DENY_ATTACH 31
 #endif
 #import <unistd.h>
+#import <limits.h>
 
 #import <substrate.h>
 
@@ -143,6 +144,8 @@ static volatile BOOL gJBBlockDlopenDlsymProbesEnabled = NO;
 static volatile BOOL gJBSysctlProcSanitizeEnabled = NO;
 static volatile BOOL gJBHideProcMapsEnabled = NO;
 static volatile BOOL gJBHideObjcImagesEnabled = NO;
+static volatile BOOL gJBHookSandboxCheckEnabled = NO;
+static volatile BOOL gJBDebugLoggingEnabled = NO;
 static volatile CFTimeInterval gJBLastCheck = 0;
 static BOOL PXJBShouldBypassCached(void) {
     if (PXJBIsCriticalProcess()) return NO;
@@ -205,6 +208,12 @@ static BOOL PXJBShouldBypassCached(void) {
         // Phase 3 extension toggle: hide ObjC runtime image list (default OFF)
         gJBHideObjcImagesEnabled = [securitySettings boolForKey:@"jbBypassHideObjcImagesEnabled"]; 
 
+        // Phase 3 extension toggle: hook sandbox_check (default OFF)
+        gJBHookSandboxCheckEnabled = [securitySettings boolForKey:@"jbBypassHookSandboxCheckEnabled"]; 
+
+        // Debug: log blocked operations (default OFF)
+        gJBDebugLoggingEnabled = [securitySettings boolForKey:@"jbBypassDebugLoggingEnabled"]; 
+
         Class mgrCls = NSClassFromString(@"IdentifierManager");
         if (!mgrCls || ![mgrCls respondsToSelector:@selector(sharedManager)]) {
             gJBEnabled = NO;
@@ -256,6 +265,25 @@ static BOOL PXJBHideObjcImagesEnabled(void) {
     return PXJBShouldBypassCached() && gJBHideObjcImagesEnabled;
 }
 
+static BOOL PXJBHookSandboxCheckEnabled(void) {
+    return PXJBShouldBypassCached() && gJBHookSandboxCheckEnabled;
+}
+
+static BOOL PXJBDebugLoggingEnabled(void) {
+    return PXJBShouldBypassCached() && gJBDebugLoggingEnabled;
+}
+
+static void PXJBLogBlockedOncePerSecond(const char *what, const char *detail) {
+    if (!PXJBDebugLoggingEnabled()) return;
+    static CFTimeInterval last = 0;
+    CFTimeInterval now = CFAbsoluteTimeGetCurrent();
+    if ((now - last) < 1.0) return;
+    last = now;
+    if (!what) what = "(unknown)";
+    if (!detail) detail = "";
+    PXLog(@"[JailbreakBypass][debug] blocked %s %s", what, detail);
+}
+
 static BOOL PXJBSyscallBypassEnabled(void) {
     return PXJBShouldBypassCached() && gJBSyscallHookEnabled;
 }
@@ -273,6 +301,16 @@ static BOOL PXJBIsHiddenExactPath(const char *path) {
         "/usr/lib/substrate/SubstrateBootstrap.dylib",
         "/usr/lib/libsubstrate.dylib",
         "/usr/lib/libmryipc.dylib",
+        "/usr/lib/libFrida.dylib",
+        "/usr/lib/libcycript.dylib",
+        "/usr/lib/libjailbreak.dylib",
+        "/Library/Frameworks/CydiaSubstrate.framework",
+        "/Library/PreferenceBundles",
+        "/Library/PreferenceLoader",
+        "/usr/bin/ssh",
+        "/usr/bin/scp",
+        "/var/checkra1n.dmg",
+        "/var/binpack",
         "/usr/sbin/sshd",
         "/bin/bash",
         "/etc/apt",
@@ -298,6 +336,9 @@ static BOOL PXJBIsHiddenPrefixPath(const char *path) {
         "/Library/Caches/cy-",
         "/private/var/Library/Caches/cy-",
         "/private/var/mobile/Library/Caches/cy-",
+        "/Library/Frameworks/CydiaSubstrate.framework/",
+        "/Library/PreferenceBundles/",
+        "/Library/PreferenceLoader/",
         "/var/jb",
         "/private/var/jb",
         "/private/preboot/jb",
@@ -436,15 +477,141 @@ static int hook_open(const char *path, int oflag, ...) {
 }
 
 static int (*orig_openat)(int, const char *, int, ...);
+
+static BOOL PXJBRelativePathLooksLikeProbe(const char *path) {
+    if (!path) return NO;
+    // Keep this list tight to avoid false positives.
+    static const char *needles[] = {
+        "mobilesubstrate",
+        "cydia.app",
+        "sileo.app",
+        "zebra.app",
+        "filza.app",
+        "preferenceloader",
+        "preferencebundles",
+        "var/jb",
+        "library/caches/cy-",
+        "substrate",
+        "ellekit",
+        "libhooker",
+        "frida",
+        NULL
+    };
+    for (int i = 0; needles[i]; i++) {
+        if (PXStrContainsNoCase(path, needles[i])) return YES;
+    }
+    return NO;
+}
+
+static BOOL PXJBNormalizeAbsolutePath(const char *inPath, char *out, size_t outsz) {
+    if (!inPath || !out || outsz < 2) return NO;
+    if (inPath[0] != '/') return NO;
+
+    size_t w = 0;
+    out[w++] = '/';
+
+    const char *p = inPath;
+    while (*p) {
+        while (*p == '/') p++;
+        if (!*p) break;
+        const char *seg = p;
+        while (*p && *p != '/') p++;
+        size_t segLen = (size_t)(p - seg);
+        if (segLen == 1 && seg[0] == '.') {
+            continue;
+        }
+        if (segLen == 2 && seg[0] == '.' && seg[1] == '.') {
+            // pop last segment
+            if (w > 1) {
+                // remove trailing slash if any
+                if (out[w - 1] == '/' && w > 1) w--;
+                while (w > 1 && out[w - 1] != '/') w--;
+            }
+            continue;
+        }
+        // append segment
+        if (w > 1 && out[w - 1] != '/') {
+            if (w + 1 >= outsz) return NO;
+            out[w++] = '/';
+        }
+        if (w + segLen + 1 >= outsz) return NO;
+        memcpy(out + w, seg, segLen);
+        w += segLen;
+        out[w] = '\0';
+    }
+
+    if (w == 0) {
+        out[0] = '/';
+        out[1] = '\0';
+    } else {
+        out[w] = '\0';
+    }
+    return YES;
+}
+
+static BOOL PXJBJoinCwdAndNormalize(const char *relPath, char *out, size_t outsz) {
+    if (!relPath || !out || outsz < 2) return NO;
+    char cwd[PATH_MAX];
+    if (!getcwd(cwd, sizeof(cwd))) return NO;
+    size_t cwdLen = strlen(cwd);
+    size_t relLen = strlen(relPath);
+    if (cwdLen == 0 || cwd[0] != '/') return NO;
+
+    char tmp[PATH_MAX];
+    size_t need = cwdLen + 1 + relLen + 1;
+    if (need >= sizeof(tmp)) return NO;
+    memcpy(tmp, cwd, cwdLen);
+    tmp[cwdLen] = '/';
+    memcpy(tmp + cwdLen + 1, relPath, relLen);
+    tmp[cwdLen + 1 + relLen] = '\0';
+    return PXJBNormalizeAbsolutePath(tmp, out, outsz);
+}
+
 static int hook_openat(int fd, const char *path, int oflag, ...) {
     if (PXJBShouldBypassCached()) {
-        if (path && path[0] == '/' && PXJBPathShouldHide(path)) {
-            errno = ENOENT;
-            return -1;
-        }
-        if (path && path[0] == '/' && PXJBWriteCheckShouldBlock(path, oflag)) {
-            errno = EACCES;
-            return -1;
+        if (path) {
+            if (path[0] == '/') {
+                if (PXJBPathShouldHide(path)) {
+                    PXJBLogBlockedOncePerSecond("openat", path);
+                    errno = ENOENT;
+                    return -1;
+                }
+                if (PXJBWriteCheckShouldBlock(path, oflag)) {
+                    PXJBLogBlockedOncePerSecond("openat(write)", path);
+                    errno = EACCES;
+                    return -1;
+                }
+            } else {
+#ifndef AT_FDCWD
+#define AT_FDCWD (-2)
+#endif
+                if (fd == AT_FDCWD) {
+                    char normalized[PATH_MAX];
+                    if (PXJBJoinCwdAndNormalize(path, normalized, sizeof(normalized))) {
+                        if (PXJBPathShouldHide(normalized)) {
+                            PXJBLogBlockedOncePerSecond("openat", normalized);
+                            errno = ENOENT;
+                            return -1;
+                        }
+                        if (PXJBWriteCheckShouldBlock(normalized, oflag)) {
+                            PXJBLogBlockedOncePerSecond("openat(write)", normalized);
+                            errno = EACCES;
+                            return -1;
+                        }
+                    } else if (PXJBRelativePathLooksLikeProbe(path)) {
+                        PXJBLogBlockedOncePerSecond("openat(rel)", path);
+                        errno = ENOENT;
+                        return -1;
+                    }
+                } else {
+                    // Don't try to resolve fd->path (avoid side effects). Only block obvious probes.
+                    if (PXJBRelativePathLooksLikeProbe(path)) {
+                        PXJBLogBlockedOncePerSecond("openat(relfd)", path);
+                        errno = ENOENT;
+                        return -1;
+                    }
+                }
+            }
         }
     }
 
@@ -785,6 +952,81 @@ static FILE *hook_popen(const char *command, const char *type) {
     return orig_popen ? orig_popen(command, type) : NULL;
 }
 
+static BOOL PXJBSpawnPathLooksLikeProbe(const char *path) {
+    if (!path || !path[0]) return NO;
+    if (path[0] == '/' && PXJBPathShouldHide(path)) return YES;
+    // Also block common tool names when posix_spawnp is used.
+    static const char *denyTokens[] = {
+        "ssh",
+        "scp",
+        "sshd",
+        "bash",
+        "zsh",
+        "sh",
+        "uicache",
+        "ldrestart",
+        "frida-server",
+        "cycript",
+        "dpkg",
+        "apt",
+        "apt-get",
+        NULL
+    };
+    const char *base = strrchr(path, '/');
+    base = base ? (base + 1) : path;
+    for (int i = 0; denyTokens[i]; i++) {
+        if (PXStrEqNoCase(base, denyTokens[i])) return YES;
+    }
+    return NO;
+}
+
+static int (*orig_posix_spawn)(pid_t *restrict, const char *restrict, const posix_spawn_file_actions_t *restrict, const posix_spawnattr_t *restrict, char *const argv[restrict], char *const envp[restrict]);
+static int hook_posix_spawn(pid_t *restrict pid, const char *restrict path, const posix_spawn_file_actions_t *restrict file_actions, const posix_spawnattr_t *restrict attrp, char *const argv[restrict], char *const envp[restrict]) {
+    if (PXJBShouldBypassCached() && path && PXJBSpawnPathLooksLikeProbe(path)) {
+        PXJBLogBlockedOncePerSecond("posix_spawn", path);
+        errno = ENOENT;
+        return -1;
+    }
+    return orig_posix_spawn ? orig_posix_spawn(pid, path, file_actions, attrp, argv, envp) : -1;
+}
+
+static int (*orig_posix_spawnp)(pid_t *restrict, const char *restrict, const posix_spawn_file_actions_t *restrict, const posix_spawnattr_t *restrict, char *const argv[restrict], char *const envp[restrict]);
+static int hook_posix_spawnp(pid_t *restrict pid, const char *restrict file, const posix_spawn_file_actions_t *restrict file_actions, const posix_spawnattr_t *restrict attrp, char *const argv[restrict], char *const envp[restrict]) {
+    if (PXJBShouldBypassCached() && file && PXJBSpawnPathLooksLikeProbe(file)) {
+        PXJBLogBlockedOncePerSecond("posix_spawnp", file);
+        errno = ENOENT;
+        return -1;
+    }
+    return orig_posix_spawnp ? orig_posix_spawnp(pid, file, file_actions, attrp, argv, envp) : -1;
+}
+
+// Optional strong hook: sandbox_check
+static int (*orig_sandbox_check)(pid_t pid, const char *operation, int type, ...);
+static int hook_sandbox_check(pid_t pid, const char *operation, int type, ...) {
+    if (!orig_sandbox_check) {
+        errno = EPERM;
+        return -1;
+    }
+
+    // We only support the common 1-string-argument patterns.
+    const char *arg = NULL;
+    va_list ap;
+    va_start(ap, type);
+    arg = va_arg(ap, const char *);
+    va_end(ap);
+
+    if (PXJBHookSandboxCheckEnabled() && operation && arg && arg[0] == '/') {
+        // Only gate file-related operations (avoid breaking non-file sandbox queries).
+        if (PXHasPrefix(operation, "file-") && PXJBPathShouldHide(arg)) {
+            PXJBLogBlockedOncePerSecond("sandbox_check", arg);
+            errno = EPERM;
+            return -1;
+        }
+    }
+
+    return orig_sandbox_check(pid, operation, type, arg);
+}
+
 // Phase 3: dylib hiding (dyld enumeration + dladdr)
 static pthread_mutex_t gDyldLock = PTHREAD_MUTEX_INITIALIZER;
 static uint32_t *gVisibleToReal = NULL;
@@ -880,6 +1122,11 @@ static BOOL PXJBShouldHideImageName(const char *name) {
     if (PXStrContainsNoCase(name, "/library/mobilesubstrate/")) return YES;
     // mryipc is commonly used by jailbreak ecosystem.
     if (PXStrContainsNoCase(name, "libmryipc")) return YES;
+    if (PXStrContainsNoCase(name, "frida")) return YES;
+    if (PXStrContainsNoCase(name, "cycript")) return YES;
+    if (PXStrContainsNoCase(name, "libjailbreak")) return YES;
+    if (PXStrContainsNoCase(name, "preferenceloader")) return YES;
+    if (PXStrContainsNoCase(name, "preferencebundles")) return YES;
     return NO;
 }
 
@@ -986,14 +1233,15 @@ static BOOL PXJBShouldBlockDlsymName(const char *sym) {
 
 // Phase 3 strong option: hide dl_iterate_phdr enumeration
 static int (*orig_dl_iterate_phdr)(int (*callback)(struct dl_phdr_info *info, size_t size, void *data), void *data);
-static __thread int (*px_orig_dl_iterate_cb)(struct dl_phdr_info *info, size_t size, void *data) = NULL;
-static __thread void *px_orig_dl_iterate_data = NULL;
+
+typedef struct {
+    int (*cb)(struct dl_phdr_info *info, size_t size, void *data);
+    void *data;
+} PXJBPhdrIterCtx;
 
 static int px_dl_iterate_phdr_cb(struct dl_phdr_info *info, size_t size, void *data) {
-    (void)data;
-    int (*cb)(struct dl_phdr_info *, size_t, void *) = px_orig_dl_iterate_cb;
-    void *cbData = px_orig_dl_iterate_data;
-    if (!cb) return 0;
+    PXJBPhdrIterCtx *ctx = (PXJBPhdrIterCtx *)data;
+    if (!ctx || !ctx->cb) return 0;
 
     if (PXJBHideDlIteratePhdrEnabled() && info) {
         const char *nm = info->dlpi_name;
@@ -1001,7 +1249,7 @@ static int px_dl_iterate_phdr_cb(struct dl_phdr_info *info, size_t size, void *d
             return 0; // skip
         }
     }
-    return cb(info, size, cbData);
+    return ctx->cb(info, size, ctx->data);
 }
 
 static int hook_dl_iterate_phdr(int (*callback)(struct dl_phdr_info *info, size_t size, void *data), void *data) {
@@ -1010,12 +1258,10 @@ static int hook_dl_iterate_phdr(int (*callback)(struct dl_phdr_info *info, size_
         return orig_dl_iterate_phdr(callback, data);
     }
 
-    px_orig_dl_iterate_cb = callback;
-    px_orig_dl_iterate_data = data;
-    int r = orig_dl_iterate_phdr(px_dl_iterate_phdr_cb, NULL);
-    px_orig_dl_iterate_cb = NULL;
-    px_orig_dl_iterate_data = NULL;
-    return r;
+    PXJBPhdrIterCtx ctx;
+    ctx.cb = callback;
+    ctx.data = data;
+    return orig_dl_iterate_phdr(px_dl_iterate_phdr_cb, &ctx);
 }
 
 // Phase 3 strong option: block dlopen/dlsym probes
@@ -1425,7 +1671,12 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
             if ([scheme isEqualToString:@"cydia"] ||
                 [scheme isEqualToString:@"sileo"] ||
                 [scheme isEqualToString:@"zbra"] ||
-                [scheme isEqualToString:@"filza"]) {
+                [scheme isEqualToString:@"filza"] ||
+                [scheme isEqualToString:@"undecimus"] ||
+                [scheme isEqualToString:@"checkra1n"] ||
+                [scheme isEqualToString:@"odyssey"] ||
+                [scheme isEqualToString:@"taurine"] ||
+                [scheme isEqualToString:@"electra"]) {
                 return NO;
             }
         }
@@ -1494,6 +1745,7 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
         BOOL wantSysctlSanitize = [ss boolForKey:@"jbBypassSysctlProcSanitizeEnabled"]; // experimental
         BOOL wantHideProcMaps = [ss boolForKey:@"jbBypassHideProcMapsEnabled"]; // experimental
         BOOL wantHideObjcImages = [ss boolForKey:@"jbBypassHideObjcImagesEnabled"]; // experimental
+        BOOL wantSandboxCheck = [ss boolForKey:@"jbBypassHookSandboxCheckEnabled"]; // experimental
         void *libSystem = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
         if (libSystem) {
             void *sym = NULL;
@@ -1560,6 +1812,19 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
 
             sym = FindSymbol(NULL, "popen");
             if (sym) MSHookFunction(sym, (void *)hook_popen, (void **)&orig_popen);
+
+            // Block probe spawns (safe default; gate inside hook).
+            sym = FindSymbol(NULL, "posix_spawn");
+            if (sym) MSHookFunction(sym, (void *)hook_posix_spawn, (void **)&orig_posix_spawn);
+
+            sym = FindSymbol(NULL, "posix_spawnp");
+            if (sym) MSHookFunction(sym, (void *)hook_posix_spawnp, (void **)&orig_posix_spawnp);
+
+            // Optional: sandbox_check hook (default OFF)
+            if (wantSandboxCheck) {
+                sym = FindSymbol(NULL, "sandbox_check");
+                if (sym) MSHookFunction(sym, (void *)hook_sandbox_check, (void **)&orig_sandbox_check);
+            }
 
             // Phase 2 extension (toggle: jbBypassStatfsEnabled)
             sym = FindSymbol(NULL, "statfs");
