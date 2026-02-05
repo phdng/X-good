@@ -57,32 +57,32 @@ static Class hooked_objc_allocateClassPair(Class superclass, const char *name, s
     if (cls) return cls;
 
     // Most common failure case: name already exists.
-    // For Firebase/GUL dynamic subclasses, return the already-registered class when compatible.
+    // For Firebase/GUL dynamic subclasses, prefer allocating a unique name so swizzlers get a
+    // fresh class (avoids mutating an existing class created by another swizzler attempt).
     if (name && name[0] != '\0' && PXHasFirebasePrefix(name)) {
         char buf[320];
         (void)snprintf(buf, sizeof(buf), "allocateClassPair returned NULL for name=%s super=%s", name, superclass ? class_getName(superclass) : "(null)");
         PXGuardTrace(buf);
         syslog(LOG_NOTICE, "[ProjectX] %s", buf);
 
-        Class existing = objc_getClass(name);
-        if (existing) {
-            if (!superclass || PXIsSubclassOfClass(existing, superclass)) {
-                return existing;
-            }
+        static unsigned long counter = 0;
+        char altName[256];
+        (void)snprintf(altName, sizeof(altName), "%s__px%lu", name, ++counter);
+        Class alt = orig_objc_allocateClassPair(superclass, altName, extraBytes);
+        if (alt) {
+            char buf2[384];
+            (void)snprintf(buf2, sizeof(buf2), "name collision for %s; allocated %s instead", name, altName);
+            PXGuardTrace(buf2);
+            syslog(LOG_NOTICE, "[ProjectX] %s", buf2);
+            return alt;
+        }
 
-            // Collision with an incompatible class: try allocating with a unique suffix.
-            // This is a best-effort fallback to keep swizzlers functional.
-            static unsigned long counter = 0;
-            char altName[256];
-            (void)snprintf(altName, sizeof(altName), "%s__px%lu", name, ++counter);
-            Class alt = orig_objc_allocateClassPair(superclass, altName, extraBytes);
-            if (alt) {
-                char buf2[384];
-                (void)snprintf(buf2, sizeof(buf2), "name collision for %s; allocated %s instead", name, altName);
-                PXGuardTrace(buf2);
-                syslog(LOG_NOTICE, "[ProjectX] %s", buf2);
-                return alt;
-            }
+        // Last resort: return existing class if compatible.
+        Class existing = objc_getClass(name);
+        if (existing && (!superclass || PXIsSubclassOfClass(existing, superclass))) {
+            PXGuardTrace("falling back to existing class after alt allocation failed");
+            syslog(LOG_NOTICE, "[ProjectX] falling back to existing class for %s", name);
+            return existing;
         }
     }
 
