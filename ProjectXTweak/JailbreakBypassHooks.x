@@ -120,6 +120,7 @@ static BOOL PXJBIsCriticalProcess(void) {
 static volatile BOOL gJBEnabled = NO;
 static volatile BOOL gJBStatfsEnabled = NO;
 static volatile BOOL gJBHideDylibsEnabled = NO;
+static volatile BOOL gJBSyscallHookEnabled = NO;
 static volatile CFTimeInterval gJBLastCheck = 0;
 static BOOL PXJBShouldBypassCached(void) {
     if (PXJBIsCriticalProcess()) return NO;
@@ -158,6 +159,9 @@ static BOOL PXJBShouldBypassCached(void) {
         // Phase 3 toggle: hide jailbreak-related dylibs from dyld enumeration.
         gJBHideDylibsEnabled = [securitySettings boolForKey:@"jbBypassHideDylibsEnabled"]; // default OFF
 
+        // Phase 2 extension toggle: syscall() fallback (EXPERIMENTAL; default OFF)
+        gJBSyscallHookEnabled = [securitySettings boolForKey:@"jbBypassHookSyscallFallbackEnabled"]; 
+
         Class mgrCls = NSClassFromString(@"IdentifierManager");
         if (!mgrCls || ![mgrCls respondsToSelector:@selector(sharedManager)]) {
             gJBEnabled = NO;
@@ -179,6 +183,10 @@ static BOOL PXJBStatfsBypassEnabled(void) {
 
 static BOOL PXJBHideDylibsEnabled(void) {
     return PXJBShouldBypassCached() && gJBHideDylibsEnabled;
+}
+
+static BOOL PXJBSyscallBypassEnabled(void) {
+    return PXJBShouldBypassCached() && gJBSyscallHookEnabled;
 }
 
 // Path matching
@@ -525,6 +533,21 @@ static long hook_syscall(long number, ...) {
         return -1;
     }
 
+    if (!PXJBSyscallBypassEnabled()) {
+        // Forward without inspecting. We still have to consume varargs to call the function pointer.
+        uint64_t a1 = 0, a2 = 0, a3 = 0, a4 = 0, a5 = 0, a6 = 0;
+        va_list ap;
+        va_start(ap, number);
+        a1 = (uint64_t)va_arg(ap, uint64_t);
+        a2 = (uint64_t)va_arg(ap, uint64_t);
+        a3 = (uint64_t)va_arg(ap, uint64_t);
+        a4 = (uint64_t)va_arg(ap, uint64_t);
+        a5 = (uint64_t)va_arg(ap, uint64_t);
+        a6 = (uint64_t)va_arg(ap, uint64_t);
+        va_end(ap);
+        return orig_syscall(number, a1, a2, a3, a4, a5, a6);
+    }
+
     // Pull up to 6 args as 64-bit values (covers common syscalls).
     uint64_t a1 = 0, a2 = 0, a3 = 0, a4 = 0, a5 = 0, a6 = 0;
     va_list ap;
@@ -537,7 +560,7 @@ static long hook_syscall(long number, ...) {
     a6 = (uint64_t)va_arg(ap, uint64_t);
     va_end(ap);
 
-    if (PXJBShouldBypassCached()) {
+    if (PXJBSyscallBypassEnabled()) {
         const char *path = NULL;
 
         switch ((int)number) {
@@ -545,8 +568,12 @@ static long hook_syscall(long number, ...) {
             case SYS_lstat:
             case SYS_access:
             case SYS_open:
+            #ifdef SYS_stat64
             case SYS_stat64:
+            #endif
+            #ifdef SYS_lstat64
             case SYS_lstat64:
+            #endif
                 path = (const char *)(uintptr_t)a1;
                 if (PXJBPathShouldHide(path)) {
                     errno = ENOENT;
@@ -589,18 +616,39 @@ static BOOL PXJBCommandLooksLikeProbe(NSString *cmd) {
     NSString *c = [[cmd lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
     if (!c.length) return NO;
 
-    // Fast substring checks.
-    NSArray<NSString *> *needles = @[
-        @"cydia", @"sileo", @"zebra", @"filza", @"substrate", @"ellekit", @"libhooker",
-        @"frida", @"27042", @"ssh", @"sshd", @"apt", @"dpkg", @"uicache", @"ldrestart", @"cycript", @"su"
+    // Avoid overly broad substring checks that can break legitimate commands.
+    // Only treat as a probe when we see explicit jailbreak tool paths/binaries.
+    NSArray<NSString *> *pathNeedles = @[
+        @"/applications/cydia.app",
+        @"/applications/sileo.app",
+        @"/applications/zebra.app",
+        @"/applications/filza.app",
+        @"/library/mobilesubstrate",
+        @"/usr/sbin/sshd",
+        @"/etc/apt",
+        @"/var/lib/apt",
+        @"/var/lib/cydia",
+        @"/var/jb",
+        @"/private/preboot/jb",
+        @"frida-server",
+        @"fridagadget",
+        @"cycript",
+        @"uicache",
+        @"ldrestart"
     ];
-    for (NSString *n in needles) {
+    for (NSString *n in pathNeedles) {
         if ([c containsString:n]) return YES;
     }
 
-    // Common patterns: test -f /Applications/Cydia.app, ls /var/jb, etc.
-    if ([c containsString:@"/var/jb"] || [c containsString:@"/private/preboot/jb"] || [c containsString:@"/library/mobilesubstrate"]) {
-        return YES;
+    // Token checks for package managers (match whole tokens only).
+    // This avoids false positives like "capture" containing "apt".
+    NSCharacterSet *seps = [NSCharacterSet characterSetWithCharactersInString:@" \t\r\n;|&()<>\"'\\"];
+    NSArray<NSString *> *tokens = [c componentsSeparatedByCharactersInSet:seps];
+    for (NSString *t in tokens) {
+        if (!t.length) continue;
+        if ([t isEqualToString:@"apt"] || [t isEqualToString:@"apt-get"] || [t isEqualToString:@"dpkg"]) {
+            return YES;
+        }
     }
     return NO;
 }
@@ -640,12 +688,20 @@ static CFTimeInterval gDyldLastBuild = 0;
 static uint32_t (*orig__dyld_image_count)(void) = NULL;
 static const char *(*orig__dyld_get_image_name)(uint32_t image_index) = NULL;
 
+// Real function pointers captured before hooking, to avoid recursion issues.
+static uint32_t (*real__dyld_image_count)(void) = NULL;
+static const char *(*real__dyld_get_image_name)(uint32_t image_index) = NULL;
+
 static uint32_t PXDyldRealImageCount(void) {
-    return orig__dyld_image_count ? orig__dyld_image_count() : 0;
+    if (real__dyld_image_count) return real__dyld_image_count();
+    if (orig__dyld_image_count) return orig__dyld_image_count();
+    return 0;
 }
 
 static const char *PXDyldRealImageName(uint32_t idx) {
-    return orig__dyld_get_image_name ? orig__dyld_get_image_name(idx) : NULL;
+    if (real__dyld_get_image_name) return real__dyld_get_image_name(idx);
+    if (orig__dyld_get_image_name) return orig__dyld_get_image_name(idx);
+    return NULL;
 }
 
 static BOOL PXStrContainsNoCase(const char *haystack, const char *needle) {
@@ -1005,6 +1061,11 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
     @autoreleasepool {
         // Install C hooks unconditionally; gate inside hooks for scoped apps.
         if (PXJBIsCriticalProcess()) return;
+
+        // Install-time toggles (take effect after app relaunch).
+        NSUserDefaults *ss = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+        BOOL wantSyscallHook = [ss boolForKey:@"jbBypassHookSyscallFallbackEnabled"]; // experimental
+        BOOL wantDyldHide = [ss boolForKey:@"jbBypassHideDylibsEnabled"]; // experimental
         void *libSystem = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
         if (libSystem) {
             void *sym = NULL;
@@ -1061,8 +1122,10 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
             sym = FindSymbol(NULL, "vfork");
             if (sym) MSHookFunction(sym, (void *)hook_vfork, (void **)&orig_vfork);
 
-            sym = FindSymbol(NULL, "syscall");
-            if (sym) MSHookFunction(sym, (void *)hook_syscall, (void **)&orig_syscall);
+            if (wantSyscallHook) {
+                sym = FindSymbol(NULL, "syscall");
+                if (sym) MSHookFunction(sym, (void *)hook_syscall, (void **)&orig_syscall);
+            }
 
             sym = FindSymbol(NULL, "system");
             if (sym) MSHookFunction(sym, (void *)hook_system, (void **)&orig_system);
@@ -1083,15 +1146,27 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
             sym = FindSymbol(NULL, "fstatvfs");
             if (sym) MSHookFunction(sym, (void *)hook_fstatvfs, (void **)&orig_fstatvfs);
 
-            // Phase 3 (toggle: jbBypassHideDylibsEnabled)
-            sym = FindSymbol(NULL, "_dyld_image_count");
-            if (sym) MSHookFunction(sym, (void *)hook__dyld_image_count, (void **)&orig__dyld_image_count);
+            // Phase 3 (toggle: jbBypassHideDylibsEnabled). Install only when explicitly enabled.
+            if (wantDyldHide) {
+                sym = FindSymbol(NULL, "_dyld_image_count");
+                if (sym) {
+                    if (!real__dyld_image_count) {
+                        real__dyld_image_count = (uint32_t (*)(void))sym;
+                    }
+                    MSHookFunction(sym, (void *)hook__dyld_image_count, (void **)&orig__dyld_image_count);
+                }
 
-            sym = FindSymbol(NULL, "_dyld_get_image_name");
-            if (sym) MSHookFunction(sym, (void *)hook__dyld_get_image_name, (void **)&orig__dyld_get_image_name);
+                sym = FindSymbol(NULL, "_dyld_get_image_name");
+                if (sym) {
+                    if (!real__dyld_get_image_name) {
+                        real__dyld_get_image_name = (const char *(*)(uint32_t))sym;
+                    }
+                    MSHookFunction(sym, (void *)hook__dyld_get_image_name, (void **)&orig__dyld_get_image_name);
+                }
 
-            sym = FindSymbol(NULL, "dladdr");
-            if (sym) MSHookFunction(sym, (void *)hook_dladdr, (void **)&orig_dladdr);
+                sym = FindSymbol(NULL, "dladdr");
+                if (sym) MSHookFunction(sym, (void *)hook_dladdr, (void **)&orig_dladdr);
+            }
 
             dlclose(libSystem);
         }
