@@ -23,6 +23,10 @@
 #import <sys/syscall.h>
 #import <sys/mount.h>
 #import <sys/statvfs.h>
+#import <sys/sysctl.h>
+#if __has_include(<sys/user.h>)
+#import <sys/user.h>
+#endif
 #import <string.h>
 #import <pthread.h>
 #import <dispatch/dispatch.h>
@@ -135,6 +139,8 @@ static volatile BOOL gJBSyscallHookEnabled = NO;
 static volatile BOOL gJBBlockDyldAddImageCallbacksEnabled = NO;
 static volatile BOOL gJBHideTaskDyldInfoEnabled = NO;
 static volatile BOOL gJBHideDlIteratePhdrEnabled = NO;
+static volatile BOOL gJBBlockDlopenDlsymProbesEnabled = NO;
+static volatile BOOL gJBSysctlProcSanitizeEnabled = NO;
 static volatile CFTimeInterval gJBLastCheck = 0;
 static BOOL PXJBShouldBypassCached(void) {
     if (PXJBIsCriticalProcess()) return NO;
@@ -185,6 +191,12 @@ static BOOL PXJBShouldBypassCached(void) {
         // Phase 3 extension toggle: hide dl_iterate_phdr image enumeration (default OFF)
         gJBHideDlIteratePhdrEnabled = [securitySettings boolForKey:@"jbBypassHideDlIteratePhdrEnabled"]; 
 
+        // Phase 3 extension toggle: block dlopen/dlsym probing for jailbreak tooling (default OFF)
+        gJBBlockDlopenDlsymProbesEnabled = [securitySettings boolForKey:@"jbBypassBlockDlopenDlsymProbesEnabled"]; 
+
+        // Phase 3 extension toggle: sanitize sysctl/sysctlbyname proc/debug/bootargs (default OFF)
+        gJBSysctlProcSanitizeEnabled = [securitySettings boolForKey:@"jbBypassSysctlProcSanitizeEnabled"]; 
+
         Class mgrCls = NSClassFromString(@"IdentifierManager");
         if (!mgrCls || ![mgrCls respondsToSelector:@selector(sharedManager)]) {
             gJBEnabled = NO;
@@ -218,6 +230,14 @@ static BOOL PXJBHideTaskDyldInfoEnabled(void) {
 
 static BOOL PXJBHideDlIteratePhdrEnabled(void) {
     return PXJBShouldBypassCached() && gJBHideDlIteratePhdrEnabled;
+}
+
+static BOOL PXJBBlockDlopenDlsymProbesEnabled(void) {
+    return PXJBShouldBypassCached() && gJBBlockDlopenDlsymProbesEnabled;
+}
+
+static BOOL PXJBSysctlProcSanitizeEnabled(void) {
+    return PXJBShouldBypassCached() && gJBSysctlProcSanitizeEnabled;
 }
 
 static BOOL PXJBSyscallBypassEnabled(void) {
@@ -839,6 +859,49 @@ static BOOL PXJBShouldHideImageName(const char *name) {
     return NO;
 }
 
+static BOOL PXJBShouldBlockDlopenPath(const char *path) {
+    if (!path || !path[0]) return NO;
+    // Block direct probes for common injection/jailbreak libraries.
+    static const char *deny[] = {
+        "/usr/lib/substrate/",
+        "substratebootstrap",
+        "mobilesubstrate",
+        "substrate",
+        "ellekit",
+        "libhooker",
+        "rocketbootstrap",
+        "substitute",
+        "frida",
+        "/library/caches/cy-",
+        NULL
+    };
+    for (int i = 0; deny[i]; i++) {
+        if (PXStrContainsNoCase(path, deny[i])) return YES;
+    }
+    return NO;
+}
+
+static BOOL PXJBShouldBlockDlsymName(const char *sym) {
+    if (!sym || !sym[0]) return NO;
+    // Only block extremely fingerprintable hooking symbols.
+    static const char *deny[] = {
+        "MSHookFunction",
+        "MSHookMessageEx",
+        "MSGetImageByName",
+        "MSFindSymbol",
+        "EKHook",
+        "EKHookFunction",
+        "LHHookFunction",
+        "SubHookFunction",
+        "fishhook_rebind_symbols",
+        NULL
+    };
+    for (int i = 0; deny[i]; i++) {
+        if (strcmp(sym, deny[i]) == 0) return YES;
+    }
+    return NO;
+}
+
 // Phase 3 strong option: hide dl_iterate_phdr enumeration
 static int (*orig_dl_iterate_phdr)(int (*callback)(struct dl_phdr_info *info, size_t size, void *data), void *data);
 static __thread int (*px_orig_dl_iterate_cb)(struct dl_phdr_info *info, size_t size, void *data) = NULL;
@@ -870,6 +933,93 @@ static int hook_dl_iterate_phdr(int (*callback)(struct dl_phdr_info *info, size_
     int r = orig_dl_iterate_phdr(px_dl_iterate_phdr_cb, NULL);
     px_orig_dl_iterate_cb = NULL;
     px_orig_dl_iterate_data = NULL;
+    return r;
+}
+
+// Phase 3 strong option: block dlopen/dlsym probes
+static void *(*orig_dlopen)(const char *path, int mode);
+static void *hook_dlopen(const char *path, int mode) {
+    if (PXJBBlockDlopenDlsymProbesEnabled() && path) {
+        if (PXJBShouldBlockDlopenPath(path)) {
+            errno = ENOENT;
+            return NULL;
+        }
+    }
+    return orig_dlopen ? orig_dlopen(path, mode) : NULL;
+}
+
+static void *(*orig_dlsym)(void *handle, const char *symbol);
+static void *hook_dlsym(void *handle, const char *symbol) {
+    if (PXJBBlockDlopenDlsymProbesEnabled() && symbol) {
+        if (PXJBShouldBlockDlsymName(symbol)) {
+            return NULL;
+        }
+    }
+    return orig_dlsym ? orig_dlsym(handle, symbol) : NULL;
+}
+
+// Phase 3 strong option: sysctl/sysctlbyname sanitization
+static int (*orig_sysctl_jb)(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+static int (*orig_sysctlbyname_jb)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+
+static void PXJBSanitizeBootArgs(void *oldp, size_t *oldlenp) {
+    if (!oldp || !oldlenp || *oldlenp == 0) return;
+    char *buf = (char *)oldp;
+    size_t n = *oldlenp;
+    // Ensure NUL-termination for scanning.
+    buf[n - 1] = '\0';
+    if (strstr(buf, "checkra1n") || strstr(buf, "cs_enforcement_disable") || strstr(buf, "amfid") || strstr(buf, "jailbreak")) {
+        memset(buf, 0, n);
+        // Keep it plausible.
+        const char *clean = "root_device=md0";
+        strncpy(buf, clean, n - 1);
+    }
+}
+
+static void PXJBSanitizeKinfoProc(void *oldp, size_t *oldlenp) {
+    if (!oldp || !oldlenp || *oldlenp == 0) return;
+#if __has_include(<sys/user.h>)
+    // Clear P_TRACED if present.
+#ifndef P_TRACED
+#define P_TRACED 0x00000800
+#endif
+    size_t len = *oldlenp;
+    if (len < sizeof(struct kinfo_proc)) return;
+    size_t count = len / sizeof(struct kinfo_proc);
+    struct kinfo_proc *procs = (struct kinfo_proc *)oldp;
+    for (size_t i = 0; i < count; i++) {
+        procs[i].kp_proc.p_flag &= ~P_TRACED;
+    }
+#else
+    (void)oldp; (void)oldlenp;
+#endif
+}
+
+static int hook_sysctl_jb(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    int r = orig_sysctl_jb ? orig_sysctl_jb(name, namelen, oldp, oldlenp, newp, newlen) : -1;
+    if (r != 0 || !PXJBSysctlProcSanitizeEnabled()) return r;
+    if (!name || namelen < 2) return r;
+
+    if (name[0] == CTL_KERN) {
+        if (name[1] == KERN_BOOTARGS) {
+            PXJBSanitizeBootArgs(oldp, oldlenp);
+        }
+        if (name[1] == KERN_PROC) {
+            PXJBSanitizeKinfoProc(oldp, oldlenp);
+        }
+    }
+    return r;
+}
+
+static int hook_sysctlbyname_jb(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    int r = orig_sysctlbyname_jb ? orig_sysctlbyname_jb(name, oldp, oldlenp, newp, newlen) : -1;
+    if (r != 0 || !PXJBSysctlProcSanitizeEnabled()) return r;
+    if (!name) return r;
+    if (strcmp(name, "kern.bootargs") == 0) {
+        PXJBSanitizeBootArgs(oldp, oldlenp);
+    } else if (strcmp(name, "kern.proc.pid") == 0 || strcmp(name, "kern.proc") == 0) {
+        PXJBSanitizeKinfoProc(oldp, oldlenp);
+    }
     return r;
 }
 
@@ -1256,6 +1406,8 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
         BOOL wantBlockAddImage = [ss boolForKey:@"jbBypassBlockDyldAddImageCallbacksEnabled"]; // experimental
         BOOL wantHideTaskDyldInfo = [ss boolForKey:@"jbBypassHideTaskDyldInfoEnabled"]; // experimental
         BOOL wantHideDlIteratePhdr = [ss boolForKey:@"jbBypassHideDlIteratePhdrEnabled"]; // experimental
+        BOOL wantBlockDlopenDlsym = [ss boolForKey:@"jbBypassBlockDlopenDlsymProbesEnabled"]; // experimental
+        BOOL wantSysctlSanitize = [ss boolForKey:@"jbBypassSysctlProcSanitizeEnabled"]; // experimental
         void *libSystem = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
         if (libSystem) {
             void *sym = NULL;
@@ -1400,6 +1552,22 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
                 if (sym) {
                     MSHookFunction(sym, (void *)hook_dl_iterate_phdr, (void **)&orig_dl_iterate_phdr);
                 }
+            }
+
+            // Phase 4: block dlopen/dlsym probes.
+            if (wantBlockDlopenDlsym) {
+                sym = FindSymbol(NULL, "dlopen");
+                if (sym) MSHookFunction(sym, (void *)hook_dlopen, (void **)&orig_dlopen);
+                sym = FindSymbol(NULL, "dlsym");
+                if (sym) MSHookFunction(sym, (void *)hook_dlsym, (void **)&orig_dlsym);
+            }
+
+            // Phase 5: sysctl/sysctlbyname sanitize.
+            if (wantSysctlSanitize) {
+                sym = FindSymbol(NULL, "sysctl");
+                if (sym) MSHookFunction(sym, (void *)hook_sysctl_jb, (void **)&orig_sysctl_jb);
+                sym = FindSymbol(NULL, "sysctlbyname");
+                if (sym) MSHookFunction(sym, (void *)hook_sysctlbyname_jb, (void **)&orig_sysctlbyname_jb);
             }
 
             dlclose(libSystem);
