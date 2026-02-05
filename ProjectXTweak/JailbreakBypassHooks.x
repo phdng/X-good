@@ -636,6 +636,10 @@ static uint32_t gVisibleCount = 0;
 static uint32_t gRealCount = 0;
 static CFTimeInterval gDyldLastBuild = 0;
 
+// Declare originals before helpers to avoid implicit declarations.
+static uint32_t (*orig__dyld_image_count)(void) = NULL;
+static const char *(*orig__dyld_get_image_name)(uint32_t image_index) = NULL;
+
 static uint32_t PXDyldRealImageCount(void) {
     return orig__dyld_image_count ? orig__dyld_image_count() : 0;
 }
@@ -741,7 +745,6 @@ static void PXDyldEnsureVisibleMap(void) {
     pthread_mutex_unlock(&gDyldLock);
 }
 
-static uint32_t (*orig__dyld_image_count)(void);
 static uint32_t hook__dyld_image_count(void) {
     uint32_t count = orig__dyld_image_count ? orig__dyld_image_count() : 0;
     if (!PXJBHideDylibsEnabled()) return count;
@@ -752,7 +755,6 @@ static uint32_t hook__dyld_image_count(void) {
     return out;
 }
 
-static const char *(*orig__dyld_get_image_name)(uint32_t image_index);
 static const char *hook__dyld_get_image_name(uint32_t image_index) {
     if (!PXJBHideDylibsEnabled()) {
         return orig__dyld_get_image_name ? orig__dyld_get_image_name(image_index) : NULL;
