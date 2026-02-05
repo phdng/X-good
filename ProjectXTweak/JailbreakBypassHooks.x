@@ -26,6 +26,7 @@
 #import <string.h>
 #import <pthread.h>
 #import <dispatch/dispatch.h>
+#import <mach/mach.h>
 
 // Some Theos SDKs for iOS don't ship <sys/ptrace.h>.
 // PT_DENY_ATTACH is 31 on Darwin.
@@ -121,6 +122,8 @@ static volatile BOOL gJBEnabled = NO;
 static volatile BOOL gJBStatfsEnabled = NO;
 static volatile BOOL gJBHideDylibsEnabled = NO;
 static volatile BOOL gJBSyscallHookEnabled = NO;
+static volatile BOOL gJBBlockDyldAddImageCallbacksEnabled = NO;
+static volatile BOOL gJBHideTaskDyldInfoEnabled = NO;
 static volatile CFTimeInterval gJBLastCheck = 0;
 static BOOL PXJBShouldBypassCached(void) {
     if (PXJBIsCriticalProcess()) return NO;
@@ -162,6 +165,12 @@ static BOOL PXJBShouldBypassCached(void) {
         // Phase 2 extension toggle: syscall() fallback (EXPERIMENTAL; default OFF)
         gJBSyscallHookEnabled = [securitySettings boolForKey:@"jbBypassHookSyscallFallbackEnabled"]; 
 
+        // Phase 3 extension toggle: block suspicious dyld add_image callbacks (default OFF)
+        gJBBlockDyldAddImageCallbacksEnabled = [securitySettings boolForKey:@"jbBypassBlockDyldAddImageCallbacksEnabled"]; 
+
+        // Phase 3 extension toggle: hide TASK_DYLD_INFO via task_info (default OFF)
+        gJBHideTaskDyldInfoEnabled = [securitySettings boolForKey:@"jbBypassHideTaskDyldInfoEnabled"]; 
+
         Class mgrCls = NSClassFromString(@"IdentifierManager");
         if (!mgrCls || ![mgrCls respondsToSelector:@selector(sharedManager)]) {
             gJBEnabled = NO;
@@ -183,6 +192,14 @@ static BOOL PXJBStatfsBypassEnabled(void) {
 
 static BOOL PXJBHideDylibsEnabled(void) {
     return PXJBShouldBypassCached() && gJBHideDylibsEnabled;
+}
+
+static BOOL PXJBBlockDyldAddImageCallbacksEnabled(void) {
+    return PXJBShouldBypassCached() && gJBBlockDyldAddImageCallbacksEnabled;
+}
+
+static BOOL PXJBHideTaskDyldInfoEnabled(void) {
+    return PXJBShouldBypassCached() && gJBHideTaskDyldInfoEnabled;
 }
 
 static BOOL PXJBSyscallBypassEnabled(void) {
@@ -495,6 +512,34 @@ static char *hook_getenv(const char *name) {
     return orig_getenv ? orig_getenv(name) : NULL;
 }
 
+static void PXJBUnsetSuspiciousEnvIfNeeded(void) {
+    if (!PXJBShouldBypassCached()) return;
+    // Proactive cleanup so detectors reading env via non-getenv paths see a clean environment.
+    // Low risk: only affects this process.
+    const char *keys[] = {
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "DYLD_FRAMEWORK_PATH",
+        "DYLD_FALLBACK_LIBRARY_PATH",
+        "DYLD_FALLBACK_FRAMEWORK_PATH",
+        "DYLD_ROOT_PATH",
+        "DYLD_SHARED_CACHE_DIR",
+        "DYLD_PRINT_TO_FILE",
+        "DYLD_PRINT_LIBRARIES",
+        "DYLD_PRINT_APIS",
+        "DYLD_PRINT_OPTS",
+        "DYLD_PRINT_ENV",
+        "LD_PRELOAD",
+        "_MSSafeMode",
+        "MSDebug",
+        "JB_SANDBOX_EXTENSIONS",
+        NULL
+    };
+    for (int i = 0; keys[i]; i++) {
+        unsetenv(keys[i]);
+    }
+}
+
 // Phase 2: anti-debug / anti-exec probes
 static int (*orig_ptrace)(int request, pid_t pid, void *addr, int data);
 static int hook_ptrace(int request, pid_t pid, void *addr, int data) {
@@ -687,10 +732,14 @@ static CFTimeInterval gDyldLastBuild = 0;
 // Declare originals before helpers to avoid implicit declarations.
 static uint32_t (*orig__dyld_image_count)(void) = NULL;
 static const char *(*orig__dyld_get_image_name)(uint32_t image_index) = NULL;
+static const struct mach_header *(*orig__dyld_get_image_header)(uint32_t image_index) = NULL;
+static intptr_t (*orig__dyld_get_image_vmaddr_slide)(uint32_t image_index) = NULL;
 
 // Real function pointers captured before hooking, to avoid recursion issues.
 static uint32_t (*real__dyld_image_count)(void) = NULL;
 static const char *(*real__dyld_get_image_name)(uint32_t image_index) = NULL;
+static const struct mach_header *(*real__dyld_get_image_header)(uint32_t image_index) = NULL;
+static intptr_t (*real__dyld_get_image_vmaddr_slide)(uint32_t image_index) = NULL;
 
 static uint32_t PXDyldRealImageCount(void) {
     if (real__dyld_image_count) return real__dyld_image_count();
@@ -702,6 +751,18 @@ static const char *PXDyldRealImageName(uint32_t idx) {
     if (real__dyld_get_image_name) return real__dyld_get_image_name(idx);
     if (orig__dyld_get_image_name) return orig__dyld_get_image_name(idx);
     return NULL;
+}
+
+static const struct mach_header *PXDyldRealImageHeader(uint32_t idx) {
+    if (real__dyld_get_image_header) return real__dyld_get_image_header(idx);
+    if (orig__dyld_get_image_header) return orig__dyld_get_image_header(idx);
+    return NULL;
+}
+
+static intptr_t PXDyldRealImageSlide(uint32_t idx) {
+    if (real__dyld_get_image_vmaddr_slide) return real__dyld_get_image_vmaddr_slide(idx);
+    if (orig__dyld_get_image_vmaddr_slide) return orig__dyld_get_image_vmaddr_slide(idx);
+    return 0;
 }
 
 static BOOL PXStrContainsNoCase(const char *haystack, const char *needle) {
@@ -826,6 +887,40 @@ static const char *hook__dyld_get_image_name(uint32_t image_index) {
     pthread_mutex_unlock(&gDyldLock);
 
     return orig__dyld_get_image_name ? orig__dyld_get_image_name(realIndex) : NULL;
+}
+
+static const struct mach_header *hook__dyld_get_image_header(uint32_t image_index) {
+    if (!PXJBHideDylibsEnabled()) {
+        return orig__dyld_get_image_header ? orig__dyld_get_image_header(image_index) : NULL;
+    }
+    PXDyldEnsureVisibleMap();
+
+    pthread_mutex_lock(&gDyldLock);
+    if (!gVisibleToReal || image_index >= gVisibleCount) {
+        pthread_mutex_unlock(&gDyldLock);
+        return NULL;
+    }
+    uint32_t realIndex = gVisibleToReal[image_index];
+    pthread_mutex_unlock(&gDyldLock);
+
+    return orig__dyld_get_image_header ? orig__dyld_get_image_header(realIndex) : NULL;
+}
+
+static intptr_t hook__dyld_get_image_vmaddr_slide(uint32_t image_index) {
+    if (!PXJBHideDylibsEnabled()) {
+        return orig__dyld_get_image_vmaddr_slide ? orig__dyld_get_image_vmaddr_slide(image_index) : 0;
+    }
+    PXDyldEnsureVisibleMap();
+
+    pthread_mutex_lock(&gDyldLock);
+    if (!gVisibleToReal || image_index >= gVisibleCount) {
+        pthread_mutex_unlock(&gDyldLock);
+        return 0;
+    }
+    uint32_t realIndex = gVisibleToReal[image_index];
+    pthread_mutex_unlock(&gDyldLock);
+
+    return orig__dyld_get_image_vmaddr_slide ? orig__dyld_get_image_vmaddr_slide(realIndex) : 0;
 }
 
 static int (*orig_dladdr)(const void *addr, Dl_info *info);
@@ -995,6 +1090,39 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
 
 %end
 
+%hook NSProcessInfo
+
+- (NSDictionary<NSString *, NSString *> *)environment {
+    NSDictionary *env = %orig;
+    if (!PXJBShouldBypassCached()) return env;
+    if (![env isKindOfClass:[NSDictionary class]] || env.count == 0) return env;
+
+    NSMutableDictionary *out = [env mutableCopy];
+    NSArray<NSString *> *deny = @[
+        @"DYLD_INSERT_LIBRARIES",
+        @"DYLD_LIBRARY_PATH",
+        @"DYLD_FRAMEWORK_PATH",
+        @"DYLD_FALLBACK_LIBRARY_PATH",
+        @"DYLD_FALLBACK_FRAMEWORK_PATH",
+        @"DYLD_ROOT_PATH",
+        @"DYLD_SHARED_CACHE_DIR",
+        @"DYLD_PRINT_TO_FILE",
+        @"DYLD_PRINT_LIBRARIES",
+        @"DYLD_PRINT_APIS",
+        @"DYLD_PRINT_OPTS",
+        @"DYLD_PRINT_ENV",
+        @"LD_PRELOAD",
+        @"_MSSafeMode",
+        @"MSDebug",
+        @"JB_SANDBOX_EXTENSIONS",
+        @"SHELL"
+    ];
+    [out removeObjectsForKeys:deny];
+    return [out copy];
+}
+
+%end
+
 %hook UIApplication
 
 - (BOOL)canOpenURL:(NSURL *)url {
@@ -1066,6 +1194,8 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
         NSUserDefaults *ss = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
         BOOL wantSyscallHook = [ss boolForKey:@"jbBypassHookSyscallFallbackEnabled"]; // experimental
         BOOL wantDyldHide = [ss boolForKey:@"jbBypassHideDylibsEnabled"]; // experimental
+        BOOL wantBlockAddImage = [ss boolForKey:@"jbBypassBlockDyldAddImageCallbacksEnabled"]; // experimental
+        BOOL wantHideTaskDyldInfo = [ss boolForKey:@"jbBypassHideTaskDyldInfoEnabled"]; // experimental
         void *libSystem = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
         if (libSystem) {
             void *sym = NULL;
@@ -1164,14 +1294,101 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
                     MSHookFunction(sym, (void *)hook__dyld_get_image_name, (void **)&orig__dyld_get_image_name);
                 }
 
+                sym = FindSymbol(NULL, "_dyld_get_image_header");
+                if (sym) {
+                    if (!real__dyld_get_image_header) {
+                        real__dyld_get_image_header = (const struct mach_header *(*)(uint32_t))sym;
+                    }
+                    MSHookFunction(sym, (void *)hook__dyld_get_image_header, (void **)&orig__dyld_get_image_header);
+                }
+
+                sym = FindSymbol(NULL, "_dyld_get_image_vmaddr_slide");
+                if (sym) {
+                    if (!real__dyld_get_image_vmaddr_slide) {
+                        real__dyld_get_image_vmaddr_slide = (intptr_t (*)(uint32_t))sym;
+                    }
+                    MSHookFunction(sym, (void *)hook__dyld_get_image_vmaddr_slide, (void **)&orig__dyld_get_image_vmaddr_slide);
+                }
+
                 sym = FindSymbol(NULL, "dladdr");
                 if (sym) MSHookFunction(sym, (void *)hook_dladdr, (void **)&orig_dladdr);
+            }
+
+            // Phase 3 extension: block suspicious add_image callback registrations.
+            if (wantBlockAddImage) {
+                // _dyld_register_func_for_add_image is in libdyld/dyld; dlsym RTLD_DEFAULT works.
+                sym = FindSymbol(NULL, "_dyld_register_func_for_add_image");
+                if (sym) {
+                    // See hook implementation below (near dyld helpers).
+                    extern void PXJBInstallDyldAddImageBlocker(void *sym);
+                    PXJBInstallDyldAddImageBlocker(sym);
+                }
+            }
+
+            // Phase 3 extension: hide TASK_DYLD_INFO via task_info.
+            if (wantHideTaskDyldInfo) {
+                sym = FindSymbol(NULL, "task_info");
+                if (sym) {
+                    extern void PXJBInstallTaskInfoHook(void *sym);
+                    PXJBInstallTaskInfoHook(sym);
+                }
             }
 
             dlclose(libSystem);
         }
 
         %init;
+
+        // Proactive env cleanup (safe) for scoped apps.
+        PXJBUnsetSuspiciousEnvIfNeeded();
+        dispatch_async(dispatch_get_main_queue(), ^{
+            PXJBUnsetSuspiciousEnvIfNeeded();
+        });
         PXLog(@"[JailbreakBypass] Phase 1 hooks initialized");
     }
+}
+
+// --- Optional strong hooks (installed only when toggle is enabled at launch) ---
+static void (*orig__dyld_register_func_for_add_image)(void (*func)(const struct mach_header *, intptr_t));
+static void hook__dyld_register_func_for_add_image(void (*func)(const struct mach_header *, intptr_t)) {
+    if (!orig__dyld_register_func_for_add_image) return;
+    if (!PXJBBlockDyldAddImageCallbacksEnabled() || !func) {
+        orig__dyld_register_func_for_add_image(func);
+        return;
+    }
+    Dl_info info;
+    if (dladdr((const void *)func, &info) && info.dli_fname) {
+        if (PXJBShouldHideImageName(info.dli_fname)) {
+            return;
+        }
+    }
+    orig__dyld_register_func_for_add_image(func);
+}
+
+void PXJBInstallDyldAddImageBlocker(void *sym) {
+    if (!sym) return;
+    MSHookFunction(sym, (void *)hook__dyld_register_func_for_add_image, (void **)&orig__dyld_register_func_for_add_image);
+}
+
+static kern_return_t (*orig_task_info)(task_t, task_flavor_t, task_info_t, mach_msg_type_number_t *);
+static kern_return_t hook_task_info(task_t target_task, task_flavor_t flavor, task_info_t task_info_out, mach_msg_type_number_t *task_info_outCnt) {
+    if (!orig_task_info) return KERN_INVALID_ARGUMENT;
+    if (!PXJBHideTaskDyldInfoEnabled()) {
+        return orig_task_info(target_task, flavor, task_info_out, task_info_outCnt);
+    }
+    if (target_task != mach_task_self()) {
+        return orig_task_info(target_task, flavor, task_info_out, task_info_outCnt);
+    }
+#ifdef TASK_DYLD_INFO
+    if (flavor == TASK_DYLD_INFO) {
+        if (task_info_outCnt) *task_info_outCnt = 0;
+        return KERN_INVALID_ARGUMENT;
+    }
+#endif
+    return orig_task_info(target_task, flavor, task_info_out, task_info_outCnt);
+}
+
+void PXJBInstallTaskInfoHook(void *sym) {
+    if (!sym) return;
+    MSHookFunction(sym, (void *)hook_task_info, (void **)&orig_task_info);
 }
