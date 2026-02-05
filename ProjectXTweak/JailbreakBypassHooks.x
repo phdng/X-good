@@ -19,6 +19,8 @@
 #import <arpa/inet.h>
 #import <sys/types.h>
 #import <sys/syscall.h>
+#import <sys/mount.h>
+#import <sys/statvfs.h>
 #import <string.h>
 
 // Some Theos SDKs for iOS don't ship <sys/ptrace.h>.
@@ -112,6 +114,7 @@ static BOOL PXJBIsCriticalProcess(void) {
 }
 
 static volatile BOOL gJBEnabled = NO;
+static volatile BOOL gJBStatfsEnabled = NO;
 static volatile CFTimeInterval gJBLastCheck = 0;
 static BOOL PXJBShouldBypassCached(void) {
     if (PXJBIsCriticalProcess()) return NO;
@@ -140,8 +143,12 @@ static BOOL PXJBShouldBypassCached(void) {
         BOOL enabled = [securitySettings boolForKey:@"jailbreakDetectionEnabled"];
         if (!enabled) {
             gJBEnabled = NO;
+            gJBStatfsEnabled = NO;
             return gJBEnabled;
         }
+
+        // Phase 2 extension toggle: mount/volume checks via statfs/statvfs.
+        gJBStatfsEnabled = [securitySettings boolForKey:@"jbBypassStatfsEnabled"]; // default OFF
 
         Class mgrCls = NSClassFromString(@"IdentifierManager");
         if (!mgrCls || ![mgrCls respondsToSelector:@selector(sharedManager)]) {
@@ -156,6 +163,10 @@ static BOOL PXJBShouldBypassCached(void) {
         gJBEnabled = [mgr isApplicationEnabled:bundleID];
         return gJBEnabled;
     }
+}
+
+static BOOL PXJBStatfsBypassEnabled(void) {
+    return PXJBShouldBypassCached() && gJBStatfsEnabled;
 }
 
 // Path matching
@@ -595,6 +606,69 @@ static FILE *hook_popen(const char *command, const char *type) {
     return orig_popen ? orig_popen(command, type) : NULL;
 }
 
+// Phase 2 extension: mount/volume checks (statfs/statvfs)
+static BOOL PXJBIsSensitiveMountPath(const char *path) {
+    if (!path) return NO;
+    // Most detectors check "/" and sometimes "/private" or "/var".
+    if (strcmp(path, "/") == 0) return YES;
+    if (strcmp(path, "/var") == 0) return YES;
+    if (strcmp(path, "/private") == 0) return YES;
+    if (strcmp(path, "/private/var") == 0) return YES;
+    return NO;
+}
+
+static void PXJBNormalizeStatfs(struct statfs *buf) {
+    if (!buf) return;
+    // Ensure rootfs looks read-only (common non-JB expectation).
+#ifdef MNT_RDONLY
+    buf->f_flags |= MNT_RDONLY;
+#endif
+}
+
+static void PXJBNormalizeStatvfs(struct statvfs *buf) {
+    if (!buf) return;
+#ifdef ST_RDONLY
+    buf->f_flag |= ST_RDONLY;
+#endif
+}
+
+static int (*orig_statfs)(const char *, struct statfs *);
+static int hook_statfs(const char *path, struct statfs *buf) {
+    int r = orig_statfs ? orig_statfs(path, buf) : -1;
+    if (r == 0 && PXJBStatfsBypassEnabled() && PXJBIsSensitiveMountPath(path)) {
+        PXJBNormalizeStatfs(buf);
+    }
+    return r;
+}
+
+static int (*orig_fstatfs)(int, struct statfs *);
+static int hook_fstatfs(int fd, struct statfs *buf) {
+    int r = orig_fstatfs ? orig_fstatfs(fd, buf) : -1;
+    if (r == 0 && PXJBStatfsBypassEnabled()) {
+        // We can't reliably map fd->path cheaply; normalize anyway (best-effort).
+        PXJBNormalizeStatfs(buf);
+    }
+    return r;
+}
+
+static int (*orig_statvfs)(const char *, struct statvfs *);
+static int hook_statvfs(const char *path, struct statvfs *buf) {
+    int r = orig_statvfs ? orig_statvfs(path, buf) : -1;
+    if (r == 0 && PXJBStatfsBypassEnabled() && PXJBIsSensitiveMountPath(path)) {
+        PXJBNormalizeStatvfs(buf);
+    }
+    return r;
+}
+
+static int (*orig_fstatvfs)(int, struct statvfs *);
+static int hook_fstatvfs(int fd, struct statvfs *buf) {
+    int r = orig_fstatvfs ? orig_fstatvfs(fd, buf) : -1;
+    if (r == 0 && PXJBStatfsBypassEnabled()) {
+        PXJBNormalizeStatvfs(buf);
+    }
+    return r;
+}
+
 // --- ObjC hooks ---
 %hook NSFileManager
 
@@ -817,6 +891,19 @@ static FILE *hook_popen(const char *command, const char *type) {
 
             sym = FindSymbol(NULL, "popen");
             if (sym) MSHookFunction(sym, (void *)hook_popen, (void **)&orig_popen);
+
+            // Phase 2 extension (toggle: jbBypassStatfsEnabled)
+            sym = FindSymbol(NULL, "statfs");
+            if (sym) MSHookFunction(sym, (void *)hook_statfs, (void **)&orig_statfs);
+
+            sym = FindSymbol(NULL, "fstatfs");
+            if (sym) MSHookFunction(sym, (void *)hook_fstatfs, (void **)&orig_fstatfs);
+
+            sym = FindSymbol(NULL, "statvfs");
+            if (sym) MSHookFunction(sym, (void *)hook_statvfs, (void **)&orig_statvfs);
+
+            sym = FindSymbol(NULL, "fstatvfs");
+            if (sym) MSHookFunction(sym, (void *)hook_fstatvfs, (void **)&orig_fstatvfs);
 
             dlclose(libSystem);
         }
