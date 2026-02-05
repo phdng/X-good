@@ -27,7 +27,16 @@
 #import <pthread.h>
 #import <dispatch/dispatch.h>
 #import <mach/mach.h>
-#import <link.h>
+#import <stdint.h>
+
+// Some iOS SDKs used by Theos don't ship <link.h>, but we only need the
+// leading fields of dl_phdr_info to access dlpi_name for dl_iterate_phdr.
+struct dl_phdr_info {
+    uintptr_t dlpi_addr;
+    const char *dlpi_name;
+    const void *dlpi_phdr;
+    unsigned short dlpi_phnum;
+};
 
 // Some Theos SDKs for iOS don't ship <sys/ptrace.h>.
 // PT_DENY_ATTACH is 31 on Darwin.
