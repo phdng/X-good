@@ -2370,7 +2370,53 @@ static NSString *PXFlagEmojiFromCountryCode(NSString *cc) {
 }
 
 - (void)jailbreakDetectionToggleChanged:(UISwitch *)sender {
+    BOOL enabled = sender.isOn;
 
+    // 1) Persist to the security settings plist (source of truth)
+    NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
+    settingsDict[@"jailbreakDetectionEnabled"] = @(enabled);
+    NSData *plistData = [NSPropertyListSerialization dataWithPropertyList:settingsDict
+                                                                   format:NSPropertyListXMLFormat_v1_0
+                                                                  options:0
+                                                                    error:nil];
+    if (plistData) {
+        [plistData writeToFile:securitySettingsPath atomically:YES];
+    }
+
+    // 2) Update NSUserDefaults suites
+    NSArray *suiteNames = @[
+        @"com.weaponx.securitySettings",
+        @"com.hydra.projectx.SecuritySettings",
+        @"com.hydra.projectx"
+    ];
+    for (NSString *suiteName in suiteNames) {
+        NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suiteName];
+        [defaults setBool:enabled forKey:@"jailbreakDetectionEnabled"];
+        [defaults synchronize];
+    }
+    [self.securitySettings setBool:enabled forKey:@"jailbreakDetectionEnabled"];
+    [self.securitySettings synchronize];
+
+    // 3) Notify tweaks/processes
+    CFNotificationCenterRef darwinCenter = CFNotificationCenterGetDarwinNotifyCenter();
+    if (darwinCenter) {
+        CFNotificationCenterPostNotification(darwinCenter,
+                                            CFSTR("com.hydra.projectx.settings.changed"),
+                                            NULL,
+                                            NULL,
+                                            YES);
+        CFNotificationCenterPostNotification(darwinCenter,
+                                            CFSTR("com.hydra.projectx.jailbreakBypassChanged"),
+                                            NULL,
+                                            NULL,
+                                            YES);
+    }
+
+    // 4) Haptic feedback
+    UIImpactFeedbackGenerator *generator = [[UIImpactFeedbackGenerator alloc] initWithStyle:UIImpactFeedbackStyleMedium];
+    [generator prepare];
+    [generator impactOccurred];
 }
 
 - (void)networkDataSpoofToggleChanged:(UISwitch *)sender {
