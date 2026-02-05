@@ -18,9 +18,14 @@
 #import <netinet/in.h>
 #import <arpa/inet.h>
 #import <sys/types.h>
-#import <sys/ptrace.h>
 #import <sys/syscall.h>
 #import <string.h>
+
+// Some Theos SDKs for iOS don't ship <sys/ptrace.h>.
+// PT_DENY_ATTACH is 31 on Darwin.
+#ifndef PT_DENY_ATTACH
+#define PT_DENY_ATTACH 31
+#endif
 #import <unistd.h>
 
 #import <substrate.h>
@@ -449,8 +454,8 @@ static char *hook_getenv(const char *name) {
 }
 
 // Phase 2: anti-debug / anti-exec probes
-static int (*orig_ptrace)(int request, pid_t pid, caddr_t addr, int data);
-static int hook_ptrace(int request, pid_t pid, caddr_t addr, int data) {
+static int (*orig_ptrace)(int request, pid_t pid, void *addr, int data);
+static int hook_ptrace(int request, pid_t pid, void *addr, int data) {
     if (PXJBShouldBypassCached()) {
         // PT_DENY_ATTACH == 31 on Darwin.
         if (request == PT_DENY_ATTACH || request == 31) {
