@@ -13,6 +13,24 @@
 static Class (*orig_objc_allocateClassPair)(Class superclass, const char *name, size_t extraBytes);
 static void (*orig_objc_registerClassPair)(Class cls);
 
+static inline BOOL PXHasFirebasePrefix(const char *name) {
+    if (!name) return NO;
+    if (strncmp(name, "FPR", 3) == 0) return YES;
+    if (strncmp(name, "GUL", 3) == 0) return YES;
+    if (strncmp(name, "FIR", 3) == 0) return YES;
+    return NO;
+}
+
+static BOOL PXIsSubclassOfClass(Class cls, Class expectedSuperclass) {
+    if (!cls || !expectedSuperclass) return NO;
+    Class cur = cls;
+    while (cur) {
+        if (cur == expectedSuperclass) return YES;
+        cur = class_getSuperclass(cur);
+    }
+    return NO;
+}
+
 static const char *PXGuardLogPath(void) {
     // In sandboxed apps, TMPDIR points to the app container tmp.
     // Prefer that so we always have write permission.
@@ -39,14 +57,33 @@ static Class hooked_objc_allocateClassPair(Class superclass, const char *name, s
     if (cls) return cls;
 
     // Most common failure case: name already exists.
-    // Returning the existing class avoids downstream callers passing NULL to objc_registerClassPair.
-    if (name && name[0] != '\0') {
-        char buf[256];
-        (void)snprintf(buf, sizeof(buf), "allocateClassPair returned NULL for name=%s", name);
+    // For Firebase/GUL dynamic subclasses, return the already-registered class when compatible.
+    if (name && name[0] != '\0' && PXHasFirebasePrefix(name)) {
+        char buf[320];
+        (void)snprintf(buf, sizeof(buf), "allocateClassPair returned NULL for name=%s super=%s", name, superclass ? class_getName(superclass) : "(null)");
         PXGuardTrace(buf);
         syslog(LOG_NOTICE, "[ProjectX] %s", buf);
+
         Class existing = objc_getClass(name);
-        if (existing) return existing;
+        if (existing) {
+            if (!superclass || PXIsSubclassOfClass(existing, superclass)) {
+                return existing;
+            }
+
+            // Collision with an incompatible class: try allocating with a unique suffix.
+            // This is a best-effort fallback to keep swizzlers functional.
+            static unsigned long counter = 0;
+            char altName[256];
+            (void)snprintf(altName, sizeof(altName), "%s__px%lu", name, ++counter);
+            Class alt = orig_objc_allocateClassPair(superclass, altName, extraBytes);
+            if (alt) {
+                char buf2[384];
+                (void)snprintf(buf2, sizeof(buf2), "name collision for %s; allocated %s instead", name, altName);
+                PXGuardTrace(buf2);
+                syslog(LOG_NOTICE, "[ProjectX] %s", buf2);
+                return alt;
+            }
+        }
     }
 
     return cls;
@@ -58,6 +95,16 @@ static void hooked_objc_registerClassPair(Class cls) {
         PXGuardTrace("registerClassPair called with NULL (ignored)");
         syslog(LOG_NOTICE, "[ProjectX] objc_registerClassPair(NULL) ignored");
         return;
+    }
+
+    // Guard against double-registering an already-registered class (can cause runtime instability).
+    const char *name = class_getName(cls);
+    if (name && name[0] != '\0' && PXHasFirebasePrefix(name)) {
+        Class already = objc_getClass(name);
+        if (already == cls) {
+            // Already registered.
+            return;
+        }
     }
     orig_objc_registerClassPair(cls);
 }
