@@ -141,6 +141,8 @@ static volatile BOOL gJBHideTaskDyldInfoEnabled = NO;
 static volatile BOOL gJBHideDlIteratePhdrEnabled = NO;
 static volatile BOOL gJBBlockDlopenDlsymProbesEnabled = NO;
 static volatile BOOL gJBSysctlProcSanitizeEnabled = NO;
+static volatile BOOL gJBHideProcMapsEnabled = NO;
+static volatile BOOL gJBHideObjcImagesEnabled = NO;
 static volatile CFTimeInterval gJBLastCheck = 0;
 static BOOL PXJBShouldBypassCached(void) {
     if (PXJBIsCriticalProcess()) return NO;
@@ -197,6 +199,12 @@ static BOOL PXJBShouldBypassCached(void) {
         // Phase 3 extension toggle: sanitize sysctl/sysctlbyname proc/debug/bootargs (default OFF)
         gJBSysctlProcSanitizeEnabled = [securitySettings boolForKey:@"jbBypassSysctlProcSanitizeEnabled"]; 
 
+        // Phase 3 extension toggle: hide libproc-based map filename queries (default OFF)
+        gJBHideProcMapsEnabled = [securitySettings boolForKey:@"jbBypassHideProcMapsEnabled"]; 
+
+        // Phase 3 extension toggle: hide ObjC runtime image list (default OFF)
+        gJBHideObjcImagesEnabled = [securitySettings boolForKey:@"jbBypassHideObjcImagesEnabled"]; 
+
         Class mgrCls = NSClassFromString(@"IdentifierManager");
         if (!mgrCls || ![mgrCls respondsToSelector:@selector(sharedManager)]) {
             gJBEnabled = NO;
@@ -240,6 +248,14 @@ static BOOL PXJBSysctlProcSanitizeEnabled(void) {
     return PXJBShouldBypassCached() && gJBSysctlProcSanitizeEnabled;
 }
 
+static BOOL PXJBHideProcMapsEnabled(void) {
+    return PXJBShouldBypassCached() && gJBHideProcMapsEnabled;
+}
+
+static BOOL PXJBHideObjcImagesEnabled(void) {
+    return PXJBShouldBypassCached() && gJBHideObjcImagesEnabled;
+}
+
 static BOOL PXJBSyscallBypassEnabled(void) {
     return PXJBShouldBypassCached() && gJBSyscallHookEnabled;
 }
@@ -256,6 +272,7 @@ static BOOL PXJBIsHiddenExactPath(const char *path) {
         "/Library/MobileSubstrate/DynamicLibraries",
         "/usr/lib/substrate/SubstrateBootstrap.dylib",
         "/usr/lib/libsubstrate.dylib",
+        "/usr/lib/libmryipc.dylib",
         "/usr/sbin/sshd",
         "/bin/bash",
         "/etc/apt",
@@ -275,6 +292,9 @@ static BOOL PXJBIsHiddenPrefixPath(const char *path) {
     if (!path) return NO;
     static const char *kPrefixes[] = {
         "/usr/lib/substrate/",
+        "/Library/MobileSubstrate/",
+        "/private/var/Library/MobileSubstrate/",
+        "/private/var/mobile/Library/MobileSubstrate/",
         "/Library/Caches/cy-",
         "/private/var/Library/Caches/cy-",
         "/private/var/mobile/Library/Caches/cy-",
@@ -856,7 +876,69 @@ static BOOL PXJBShouldHideImageName(const char *name) {
     if (PXStrContainsNoCase(name, "/private/preboot/jb")) return YES;
     // Common jailbreak cache-injected dylib pattern.
     if (PXStrContainsNoCase(name, "/library/caches/cy-")) return YES;
+    // MobileSubstrate injection path.
+    if (PXStrContainsNoCase(name, "/library/mobilesubstrate/")) return YES;
+    // mryipc is commonly used by jailbreak ecosystem.
+    if (PXStrContainsNoCase(name, "libmryipc")) return YES;
     return NO;
+}
+
+// Phase 3 strong option: hide libproc-based region filename queries
+static int (*orig_proc_regionfilename)(int pid, uint64_t address, void *buffer, uint32_t buffersize);
+static int hook_proc_regionfilename(int pid, uint64_t address, void *buffer, uint32_t buffersize) {
+    if (!orig_proc_regionfilename) return 0;
+    int r = orig_proc_regionfilename(pid, address, buffer, buffersize);
+    if (r <= 0) return r;
+    if (!PXJBHideProcMapsEnabled()) return r;
+    if (pid != getpid()) return r;
+    if (!buffer || buffersize == 0) return r;
+
+    // Ensure NUL-termination for scanning.
+    char *cbuf = (char *)buffer;
+    cbuf[buffersize - 1] = '\0';
+    if (PXJBShouldHideImageName(cbuf) || PXJBPathShouldHide(cbuf)) {
+        cbuf[0] = '\0';
+        return 0;
+    }
+    return r;
+}
+
+// Phase 3 strong option: hide ObjC runtime image list
+static const char **(*orig_objc_copyImageNames)(unsigned int *outCount);
+static const char **hook_objc_copyImageNames(unsigned int *outCount) {
+    const char **list = orig_objc_copyImageNames ? orig_objc_copyImageNames(outCount) : NULL;
+    if (!PXJBHideObjcImagesEnabled()) {
+        return list;
+    }
+    if (!list || !outCount || *outCount == 0) {
+        return list;
+    }
+
+    unsigned int inCount = *outCount;
+    // Allocate a new list and free the original (caller will free what we return).
+    const char **out = (const char **)calloc(inCount + 1, sizeof(char *));
+    if (!out) {
+        return list;
+    }
+
+    unsigned int j = 0;
+    for (unsigned int i = 0; i < inCount; i++) {
+        const char *nm = list[i];
+        if (PXJBShouldHideImageName(nm)) continue;
+        out[j++] = nm;
+    }
+    out[j] = NULL;
+    *outCount = j;
+    free((void *)list);
+    return out;
+}
+
+static const char *(*orig_class_getImageName)(Class cls);
+static const char *hook_class_getImageName(Class cls) {
+    const char *nm = orig_class_getImageName ? orig_class_getImageName(cls) : NULL;
+    if (!PXJBHideObjcImagesEnabled()) return nm;
+    if (PXJBShouldHideImageName(nm)) return NULL;
+    return nm;
 }
 
 static BOOL PXJBShouldBlockDlopenPath(const char *path) {
@@ -1410,6 +1492,8 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
         BOOL wantHideDlIteratePhdr = [ss boolForKey:@"jbBypassHideDlIteratePhdrEnabled"]; // experimental
         BOOL wantBlockDlopenDlsym = [ss boolForKey:@"jbBypassBlockDlopenDlsymProbesEnabled"]; // experimental
         BOOL wantSysctlSanitize = [ss boolForKey:@"jbBypassSysctlProcSanitizeEnabled"]; // experimental
+        BOOL wantHideProcMaps = [ss boolForKey:@"jbBypassHideProcMapsEnabled"]; // experimental
+        BOOL wantHideObjcImages = [ss boolForKey:@"jbBypassHideObjcImagesEnabled"]; // experimental
         void *libSystem = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
         if (libSystem) {
             void *sym = NULL;
@@ -1570,6 +1654,26 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
                 if (sym) MSHookFunction(sym, (void *)hook_sysctl_jb, (void **)&orig_sysctl_jb);
                 sym = FindSymbol(NULL, "sysctlbyname");
                 if (sym) MSHookFunction(sym, (void *)hook_sysctlbyname_jb, (void **)&orig_sysctlbyname_jb);
+            }
+
+            // Phase 6: hide proc map filenames (libproc).
+            if (wantHideProcMaps) {
+                sym = FindSymbol(NULL, "proc_regionfilename");
+                if (sym) {
+                    MSHookFunction(sym, (void *)hook_proc_regionfilename, (void **)&orig_proc_regionfilename);
+                }
+            }
+
+            // Phase 7: hide ObjC runtime image list.
+            if (wantHideObjcImages) {
+                sym = FindSymbol(NULL, "objc_copyImageNames");
+                if (sym) {
+                    MSHookFunction(sym, (void *)hook_objc_copyImageNames, (void **)&orig_objc_copyImageNames);
+                }
+                sym = FindSymbol(NULL, "class_getImageName");
+                if (sym) {
+                    MSHookFunction(sym, (void *)hook_class_getImageName, (void **)&orig_class_getImageName);
+                }
             }
 
             dlclose(libSystem);
