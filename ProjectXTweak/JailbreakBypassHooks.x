@@ -237,6 +237,9 @@ static BOOL PXJBHideDylibsEnabled(void) {
     return PXJBShouldBypassCached() && gJBHideDylibsEnabled;
 }
 
+// Forward declaration (defined later in dyld section).
+static BOOL PXStrContainsNoCase(const char *haystack, const char *needle);
+
 static BOOL PXJBBlockDyldAddImageCallbacksEnabled(void) {
     return PXJBShouldBypassCached() && gJBBlockDyldAddImageCallbacksEnabled;
 }
