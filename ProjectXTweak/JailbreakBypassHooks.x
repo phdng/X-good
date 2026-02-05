@@ -17,6 +17,9 @@
 #import <sys/un.h>
 #import <netinet/in.h>
 #import <arpa/inet.h>
+#import <sys/types.h>
+#import <sys/ptrace.h>
+#import <sys/syscall.h>
 #import <string.h>
 #import <unistd.h>
 
@@ -116,6 +119,10 @@ static BOOL PXJBShouldBypassCached(void) {
     @autoreleasepool {
         NSString *bundleID = PXMainBundleID();
         if (!bundleID.length) {
+            gJBEnabled = NO;
+            return gJBEnabled;
+        }
+        if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
             gJBEnabled = NO;
             return gJBEnabled;
         }
@@ -441,6 +448,148 @@ static char *hook_getenv(const char *name) {
     return orig_getenv ? orig_getenv(name) : NULL;
 }
 
+// Phase 2: anti-debug / anti-exec probes
+static int (*orig_ptrace)(int request, pid_t pid, caddr_t addr, int data);
+static int hook_ptrace(int request, pid_t pid, caddr_t addr, int data) {
+    if (PXJBShouldBypassCached()) {
+        // PT_DENY_ATTACH == 31 on Darwin.
+        if (request == PT_DENY_ATTACH || request == 31) {
+            return 0;
+        }
+    }
+    return orig_ptrace ? orig_ptrace(request, pid, addr, data) : -1;
+}
+
+static pid_t (*orig_fork)(void);
+static pid_t hook_fork(void) {
+    if (PXJBShouldBypassCached()) {
+        errno = EPERM;
+        return (pid_t)-1;
+    }
+    return orig_fork ? orig_fork() : (pid_t)-1;
+}
+
+static pid_t (*orig_vfork)(void);
+static pid_t hook_vfork(void) {
+    if (PXJBShouldBypassCached()) {
+        errno = EPERM;
+        return (pid_t)-1;
+    }
+    return orig_vfork ? orig_vfork() : (pid_t)-1;
+}
+
+// Hook syscall() as a fallback when apps bypass libc wrappers.
+static long (*orig_syscall)(long number, ...);
+static long hook_syscall(long number, ...) {
+    if (!orig_syscall) {
+        errno = ENOSYS;
+        return -1;
+    }
+
+    // Pull up to 6 args as 64-bit values (covers common syscalls).
+    uint64_t a1 = 0, a2 = 0, a3 = 0, a4 = 0, a5 = 0, a6 = 0;
+    va_list ap;
+    va_start(ap, number);
+    a1 = (uint64_t)va_arg(ap, uint64_t);
+    a2 = (uint64_t)va_arg(ap, uint64_t);
+    a3 = (uint64_t)va_arg(ap, uint64_t);
+    a4 = (uint64_t)va_arg(ap, uint64_t);
+    a5 = (uint64_t)va_arg(ap, uint64_t);
+    a6 = (uint64_t)va_arg(ap, uint64_t);
+    va_end(ap);
+
+    if (PXJBShouldBypassCached()) {
+        const char *path = NULL;
+
+        switch ((int)number) {
+            case SYS_stat:
+            case SYS_lstat:
+            case SYS_access:
+            case SYS_open:
+            case SYS_stat64:
+            case SYS_lstat64:
+                path = (const char *)(uintptr_t)a1;
+                if (PXJBPathShouldHide(path)) {
+                    errno = ENOENT;
+                    return -1;
+                }
+                if (((int)number) == SYS_open) {
+                    int flags = (int)a2;
+                    if (PXJBWriteCheckShouldBlock(path, flags)) {
+                        errno = EACCES;
+                        return -1;
+                    }
+                }
+                break;
+
+            case SYS_openat: {
+                path = (const char *)(uintptr_t)a2;
+                if (path && path[0] == '/' && PXJBPathShouldHide(path)) {
+                    errno = ENOENT;
+                    return -1;
+                }
+                int flags = (int)a3;
+                if (path && path[0] == '/' && PXJBWriteCheckShouldBlock(path, flags)) {
+                    errno = EACCES;
+                    return -1;
+                }
+                break;
+            }
+            default:
+                break;
+        }
+    }
+
+    // Forward to original syscall with the same captured args. Extra args are ignored by callee.
+    return orig_syscall(number, a1, a2, a3, a4, a5, a6);
+}
+
+// Block common jailbreak probe commands executed via system()/popen().
+static BOOL PXJBCommandLooksLikeProbe(NSString *cmd) {
+    if (![cmd isKindOfClass:[NSString class]] || cmd.length == 0) return NO;
+    NSString *c = [[cmd lowercaseString] stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (!c.length) return NO;
+
+    // Fast substring checks.
+    NSArray<NSString *> *needles = @[
+        @"cydia", @"sileo", @"zebra", @"filza", @"substrate", @"ellekit", @"libhooker",
+        @"frida", @"27042", @"ssh", @"sshd", @"apt", @"dpkg", @"uicache", @"ldrestart", @"cycript", @"su"
+    ];
+    for (NSString *n in needles) {
+        if ([c containsString:n]) return YES;
+    }
+
+    // Common patterns: test -f /Applications/Cydia.app, ls /var/jb, etc.
+    if ([c containsString:@"/var/jb"] || [c containsString:@"/private/preboot/jb"] || [c containsString:@"/library/mobilesubstrate"]) {
+        return YES;
+    }
+    return NO;
+}
+
+static int (*orig_system)(const char *);
+static int hook_system(const char *command) {
+    if (PXJBShouldBypassCached() && command) {
+        NSString *cmd = [NSString stringWithUTF8String:command] ?: @"";
+        if (PXJBCommandLooksLikeProbe(cmd)) {
+            errno = EPERM;
+            return -1;
+        }
+    }
+    return orig_system ? orig_system(command) : -1;
+}
+
+static FILE *(*orig_popen)(const char *, const char *);
+static FILE *hook_popen(const char *command, const char *type) {
+    if (PXJBShouldBypassCached() && command) {
+        NSString *cmd = [NSString stringWithUTF8String:command] ?: @"";
+        if (PXJBCommandLooksLikeProbe(cmd)) {
+            errno = EPERM;
+            return NULL;
+        }
+    }
+    return orig_popen ? orig_popen(command, type) : NULL;
+}
+
 // --- ObjC hooks ---
 %hook NSFileManager
 
@@ -644,6 +793,25 @@ static char *hook_getenv(const char *name) {
 
             sym = FindSymbol(NULL, "getenv");
             if (sym) MSHookFunction(sym, (void *)hook_getenv, (void **)&orig_getenv);
+
+            // Phase 2
+            sym = FindSymbol(NULL, "ptrace");
+            if (sym) MSHookFunction(sym, (void *)hook_ptrace, (void **)&orig_ptrace);
+
+            sym = FindSymbol(NULL, "fork");
+            if (sym) MSHookFunction(sym, (void *)hook_fork, (void **)&orig_fork);
+
+            sym = FindSymbol(NULL, "vfork");
+            if (sym) MSHookFunction(sym, (void *)hook_vfork, (void **)&orig_vfork);
+
+            sym = FindSymbol(NULL, "syscall");
+            if (sym) MSHookFunction(sym, (void *)hook_syscall, (void **)&orig_syscall);
+
+            sym = FindSymbol(NULL, "system");
+            if (sym) MSHookFunction(sym, (void *)hook_system, (void **)&orig_system);
+
+            sym = FindSymbol(NULL, "popen");
+            if (sym) MSHookFunction(sym, (void *)hook_popen, (void **)&orig_popen);
 
             dlclose(libSystem);
         }
