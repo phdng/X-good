@@ -5,11 +5,13 @@
 #import <UIKit/UIKit.h>
 
 #import <CoreFoundation/CoreFoundation.h>
+#import <mach-o/dyld.h>
 #import <dlfcn.h>
 #import <errno.h>
 #import <fcntl.h>
 #import <dirent.h>
 #import <stdarg.h>
+#import <stdlib.h>
 #import <spawn.h>
 #import <signal.h>
 #import <sys/stat.h>
@@ -22,6 +24,8 @@
 #import <sys/mount.h>
 #import <sys/statvfs.h>
 #import <string.h>
+#import <pthread.h>
+#import <dispatch/dispatch.h>
 
 // Some Theos SDKs for iOS don't ship <sys/ptrace.h>.
 // PT_DENY_ATTACH is 31 on Darwin.
@@ -115,6 +119,7 @@ static BOOL PXJBIsCriticalProcess(void) {
 
 static volatile BOOL gJBEnabled = NO;
 static volatile BOOL gJBStatfsEnabled = NO;
+static volatile BOOL gJBHideDylibsEnabled = NO;
 static volatile CFTimeInterval gJBLastCheck = 0;
 static BOOL PXJBShouldBypassCached(void) {
     if (PXJBIsCriticalProcess()) return NO;
@@ -150,6 +155,9 @@ static BOOL PXJBShouldBypassCached(void) {
         // Phase 2 extension toggle: mount/volume checks via statfs/statvfs.
         gJBStatfsEnabled = [securitySettings boolForKey:@"jbBypassStatfsEnabled"]; // default OFF
 
+        // Phase 3 toggle: hide jailbreak-related dylibs from dyld enumeration.
+        gJBHideDylibsEnabled = [securitySettings boolForKey:@"jbBypassHideDylibsEnabled"]; // default OFF
+
         Class mgrCls = NSClassFromString(@"IdentifierManager");
         if (!mgrCls || ![mgrCls respondsToSelector:@selector(sharedManager)]) {
             gJBEnabled = NO;
@@ -167,6 +175,10 @@ static BOOL PXJBShouldBypassCached(void) {
 
 static BOOL PXJBStatfsBypassEnabled(void) {
     return PXJBShouldBypassCached() && gJBStatfsEnabled;
+}
+
+static BOOL PXJBHideDylibsEnabled(void) {
+    return PXJBShouldBypassCached() && gJBHideDylibsEnabled;
 }
 
 // Path matching
@@ -455,6 +467,17 @@ static char *hook_getenv(const char *name) {
     if (PXJBShouldBypassCached() && name) {
         if (strcmp(name, "DYLD_INSERT_LIBRARIES") == 0 ||
             strcmp(name, "DYLD_LIBRARY_PATH") == 0 ||
+            strcmp(name, "DYLD_FRAMEWORK_PATH") == 0 ||
+            strcmp(name, "DYLD_FALLBACK_LIBRARY_PATH") == 0 ||
+            strcmp(name, "DYLD_FALLBACK_FRAMEWORK_PATH") == 0 ||
+            strcmp(name, "DYLD_ROOT_PATH") == 0 ||
+            strcmp(name, "DYLD_SHARED_CACHE_DIR") == 0 ||
+            strcmp(name, "DYLD_PRINT_TO_FILE") == 0 ||
+            strcmp(name, "DYLD_PRINT_LIBRARIES") == 0 ||
+            strcmp(name, "DYLD_PRINT_APIS") == 0 ||
+            strcmp(name, "DYLD_PRINT_OPTS") == 0 ||
+            strcmp(name, "DYLD_PRINT_ENV") == 0 ||
+            strcmp(name, "LD_PRELOAD") == 0 ||
             strcmp(name, "_MSSafeMode") == 0 ||
             strcmp(name, "JB_SANDBOX_EXTENSIONS") == 0 ||
             strcmp(name, "SHELL") == 0) {
@@ -604,6 +627,159 @@ static FILE *hook_popen(const char *command, const char *type) {
         }
     }
     return orig_popen ? orig_popen(command, type) : NULL;
+}
+
+// Phase 3: dylib hiding (dyld enumeration + dladdr)
+static pthread_mutex_t gDyldLock = PTHREAD_MUTEX_INITIALIZER;
+static uint32_t *gVisibleToReal = NULL;
+static uint32_t gVisibleCount = 0;
+static uint32_t gRealCount = 0;
+static CFTimeInterval gDyldLastBuild = 0;
+
+static uint32_t PXDyldRealImageCount(void) {
+    return orig__dyld_image_count ? orig__dyld_image_count() : 0;
+}
+
+static const char *PXDyldRealImageName(uint32_t idx) {
+    return orig__dyld_get_image_name ? orig__dyld_get_image_name(idx) : NULL;
+}
+
+static BOOL PXStrContainsNoCase(const char *haystack, const char *needle) {
+    if (!haystack || !needle) return NO;
+    size_t nlen = strlen(needle);
+    if (nlen == 0) return YES;
+
+    for (const char *h = haystack; *h; h++) {
+        const char *p = h;
+        size_t i = 0;
+        while (p[i] && i < nlen) {
+            char a = p[i];
+            char b = needle[i];
+            if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+            if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+            if (a != b) break;
+            i++;
+        }
+        if (i == nlen) return YES;
+    }
+    return NO;
+}
+
+static BOOL PXJBShouldHideImageName(const char *name) {
+    if (!name) return NO;
+    // Substrings frequently used by jailbreak tooling / injection.
+    static const char *deny[] = {
+        "mobilesubstrate",
+        "substrateloader",
+        "substratebootstrap",
+        "libsubstrate",
+        "ellekit",
+        "libhooker",
+        "rocketbootstrap",
+        "frida",
+        "fridagadget",
+        "cycript",
+        "tweakinject",
+        "substitute",
+        "libblackjack",
+        NULL
+    };
+    for (int i = 0; deny[i]; i++) {
+        if (PXStrContainsNoCase(name, deny[i])) return YES;
+    }
+    // Common rootless prefixes.
+    if (PXStrContainsNoCase(name, "/var/jb")) return YES;
+    if (PXStrContainsNoCase(name, "/private/preboot/jb")) return YES;
+    return NO;
+}
+
+static void PXDyldRebuildVisibleMapLocked(void) {
+    uint32_t count = PXDyldRealImageCount();
+    if (count == 0) {
+        gRealCount = 0;
+        gVisibleCount = 0;
+        return;
+    }
+
+    if (gVisibleToReal) {
+        free(gVisibleToReal);
+        gVisibleToReal = NULL;
+    }
+
+    gVisibleToReal = (uint32_t *)calloc(count, sizeof(uint32_t));
+    if (!gVisibleToReal) {
+        gRealCount = count;
+        gVisibleCount = count;
+        return;
+    }
+
+    uint32_t visible = 0;
+    for (uint32_t i = 0; i < count; i++) {
+        const char *nm = PXDyldRealImageName(i);
+        if (PXJBShouldHideImageName(nm)) {
+            continue;
+        }
+        gVisibleToReal[visible++] = i;
+    }
+    gRealCount = count;
+    gVisibleCount = visible;
+    gDyldLastBuild = CFAbsoluteTimeGetCurrent();
+}
+
+static void PXDyldEnsureVisibleMap(void) {
+    if (!PXJBHideDylibsEnabled()) return;
+
+    CFTimeInterval now = CFAbsoluteTimeGetCurrent();
+    // Rebuild at most once per second, or when dyld image count changes.
+    uint32_t countNow = PXDyldRealImageCount();
+
+    pthread_mutex_lock(&gDyldLock);
+    BOOL needs = (gVisibleToReal == NULL) || (gRealCount != countNow) || ((now - gDyldLastBuild) > 1.0);
+    if (needs) {
+        PXDyldRebuildVisibleMapLocked();
+    }
+    pthread_mutex_unlock(&gDyldLock);
+}
+
+static uint32_t (*orig__dyld_image_count)(void);
+static uint32_t hook__dyld_image_count(void) {
+    uint32_t count = orig__dyld_image_count ? orig__dyld_image_count() : 0;
+    if (!PXJBHideDylibsEnabled()) return count;
+    PXDyldEnsureVisibleMap();
+    pthread_mutex_lock(&gDyldLock);
+    uint32_t out = gVisibleToReal ? gVisibleCount : count;
+    pthread_mutex_unlock(&gDyldLock);
+    return out;
+}
+
+static const char *(*orig__dyld_get_image_name)(uint32_t image_index);
+static const char *hook__dyld_get_image_name(uint32_t image_index) {
+    if (!PXJBHideDylibsEnabled()) {
+        return orig__dyld_get_image_name ? orig__dyld_get_image_name(image_index) : NULL;
+    }
+    PXDyldEnsureVisibleMap();
+
+    pthread_mutex_lock(&gDyldLock);
+    if (!gVisibleToReal || image_index >= gVisibleCount) {
+        pthread_mutex_unlock(&gDyldLock);
+        return NULL;
+    }
+    uint32_t realIndex = gVisibleToReal[image_index];
+    pthread_mutex_unlock(&gDyldLock);
+
+    return orig__dyld_get_image_name ? orig__dyld_get_image_name(realIndex) : NULL;
+}
+
+static int (*orig_dladdr)(const void *addr, Dl_info *info);
+static int hook_dladdr(const void *addr, Dl_info *info) {
+    int r = orig_dladdr ? orig_dladdr(addr, info) : 0;
+    if (r == 0 || !info) return r;
+    if (!PXJBHideDylibsEnabled()) return r;
+    if (info->dli_fname && PXJBShouldHideImageName(info->dli_fname)) {
+        // Fail lookup so callers can't attribute symbols to jailbreak dylibs.
+        return 0;
+    }
+    return r;
 }
 
 // Phase 2 extension: mount/volume checks (statfs/statvfs)
@@ -904,6 +1080,16 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
 
             sym = FindSymbol(NULL, "fstatvfs");
             if (sym) MSHookFunction(sym, (void *)hook_fstatvfs, (void **)&orig_fstatvfs);
+
+            // Phase 3 (toggle: jbBypassHideDylibsEnabled)
+            sym = FindSymbol(NULL, "_dyld_image_count");
+            if (sym) MSHookFunction(sym, (void *)hook__dyld_image_count, (void **)&orig__dyld_image_count);
+
+            sym = FindSymbol(NULL, "_dyld_get_image_name");
+            if (sym) MSHookFunction(sym, (void *)hook__dyld_get_image_name, (void **)&orig__dyld_get_image_name);
+
+            sym = FindSymbol(NULL, "dladdr");
+            if (sym) MSHookFunction(sym, (void *)hook_dladdr, (void **)&orig_dladdr);
 
             dlclose(libSystem);
         }
