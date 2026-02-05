@@ -1001,9 +1001,11 @@ static int hook_sysctl_jb(int *name, u_int namelen, void *oldp, size_t *oldlenp,
     if (!name || namelen < 2) return r;
 
     if (name[0] == CTL_KERN) {
+#ifdef KERN_BOOTARGS
         if (name[1] == KERN_BOOTARGS) {
             PXJBSanitizeBootArgs(oldp, oldlenp);
         }
+#endif
         if (name[1] == KERN_PROC) {
             PXJBSanitizeKinfoProc(oldp, oldlenp);
         }
