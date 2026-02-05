@@ -27,6 +27,7 @@
 #import <pthread.h>
 #import <dispatch/dispatch.h>
 #import <mach/mach.h>
+#import <link.h>
 
 // Some Theos SDKs for iOS don't ship <sys/ptrace.h>.
 // PT_DENY_ATTACH is 31 on Darwin.
@@ -124,6 +125,7 @@ static volatile BOOL gJBHideDylibsEnabled = NO;
 static volatile BOOL gJBSyscallHookEnabled = NO;
 static volatile BOOL gJBBlockDyldAddImageCallbacksEnabled = NO;
 static volatile BOOL gJBHideTaskDyldInfoEnabled = NO;
+static volatile BOOL gJBHideDlIteratePhdrEnabled = NO;
 static volatile CFTimeInterval gJBLastCheck = 0;
 static BOOL PXJBShouldBypassCached(void) {
     if (PXJBIsCriticalProcess()) return NO;
@@ -171,6 +173,9 @@ static BOOL PXJBShouldBypassCached(void) {
         // Phase 3 extension toggle: hide TASK_DYLD_INFO via task_info (default OFF)
         gJBHideTaskDyldInfoEnabled = [securitySettings boolForKey:@"jbBypassHideTaskDyldInfoEnabled"]; 
 
+        // Phase 3 extension toggle: hide dl_iterate_phdr image enumeration (default OFF)
+        gJBHideDlIteratePhdrEnabled = [securitySettings boolForKey:@"jbBypassHideDlIteratePhdrEnabled"]; 
+
         Class mgrCls = NSClassFromString(@"IdentifierManager");
         if (!mgrCls || ![mgrCls respondsToSelector:@selector(sharedManager)]) {
             gJBEnabled = NO;
@@ -202,6 +207,10 @@ static BOOL PXJBHideTaskDyldInfoEnabled(void) {
     return PXJBShouldBypassCached() && gJBHideTaskDyldInfoEnabled;
 }
 
+static BOOL PXJBHideDlIteratePhdrEnabled(void) {
+    return PXJBShouldBypassCached() && gJBHideDlIteratePhdrEnabled;
+}
+
 static BOOL PXJBSyscallBypassEnabled(void) {
     return PXJBShouldBypassCached() && gJBSyscallHookEnabled;
 }
@@ -216,6 +225,7 @@ static BOOL PXJBIsHiddenExactPath(const char *path) {
         "/Applications/Filza.app",
         "/Library/MobileSubstrate/MobileSubstrate.dylib",
         "/Library/MobileSubstrate/DynamicLibraries",
+        "/usr/lib/substrate/SubstrateBootstrap.dylib",
         "/usr/lib/libsubstrate.dylib",
         "/usr/sbin/sshd",
         "/bin/bash",
@@ -235,6 +245,10 @@ static BOOL PXJBIsHiddenExactPath(const char *path) {
 static BOOL PXJBIsHiddenPrefixPath(const char *path) {
     if (!path) return NO;
     static const char *kPrefixes[] = {
+        "/usr/lib/substrate/",
+        "/Library/Caches/cy-",
+        "/private/var/Library/Caches/cy-",
+        "/private/var/mobile/Library/Caches/cy-",
         "/var/jb",
         "/private/var/jb",
         "/private/preboot/jb",
@@ -811,7 +825,43 @@ static BOOL PXJBShouldHideImageName(const char *name) {
     // Common rootless prefixes.
     if (PXStrContainsNoCase(name, "/var/jb")) return YES;
     if (PXStrContainsNoCase(name, "/private/preboot/jb")) return YES;
+    // Common jailbreak cache-injected dylib pattern.
+    if (PXStrContainsNoCase(name, "/library/caches/cy-")) return YES;
     return NO;
+}
+
+// Phase 3 strong option: hide dl_iterate_phdr enumeration
+static int (*orig_dl_iterate_phdr)(int (*callback)(struct dl_phdr_info *info, size_t size, void *data), void *data);
+static __thread int (*px_orig_dl_iterate_cb)(struct dl_phdr_info *info, size_t size, void *data) = NULL;
+static __thread void *px_orig_dl_iterate_data = NULL;
+
+static int px_dl_iterate_phdr_cb(struct dl_phdr_info *info, size_t size, void *data) {
+    (void)data;
+    int (*cb)(struct dl_phdr_info *, size_t, void *) = px_orig_dl_iterate_cb;
+    void *cbData = px_orig_dl_iterate_data;
+    if (!cb) return 0;
+
+    if (PXJBHideDlIteratePhdrEnabled() && info) {
+        const char *nm = info->dlpi_name;
+        if (PXJBShouldHideImageName(nm)) {
+            return 0; // skip
+        }
+    }
+    return cb(info, size, cbData);
+}
+
+static int hook_dl_iterate_phdr(int (*callback)(struct dl_phdr_info *info, size_t size, void *data), void *data) {
+    if (!orig_dl_iterate_phdr) return 0;
+    if (!PXJBHideDlIteratePhdrEnabled() || !callback) {
+        return orig_dl_iterate_phdr(callback, data);
+    }
+
+    px_orig_dl_iterate_cb = callback;
+    px_orig_dl_iterate_data = data;
+    int r = orig_dl_iterate_phdr(px_dl_iterate_phdr_cb, NULL);
+    px_orig_dl_iterate_cb = NULL;
+    px_orig_dl_iterate_data = NULL;
+    return r;
 }
 
 static void PXDyldRebuildVisibleMapLocked(void) {
@@ -1196,6 +1246,7 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
         BOOL wantDyldHide = [ss boolForKey:@"jbBypassHideDylibsEnabled"]; // experimental
         BOOL wantBlockAddImage = [ss boolForKey:@"jbBypassBlockDyldAddImageCallbacksEnabled"]; // experimental
         BOOL wantHideTaskDyldInfo = [ss boolForKey:@"jbBypassHideTaskDyldInfoEnabled"]; // experimental
+        BOOL wantHideDlIteratePhdr = [ss boolForKey:@"jbBypassHideDlIteratePhdrEnabled"]; // experimental
         void *libSystem = dlopen("/usr/lib/libSystem.B.dylib", RTLD_NOW);
         if (libSystem) {
             void *sym = NULL;
@@ -1331,6 +1382,14 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
                 if (sym) {
                     extern void PXJBInstallTaskInfoHook(void *sym);
                     PXJBInstallTaskInfoHook(sym);
+                }
+            }
+
+            // Phase 3 extension: hide dl_iterate_phdr enumeration.
+            if (wantHideDlIteratePhdr) {
+                sym = FindSymbol(NULL, "dl_iterate_phdr");
+                if (sym) {
+                    MSHookFunction(sym, (void *)hook_dl_iterate_phdr, (void **)&orig_dl_iterate_phdr);
                 }
             }
 
