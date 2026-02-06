@@ -3,6 +3,7 @@
 
 #import <Foundation/Foundation.h>
 #import <CoreFoundation/CoreFoundation.h>
+#include <string.h>
 
 #import "ProjectXLogging.h"
 #import "PXScope.h"
@@ -121,6 +122,13 @@ static NSString *LTZPinnedTimeZoneName(void) {
 
 %ctor {
     @autoreleasepool {
+        // MB Bank is extremely sensitive to early Foundation/CF access during module init.
+        // Avoid installing these locale/timezone hooks there.
+        extern const char *__progname;
+        if (__progname && strcmp(__progname, "MB Bank") == 0) {
+            return;
+        }
+
         // Install only for scoped apps or Safari stack.
         if (!LTZShouldApply()) return;
         %init;
