@@ -2263,7 +2263,7 @@ void PXJBInstallDyldHooks(void) {
     sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_vmaddr_slide");
     if (sym) MSHookFunction(sym, (void *)hook_dyld_get_image_vmaddr_slide, (void **)&orig_dyld_get_image_vmaddr_slide);
     gDyldHooksEnabled = YES;
-    PXLog(@"[JailbreakBypass] DYLD image hiding hooks installed");
+    // Note: Don't use PXLog here - CoreFoundation may not be ready during early init
 }
 
 // ============================================================================
@@ -2291,7 +2291,7 @@ static int (*orig_pthread_kill)(pthread_t, int);
 static int hook_pthread_kill(pthread_t thread, int sig) {
     if (sig == SIGABRT) {
         if (gVGuardBypassActive || gDyldHooksEnabled || PXJBIsMBBank()) {
-            PXLog(@"[JailbreakBypass] Blocked pthread_kill(SIGABRT)");
+            // Blocked - don't log here, CF may not be ready
             return 0;
         }
     }
@@ -2301,9 +2301,8 @@ static int hook_pthread_kill(pthread_t thread, int sig) {
 // Hook abort() to prevent VGuard from crashing the app
 static void (*orig_abort)(void);
 static void hook_abort(void) {
-    // Block abort for banking apps
+    // Block abort for banking apps - don't log, CF may not be ready
     if (gVGuardBypassActive || gDyldHooksEnabled || PXJBShouldBypassCached() || PXJBIsMBBank()) {
-        PXLog(@"[JailbreakBypass] Blocked abort() call");
         return;
     }
     if (orig_abort) orig_abort();
@@ -2315,7 +2314,7 @@ static int hook_raise(int sig) {
     if (gVGuardBypassActive || PXJBIsMBBank()) {
         // Block SIGABRT (6), SIGKILL (9), SIGTERM (15)
         if (sig == SIGABRT || sig == SIGKILL || sig == SIGTERM) {
-            PXLog(@"[JailbreakBypass] Blocked raise(%d)", sig);
+            // Blocked - don't log, CF may not be ready
             return 0;
         }
     }
@@ -2552,12 +2551,7 @@ __attribute__((constructor(101))) static void PXJBBankingAppCtorInit(void) {
         // Initialize ObjC hooks - ONLY CALLED ONCE
         %init(VGuardHooks);
         %init(ZDefendHooks);
-        
-        if (bundleID) {
-            PXLog(@"[JailbreakBypass] Banking bypass enabled for %@", bundleID);
-        } else {
-            PXLog(@"[JailbreakBypass] Banking bypass enabled for exec: %s", __progname);
-        }
+        // Note: Don't use PXLog here - CoreFoundation may not be ready during early init
     }
 }
 
