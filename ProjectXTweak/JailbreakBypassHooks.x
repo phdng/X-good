@@ -2275,15 +2275,21 @@ void PXJBInstallDyldHooks(void) {
 static volatile BOOL gVGuardBypassActive = NO;
 
 // Helper to check if current app is MB Bank (for emergency fallback)
+// Helper to check if current app is MB Bank (for emergency fallback)
 static BOOL PXJBIsMBBank(void) {
-    static BOOL checked = NO;
-    static BOOL isMBBank = NO;
-    if (!checked) {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        isMBBank = [bundleID isEqualToString:@"com.mbmobile"];
-        checked = YES;
+    if (gVGuardBypassActive) return YES;
+    
+    // Use __progname check which is safe during early init
+    extern const char *__progname;
+    if (__progname) {
+        if (strcmp(__progname, "MB Bank") == 0 || 
+            strstr(__progname, "MBBank") || 
+            strstr(__progname, "mbmobile") ||
+            (strlen(__progname) >= 2 && __progname[0] == 'M' && __progname[1] == 'B')) {
+            return YES;
+        }
     }
-    return isMBBank;
+    return NO;
 }
 
 // Hook pthread_kill to block SIGABRT (this is what __abort uses internally)
@@ -2511,6 +2517,9 @@ __attribute__((constructor(101))) static void PXJBBankingAppCtorInit(void) {
     }
     
     // If not detected by name, check Bundle ID (slower, but covers other apps)
+    /* 
+    // DANGEROUS: Using ObjC/Foundation in constructor(101) crashes with SIGILL
+    // because Foundation is not yet initialized. Rely on __progname only for now.
     if (!shouldInitBankingHooks) {
         @autoreleasepool {
             if (!PXJBIsCriticalProcess()) {
@@ -2529,6 +2538,7 @@ __attribute__((constructor(101))) static void PXJBBankingAppCtorInit(void) {
             }
         }
     }
+    */
     
     if (shouldInitBankingHooks) {
         gVGuardBypassActive = YES;
