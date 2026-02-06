@@ -131,7 +131,8 @@ static int PXReadMode(void) {
     buf[n] = '\0';
     // Parse int
     int v = atoi(buf);
-    if (v < 0) v = 0;
+    // -1: install nothing (injection-only test)
+    if (v < -1) v = -1;
     if (v > 4) v = 4;
     return v;
 }
@@ -438,6 +439,12 @@ static void PXInstallMBBankMinimal(void) {
     char modeBuf[32];
     (void)snprintf(modeBuf, sizeof(modeBuf), "%d", mode);
     PXWriteLineKV("mode", modeBuf);
+
+    if (mode == -1) {
+        PXWriteLine("mode -1: no hooks installed");
+        PXWriteLine("[ProjectX] MBBankMinimalInit installed");
+        return;
+    }
 
     // Install hooks via RTLD_DEFAULT (symbols are in process images)
     void *sym = NULL;

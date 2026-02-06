@@ -8,6 +8,12 @@
 @implementation AAA_TestLoader
 
 + (void)load {
+    // Test-only file. Ensure it never runs in protected apps.
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
+
     // Try multiple paths - /tmp might be blocked by sandbox
     [@"AAA_LOAD_METHOD_RAN" writeToFile:@"/var/mobile/Library/Logs/ProjectX/AAA_load_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [@"AAA_LOAD_METHOD_RAN" writeToFile:@"/tmp/AAA_load_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
