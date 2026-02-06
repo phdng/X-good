@@ -2253,6 +2253,8 @@ void PXJBInstallVGuardBypass(void) {
 }
 
 // VGuard ObjC class hooks
+%group VGuardHooks
+
 %hook v_VPrivateUtility
 
 // Block the exception handler that calls abort()
@@ -2313,6 +2315,8 @@ void PXJBInstallVGuardBypass(void) {
 
 %end
 
+%end // %group VGuardHooks
+
 // Initialize VGuard bypass - called from main %ctor
 __attribute__((constructor)) static void PXJBVGuardCtorInit(void) {
     @autoreleasepool {
@@ -2327,7 +2331,9 @@ __attribute__((constructor)) static void PXJBVGuardCtorInit(void) {
             [bundleID hasPrefix:@"com.vpbank."] ||             // VPBank
             [bundleID hasPrefix:@"vn.com.acb."] ||             // ACB
             [bundleID hasPrefix:@"com.sacombank."]) {          // Sacombank
+            
             PXJBInstallVGuardBypass();
+            %init(VGuardHooks);
             PXLog(@"[JailbreakBypass] VGuard bypass enabled for %@", bundleID);
         }
     }
