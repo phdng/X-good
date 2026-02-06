@@ -3,6 +3,10 @@
 #include <string.h>
 
 static id PXReadSecuritySettingObject(NSString *key) {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return nil;
+    }
     if (!key.length) return nil;
     NSArray<NSString *> *paths = @[
         @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
@@ -19,6 +23,10 @@ static id PXReadSecuritySettingObject(NSString *key) {
 }
 
 static BOOL PXReadSecuritySettingHasKey(NSString *key) {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return NO;
+    }
     if (!key.length) return NO;
     NSArray<NSString *> *paths = @[
         @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist",
@@ -59,6 +67,19 @@ static void PXScopeNotify(CFNotificationCenterRef center, void *observer, CFStri
 }
 
 static void PXEnsureScopeCache(void) {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        // MB Bank is handled by minimal init. Avoid touching preferences here.
+        gCachedDeviceSpoofEnabled = NO;
+        gCachedSafariStackEnabled = NO;
+        gCachedFullSpoofTestModeEnabled = NO;
+        gCachedDisplayUIScaleEnabled = NO;
+        gCachedDisplayPixelMetricsEnabled = NO;
+        gCachedDisplayWebScreenEnabled = NO;
+        gCacheValid = YES;
+        return;
+    }
+
     NSTimeInterval now = [NSDate timeIntervalSinceReferenceDate];
     if (gCacheValid && (now - gLastSettingsRead) < 1.0) {
         return;

@@ -268,6 +268,11 @@ static BOOL isUUIDKey(NSString *key) {
 // Base method for getting objects - SAFE VERSION
 // Always get original value first, only spoof if value is actually UUID-like
 - (id)objectForKey:(NSString *)defaultName {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return %orig;
+    }
+
     // Recursion guard
     if (isInsideHook) {
         return %orig;
@@ -355,6 +360,10 @@ static BOOL isUUIDKey(NSString *key) {
 // String-specific method - SAFE VERSION
 // Only spoof if original value looks like UUID
 - (NSString *)stringForKey:(NSString *)defaultName {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return %orig;
+    }
     if (isInsideHook) return %orig;
     
     // Always get original value first
@@ -381,6 +390,10 @@ static BOOL isUUIDKey(NSString *key) {
 
 // Dictionary method - only process if key looks UUID-related
 - (NSDictionary<NSString *, id> *)dictionaryForKey:(NSString *)defaultName {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return %orig;
+    }
     if (isInsideHook) return %orig;
     
     NSDictionary *originalDict = %orig;
