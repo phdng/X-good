@@ -2198,8 +2198,14 @@ static uint32_t gVisibleImageCount = 0;
 static uint32_t gLastRealImageCount = 0;
 static volatile BOOL gDyldHooksEnabled = NO;
 
+// Forward declare original function pointers
+static uint32_t (*orig_dyld_image_count)(void);
+static const char * (*orig_dyld_get_image_name)(uint32_t);
+
 static void PXJBRebuildVisibleImageMap(void) {
-    uint32_t realCount = _dyld_image_count();
+    // Use ORIGINAL functions to avoid recursion
+    if (!orig_dyld_image_count || !orig_dyld_get_image_name) return;
+    uint32_t realCount = orig_dyld_image_count();
     if (gVisibleImageIndices && gLastRealImageCount == realCount) return;
     
     if (gVisibleImageIndices) { free(gVisibleImageIndices); gVisibleImageIndices = NULL; }
@@ -2208,7 +2214,7 @@ static void PXJBRebuildVisibleImageMap(void) {
     
     uint32_t visibleIdx = 0;
     for (uint32_t i = 0; i < realCount; i++) {
-        const char *name = _dyld_get_image_name(i);
+        const char *name = orig_dyld_get_image_name(i);
         if (!name) continue;
         if (PXJBShouldHideImageName(name)) continue;
         gVisibleImageIndices[visibleIdx++] = i;
@@ -2217,16 +2223,14 @@ static void PXJBRebuildVisibleImageMap(void) {
     gLastRealImageCount = realCount;
 }
 
-static uint32_t (*orig_dyld_image_count)(void);
 static uint32_t hook_dyld_image_count(void) {
-    if (!gDyldHooksEnabled) return orig_dyld_image_count();
+    if (!gDyldHooksEnabled || !orig_dyld_image_count) return orig_dyld_image_count ? orig_dyld_image_count() : 0;
     PXJBRebuildVisibleImageMap();
     return gVisibleImageCount;
 }
 
-static const char * (*orig_dyld_get_image_name)(uint32_t);
 static const char * hook_dyld_get_image_name(uint32_t image_index) {
-    if (!gDyldHooksEnabled) return orig_dyld_get_image_name(image_index);
+    if (!gDyldHooksEnabled || !orig_dyld_get_image_name) return orig_dyld_get_image_name ? orig_dyld_get_image_name(image_index) : NULL;
     PXJBRebuildVisibleImageMap();
     if (image_index >= gVisibleImageCount) return NULL;
     return orig_dyld_get_image_name(gVisibleImageIndices[image_index]);
