@@ -1,5 +1,6 @@
 #import "PXScope.h"
 #import <CoreFoundation/CoreFoundation.h>
+#include <string.h>
 
 static id PXReadSecuritySettingObject(NSString *key) {
     if (!key.length) return nil;
@@ -106,6 +107,13 @@ static void PXEnsureScopeCache(void) {
 
 __attribute__((constructor))
 static void PXScopeInit(void) {
+    // MB Bank is extremely sensitive to early Foundation/CF initialization.
+    // Avoid installing these observers there; MB Bank uses MBBankMinimalInit.x.
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
+
     CFNotificationCenterRef center = CFNotificationCenterGetDarwinNotifyCenter();
     if (!center) return;
     CFNotificationCenterAddObserver(center, NULL, PXScopeNotify, CFSTR("com.hydra.projectx.settings.changed"), NULL, CFNotificationSuspensionBehaviorDeliverImmediately);

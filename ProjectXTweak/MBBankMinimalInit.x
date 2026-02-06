@@ -22,6 +22,7 @@
 #include <dirent.h>
 
 #include <mach-o/dyld.h>
+#include <mach/mach.h>
 
 #import <objc/runtime.h>
 
@@ -131,10 +132,19 @@ static int PXReadMode(void) {
     buf[n] = '\0';
     // Parse int
     int v = atoi(buf);
-    // -1: install nothing (injection-only test)
-    if (v < -1) v = -1;
+    // -2: install nothing (injection-only test)
+    // -1: patch pthread_mach_thread_np only
+    if (v < -2) v = -2;
     if (v > 4) v = 4;
     return v;
+}
+
+// Patch for protected apps that crash inside dyld stubs for pthread_mach_thread_np.
+static mach_port_t (*orig_pthread_mach_thread_np)(pthread_t thread);
+static mach_port_t hook_pthread_mach_thread_np(pthread_t thread) {
+    (void)thread;
+    // Avoid calling the original: in the failing case, the stub itself traps.
+    return mach_thread_self();
 }
 
 // --- libc file probes ---
@@ -440,14 +450,27 @@ static void PXInstallMBBankMinimal(void) {
     (void)snprintf(modeBuf, sizeof(modeBuf), "%d", mode);
     PXWriteLineKV("mode", modeBuf);
 
-    if (mode == -1) {
-        PXWriteLine("mode -1: no hooks installed");
+    if (mode == -2) {
+        PXWriteLine("mode -2: no hooks installed");
         PXWriteLine("[ProjectX] MBBankMinimalInit installed");
         return;
     }
 
     // Install hooks via RTLD_DEFAULT (symbols are in process images)
     void *sym = NULL;
+
+    if (mode == -1) {
+        PXWriteLine("mode -1: patch pthread_mach_thread_np only");
+        sym = dlsym(RTLD_DEFAULT, "pthread_mach_thread_np");
+        if (sym) {
+            MSHookFunction(sym, (void *)hook_pthread_mach_thread_np, (void **)&orig_pthread_mach_thread_np);
+            PXWriteLine("installed pthread_mach_thread_np patch");
+        } else {
+            PXWriteLine("pthread_mach_thread_np symbol not found");
+        }
+        PXWriteLine("[ProjectX] MBBankMinimalInit installed");
+        return;
+    }
 
     PXWriteLine("install stat");
     sym = dlsym(RTLD_DEFAULT, "stat");
