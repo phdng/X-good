@@ -2156,6 +2156,17 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
 
         %init;
 
+        // Create a debug log marker file when enabled.
+        // This helps validate that the module loaded even if no blocks happen yet.
+        @try {
+            NSUserDefaults *ssDbg = [[NSUserDefaults alloc] initWithSuiteName:@"com.weaponx.securitySettings"];
+            if ([ssDbg boolForKey:@"jbBypassDebugLoggingEnabled"]) {
+                PXJBDebugWriteLine("[JailbreakBypass][debug] ctor initialized");
+            }
+        } @catch (NSException *e) {
+            (void)e;
+        }
+
         // Proactive env cleanup (safe) for scoped apps.
         PXJBUnsetSuspiciousEnvIfNeeded();
         dispatch_async(dispatch_get_main_queue(), ^{

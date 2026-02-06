@@ -3276,14 +3276,9 @@ static char* hook_GSSystemGetSerialNo(void) {
     [@"ctor_entry" writeToFile:@"/tmp/weaponx_ctor_started.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     
     NSString *currentProcessName = [NSProcessInfo processInfo].processName;
+    BOOL isMBBankProcess = [currentProcessName isEqualToString:@"MB Bank"];
     NSString *flagPath = [NSString stringWithFormat:@"/tmp/weaponx_loaded_%@.txt", currentProcessName];
     [@"Constructor executed!" writeToFile:flagPath atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    
-    // CRITICAL: Add simple NSLog to verify constructor runs
-    NSLog(@"[WeaponX-DEBUG] ========================================");
-    NSLog(@"[WeaponX-DEBUG] Constructor started in process: %@", currentProcessName);
-    NSLog(@"[WeaponX-DEBUG] Created flag file: %@", flagPath);
-    NSLog(@"[WeaponX-DEBUG] ========================================");
     
     // Add at beginning of ctor
     setupHookingEnvironment();
@@ -3291,24 +3286,36 @@ static char* hook_GSSystemGetSerialNo(void) {
     // Install shims for weakly-linked selectors to prevent crashes
     PXInstallCompatibilityShims();
     
-    PXLog(@"ProjectX tweak initializing...");
+    if (!isMBBankProcess) {
+        PXLog(@"ProjectX tweak initializing...");
+    }
     
     NSString *currentBundleID = [[NSBundle mainBundle] bundleIdentifier];
-    PXLog(@"[WeaponX] 💉 Tweak injected into process: %@ (BundleID: %@)", [NSProcessInfo processInfo].processName, currentBundleID);
+    if (!isMBBankProcess) {
+        PXLog(@"[WeaponX] 💉 Tweak injected into process: %@ (BundleID: %@)", [NSProcessInfo processInfo].processName, currentBundleID);
+    }
     
     if (currentBundleID) {
         IdentifierManager *mgr = [%c(IdentifierManager) sharedManager];
         if (mgr) {
             BOOL enabled = [mgr isApplicationEnabled:currentBundleID];
-            PXLog(@"[WeaponX] 🔍 App Enabled Check: %@ -> %@", currentBundleID, enabled ? @"YES" : @"NO");
+            if (!isMBBankProcess) {
+                PXLog(@"[WeaponX] 🔍 App Enabled Check: %@ -> %@", currentBundleID, enabled ? @"YES" : @"NO");
+            }
             
             if (enabled) {
-                PXLog(@"[WeaponX] ✅ App is enabled! Hooks should activate.");
+                if (!isMBBankProcess) {
+                    PXLog(@"[WeaponX] ✅ App is enabled! Hooks should activate.");
+                }
             } else {
-                PXLog(@"[WeaponX] ⚠️ App is NOT enabled in settings.");
+                if (!isMBBankProcess) {
+                    PXLog(@"[WeaponX] ⚠️ App is NOT enabled in settings.");
+                }
             }
         } else {
-            PXLog(@"[WeaponX] ❌ Failed to get IdentifierManager instance!");
+            if (!isMBBankProcess) {
+                PXLog(@"[WeaponX] ❌ Failed to get IdentifierManager instance!");
+            }
         }
     }
     

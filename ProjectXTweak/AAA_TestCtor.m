@@ -11,7 +11,7 @@
     [@"AAA_LOAD_METHOD_RAN" writeToFile:@"/var/mobile/Library/Logs/ProjectX/AAA_load_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [@"AAA_LOAD_METHOD_RAN" writeToFile:@"/tmp/AAA_load_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [@"AAA_LOAD_METHOD_RAN" writeToFile:@"/var/mobile/AAA_load_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
-    NSLog(@"[WeaponX-DEBUG] +load method executed in process: %@", [NSProcessInfo processInfo].processName);
+    // Avoid NSLog here: some protected apps crash during early init.
 }
 
 @end

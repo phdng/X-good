@@ -27,16 +27,10 @@ static NSMutableDictionary *scopedAppsCache = nil;
 static NSDate *scopedAppsCacheTimestamp = nil;
 static const NSTimeInterval kScopedAppsCacheValidDuration = 60.0; // 1 minute
 
-// Add a macro for logging with a recognizable prefix
-// Set DEBUG_LOG to 0 to reduce logging in production
-#define DEBUG_LOG 0
-
-#if DEBUG_LOG
-#define IOSVERSION_LOG(fmt, ...) NSLog((@"[iosversion] " fmt), ##__VA_ARGS__)
-#else
-// Only log important messages when DEBUG_LOG is off
-#define IOSVERSION_LOG(fmt, ...) if ([fmt hasPrefix:@"❌"] || [fmt hasPrefix:@"⚠️"]) NSLog((@"[iosversion] " fmt), ##__VA_ARGS__)
-#endif
+// Avoid NSLog/CFLog in this module.
+// Some protected apps crash (SIGILL) if logging happens during early constructors.
+#undef IOSVERSION_LOG
+#define IOSVERSION_LOG(...) do {} while (0)
 
 // Forward declarations
 static NSString *getCurrentBundleID(void);

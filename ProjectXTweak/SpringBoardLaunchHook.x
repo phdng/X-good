@@ -342,6 +342,10 @@ static void setupFreezeHooks(void) {
 
 // Initialize hooks
 __attribute__((constructor)) static void initHooks(void) {
-    // Set up the hooks
+    // Only run inside SpringBoard.
+    extern const char *__progname;
+    if (!__progname || strcmp(__progname, "SpringBoard") != 0) {
+        return;
+    }
     setupFreezeHooks();
-} 
+}

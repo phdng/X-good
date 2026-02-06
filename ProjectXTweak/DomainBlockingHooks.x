@@ -651,35 +651,20 @@ static int hooked_getnameinfo(const struct sockaddr *sa, socklen_t salen, char *
     @autoreleasepool {
         // Initialize cache
         scopedAppsCache = [NSMutableDictionary dictionary];
-        
-        // TEMPORARY DEBUG
-        NSLog(@"[DomainBlocking] Constructor called");
-        
+
         // OPTIMIZATION: Check if domain blocking is globally enabled before expensive initialization
         DomainBlockingSettings *settings = [DomainBlockingSettings sharedSettings];
-        NSLog(@"[DomainBlocking] Settings loaded, enabled: %@", settings.isEnabled ? @"YES" : @"NO");
-        NSLog(@"[DomainBlocking] Blocked domains: %@", settings.blockedDomains);
-        
         if (!settings.isEnabled) {
-            NSLog(@"[DomainBlocking] Domain blocking is disabled globally - skipping hooks");
-            // Domain blocking is disabled globally - no need to initialize hooks
             return;
         }
-        
+
         // Get bundle ID once for all checks
         NSString *bundleID = getCurrentBundleID();
-        NSLog(@"[DomainBlocking] Current bundle ID: %@", bundleID);
-        
         BOOL isScoped = isInScopedAppsList();
-        NSLog(@"[DomainBlocking] Is scoped app: %@", isScoped ? @"YES" : @"NO");
-        
         if (!bundleID || !isScoped) {
-            NSLog(@"[DomainBlocking] Not a scoped app - skipping hooks");
-            // Not a scoped app - no need to initialize hooks
             return;
         }
-        
-        NSLog(@"[DomainBlocking] Installing domain blocking hooks for %@", bundleID);
+
         // STEALTH: Silent initialization - no logging to avoid detection
         
         // Initialize DNS-level C function hooks with ElleKit
