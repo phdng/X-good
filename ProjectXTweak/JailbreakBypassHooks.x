@@ -2276,11 +2276,9 @@ static volatile BOOL gVGuardBypassActive = NO;
 // Hook abort() to prevent VGuard from crashing the app
 static void (*orig_abort)(void);
 static void hook_abort(void) {
-    // For VGuard-protected apps, ALWAYS block abort() when bypass is installed
-    if (gVGuardBypassActive) {
-        PXLog(@"[JailbreakBypass] Blocked abort() call from VGuard");
-        // Don't call abort - just return and let the app continue
-        // Use a long sleep + return to prevent the caller from retrying immediately
+    // Block abort if any bypass is enabled
+    if (gVGuardBypassActive || gDyldHooksEnabled || PXJBShouldBypassCached()) {
+        PXLog(@"[JailbreakBypass] Blocked abort() call");
         return;
     }
     if (orig_abort) orig_abort();
@@ -2477,9 +2475,13 @@ __attribute__((constructor(101))) static void PXJBBankingAppCtorInit(void) {
     
     // Check executable name first (fastest, no ObjC runtime needed)
     if (__progname) {
+        // MB Bank has space in name - check multiple patterns
         if (strcmp(__progname, "MB Bank") == 0 ||
+            strstr(__progname, "MB Bank") ||
             strstr(__progname, "MBBank") ||
-            strstr(__progname, "mbmobile")) {
+            strstr(__progname, "mbmobile") ||
+            strstr(__progname, "MB%20Bank") ||  // URL encoded space
+            (strlen(__progname) >= 2 && __progname[0] == 'M' && __progname[1] == 'B')) {  // Starts with MB
             shouldInitBankingHooks = YES;
         }
     }
