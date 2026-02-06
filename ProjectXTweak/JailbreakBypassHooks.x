@@ -317,6 +317,9 @@ static BOOL PXJBIsHiddenExactPath(const char *path) {
         
         // MobileSubstrate files
         "/Library/MobileSubstrate/DynamicLibraries/0Cr4shed.dylib",
+        "/Library/MobileSubstrate/DynamicLibraries/libappstoreplus.dylib",
+        "/Library/MobileSubstrate/DynamicLibraries/ Crane.dylib",
+        "/Library/MobileSubstrate/DynamicLibraries/ProjectXTweak.dylib",
         "/Library/MobileSubstrate/DynamicLibraries/FilzaHack.dylib",
         "/Library/MobileSubstrate/DynamicLibraries/LiveClock.plist",
         "/Library/MobileSubstrate/DynamicLibraries/Veency.plist",
@@ -325,6 +328,9 @@ static BOOL PXJBIsHiddenExactPath(const char *path) {
         
         // Substrate/hooking libs
         "/usr/lib/substrate/SubstrateBootstrap.dylib",
+        "/usr/lib/substrate/SubstrateLoader.dylib",
+        "/usr/lib/substrate/SubstrateInserter.dylib",
+
         "/usr/lib/libsubstrate.dylib",
         "/usr/lib/libmryipc.dylib",
         "/usr/lib/libFrida.dylib",
