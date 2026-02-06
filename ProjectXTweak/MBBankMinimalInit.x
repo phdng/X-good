@@ -444,7 +444,7 @@ __attribute__((constructor(101)))
 static void PXInstallMBBankMinimal(void) {
     if (!PXIsMBBankProcess()) return;
 
-    PXWriteLine("[ProjectX] MBBankMinimalInit begin");
+    PXWriteLine("[ProjectX] MBBankMinimalInit v3 begin");
     int mode = PXReadMode();
     char modeBuf[32];
     (void)snprintf(modeBuf, sizeof(modeBuf), "%d", mode);
@@ -452,7 +452,7 @@ static void PXInstallMBBankMinimal(void) {
 
     if (mode == -2) {
         PXWriteLine("mode -2: no hooks installed");
-        PXWriteLine("[ProjectX] MBBankMinimalInit installed");
+        PXWriteLine("[ProjectX] MBBankMinimalInit v3 installed");
         return;
     }
 
@@ -468,7 +468,7 @@ static void PXInstallMBBankMinimal(void) {
         } else {
             PXWriteLine("pthread_mach_thread_np symbol not found");
         }
-        PXWriteLine("[ProjectX] MBBankMinimalInit installed");
+        PXWriteLine("[ProjectX] MBBankMinimalInit v3 installed");
         return;
     }
 
@@ -552,5 +552,5 @@ static void PXInstallMBBankMinimal(void) {
         PXWriteLine("skip anti-terminate");
     }
 
-    PXWriteLine("[ProjectX] MBBankMinimalInit installed");
+    PXWriteLine("[ProjectX] MBBankMinimalInit v3 installed");
 }
