@@ -295,32 +295,110 @@ static BOOL PXJBSyscallBypassEnabled(void) {
 static BOOL PXJBIsHiddenExactPath(const char *path) {
     if (!path) return NO;
     static const char *kExact[] = {
+        // Jailbreak package managers / apps
         "/Applications/Cydia.app",
         "/Applications/Sileo.app",
         "/Applications/Zebra.app",
         "/Applications/Filza.app",
+        "/Applications/Installer.app",
+        "/Applications/RockApp.app",
+        "/Applications/Icy.app",
+        "/Applications/WinterBoard.app",
+        "/Applications/SBSettings.app",
+        "/Applications/MxTube.app",
+        "/Applications/IntelliScreen.app",
+        "/Applications/FakeCarrier.app",
+        "/Applications/blackra1n.app",
+        "/Applications/Dopamine.app",
+        "/Applications/Th0r.app",
+        "/Applications/iFile.app",
+        "/Applications/Terminal.app",
+        "/Applications/NewTerm.app",
+        
+        // MobileSubstrate files
+        "/Library/MobileSubstrate/DynamicLibraries/0Cr4shed.dylib",
+        "/Library/MobileSubstrate/DynamicLibraries/FilzaHack.dylib",
+        "/Library/MobileSubstrate/DynamicLibraries/LiveClock.plist",
+        "/Library/MobileSubstrate/DynamicLibraries/Veency.plist",
         "/Library/MobileSubstrate/MobileSubstrate.dylib",
         "/Library/MobileSubstrate/DynamicLibraries",
+        
+        // Substrate/hooking libs
         "/usr/lib/substrate/SubstrateBootstrap.dylib",
         "/usr/lib/libsubstrate.dylib",
         "/usr/lib/libmryipc.dylib",
         "/usr/lib/libFrida.dylib",
         "/usr/lib/libcycript.dylib",
         "/usr/lib/libjailbreak.dylib",
+        "/usr/lib/libhooker.dylib",
+        "/usr/lib/libsubstitute.dylib",
+        "/usr/lib/TweakInject.dylib",
+        "/usr/lib/ellekit/libinjector.dylib",
+        "/usr/lib/libellekit.dylib",
+        
+        // Frameworks
         "/Library/Frameworks/CydiaSubstrate.framework",
         "/Library/PreferenceBundles",
         "/Library/PreferenceLoader",
+        
+        // SSH / shell tools
         "/usr/bin/ssh",
         "/usr/bin/scp",
-        "/var/checkra1n.dmg",
-        "/var/binpack",
+        "/usr/bin/sftp",
         "/usr/sbin/sshd",
         "/bin/bash",
+        "/bin/sh",
+        "/bin/zsh",
+        "/usr/bin/cycript",
+        "/usr/bin/dpkg",
+        "/usr/bin/apt",
+        "/usr/bin/apt-get",
+        
+        // SSH support files
+        "/usr/libexec/cydia",
+        "/usr/libexec/sftp-server",
+        "/usr/libexec/ssh-keysign",
+        
+        // Common directories
         "/etc/apt",
         "/var/lib/apt",
         "/var/lib/cydia",
+        "/var/cache/apt",
+        "/var/log/syslog",
+        "/var/tmp/cydia.log",
+        
+        // Jailbreak markers / files
+        "/var/checkra1n.dmg",
+        "/var/binpack",
+        "/.bootstrapped_electra",
+        "/.cydia_no_stash",
+        "/.installed_unc0ver",
+        "/.installed_taurine",
+        "/.installed_odyssey",
+        "/.installed_chimera",
+        "/.installed_dopamine",
+        "/.installed_palera1n",
+        "/private/var/stash",
+        
+        // Frida detection paths
+        "/usr/sbin/frida-server",
+        "/usr/lib/frida/frida-agent.dylib",
+        
+        // LaunchDaemons used for detection
+        "/System/Library/LaunchDaemons/com.saurik.Cydia.Startup.plist",
+        "/System/Library/LaunchDaemons/com.ikey.bbot.plist",
+        
+        // Write test paths
         "/private/jailbreak_test",
         "/private/var/jailbreak_test",
+        
+        // Rootless jailbreak specific
+        "/var/jb",
+        "/var/jb/Applications",
+        "/var/jb/usr",
+        "/var/jb/Library",
+        "/private/preboot",
+        
         NULL
     };
     for (int i = 0; kExact[i]; i++) {
@@ -332,23 +410,70 @@ static BOOL PXJBIsHiddenExactPath(const char *path) {
 static BOOL PXJBIsHiddenPrefixPath(const char *path) {
     if (!path) return NO;
     static const char *kPrefixes[] = {
+        // Substrate/hooking framework paths
         "/usr/lib/substrate/",
+        "/usr/lib/TweakInject/",
+        "/usr/lib/ellekit/",
+        "/usr/lib/substitute/",
+        "/usr/lib/libhooker/",
+        
+        // MobileSubstrate paths
         "/Library/MobileSubstrate/",
         "/private/var/Library/MobileSubstrate/",
         "/private/var/mobile/Library/MobileSubstrate/",
+        
+        // Cydia cache injection paths
         "/Library/Caches/cy-",
         "/private/var/Library/Caches/cy-",
         "/private/var/mobile/Library/Caches/cy-",
+        
+        // Library paths
         "/Library/Frameworks/CydiaSubstrate.framework/",
         "/Library/PreferenceBundles/",
         "/Library/PreferenceLoader/",
-        "/var/jb",
-        "/private/var/jb",
-        "/private/preboot/jb",
-        "/var/lib/apt",
-        "/private/var/lib/apt",
+        "/Library/Themes/",
+        "/Library/Ringtones/",
+        "/Library/Wallpaper/",
+        
+        // Rootless jailbreak paths (Dopamine, palera1n, etc.)
+        "/var/jb/",
+        "/private/var/jb/",
+        "/var/jb/Applications/",
+        "/var/jb/usr/",
+        "/var/jb/Library/",
+        "/var/jb/bin/",
+        "/var/jb/sbin/",
+        "/var/jb/etc/",
+        
+        // Preboot jailbreak paths
+        "/private/preboot/jb/",
+        "/private/preboot/",
+        
+        // Package manager paths
+        "/var/lib/apt/",
+        "/private/var/lib/apt/",
+        "/var/cache/apt/",
+        "/private/var/cache/apt/",
+        "/var/lib/dpkg/",
+        "/private/var/lib/dpkg/",
+        
+        // Cydia temp/log paths
         "/var/tmp/cydia",
         "/private/var/tmp/cydia",
+        
+        // Stash paths (older jailbreaks)
+        "/private/var/stash/",
+        "/var/stash/",
+        
+        // Frida paths
+        "/usr/lib/frida/",
+        
+        // procursus (modern package set)
+        "/var/jb/procursus/",
+        
+        // ElleKit injection
+        "/var/jb/usr/lib/ellekit/",
+        
         NULL
     };
     for (int i = 0; kPrefixes[i]; i++) {
@@ -1098,19 +1223,72 @@ static BOOL PXJBShouldHideImageName(const char *name) {
     if (!name) return NO;
     // Substrings frequently used by jailbreak tooling / injection.
     static const char *deny[] = {
+        // Substrate family
         "mobilesubstrate",
         "substrateloader",
         "substratebootstrap",
         "libsubstrate",
+        "substrate",
+        
+        // ElleKit (modern jailbreaks)
         "ellekit",
+        "libellekit",
+        
+        // libhooker
         "libhooker",
+        
+        // Substitute
+        "substitute",
+        
+        // TweakInject
+        "tweakinject",
+        
+        // Common ecosystem libs
         "rocketbootstrap",
+        "libmryipc",
+        "libblackjack",
+        "applist",
+        "cephei",
+        "libcolorpicker",
+        "libflex",
+        "libactivator",
+        "preferenceloader",
+        "preferencebundles",
+        
+        // Security tools
         "frida",
         "fridagadget",
         "cycript",
-        "tweakinject",
-        "substitute",
-        "libblackjack",
+        "ssl_logger",
+        "objection",
+        
+        // Common tweak names
+        "shadow",
+        "liberty",
+        "vnodebypass",
+        "unsub",
+        "a-bypass",
+        "hestia",
+        "choicy",
+        "kernbypass",
+        "hidejb",
+        "jailprotect",
+        "detectordeter",
+        
+        // Jailbreak specific
+        "libjailbreak",
+        "jailbreakd",
+        "cy-",
+        "dopamine",
+        "palera1n",
+        "procursus",
+        "checkra1n",
+        "unc0ver",
+        "taurine",
+        "odyssey",
+        "chimera",
+        "electra",
+        
         NULL
     };
     for (int i = 0; deny[i]; i++) {
@@ -1119,17 +1297,11 @@ static BOOL PXJBShouldHideImageName(const char *name) {
     // Common rootless prefixes.
     if (PXStrContainsNoCase(name, "/var/jb")) return YES;
     if (PXStrContainsNoCase(name, "/private/preboot/jb")) return YES;
+    if (PXStrContainsNoCase(name, "/private/preboot/")) return YES;
     // Common jailbreak cache-injected dylib pattern.
     if (PXStrContainsNoCase(name, "/library/caches/cy-")) return YES;
     // MobileSubstrate injection path.
     if (PXStrContainsNoCase(name, "/library/mobilesubstrate/")) return YES;
-    // mryipc is commonly used by jailbreak ecosystem.
-    if (PXStrContainsNoCase(name, "libmryipc")) return YES;
-    if (PXStrContainsNoCase(name, "frida")) return YES;
-    if (PXStrContainsNoCase(name, "cycript")) return YES;
-    if (PXStrContainsNoCase(name, "libjailbreak")) return YES;
-    if (PXStrContainsNoCase(name, "preferenceloader")) return YES;
-    if (PXStrContainsNoCase(name, "preferencebundles")) return YES;
     return NO;
 }
 
