@@ -194,6 +194,7 @@ static BOOL shouldForceCarrierSpoof(void) {
 
 // Get the path to the current profile's identity directory
 static NSString *getProfileIdentityPath() {
+    @try {
     // Get current profile ID
     NSString *profileId = nil;
     NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
@@ -238,10 +239,12 @@ static NSString *getProfileIdentityPath() {
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     
     return identityDir;
+    } @catch (NSException *e) { return nil; }
 }
 
 // Get the local IP address from the current profile
 static NSString *getProfileLocalIPAddress() {
+    @try {
     NSString *identityDir = getProfileIdentityPath();
     if (!identityDir) {
         return @"192.168.1.1"; // Default fallback
@@ -266,6 +269,7 @@ static NSString *getProfileLocalIPAddress() {
     }
     
     return localIP;
+    } @catch (NSException *e) { return @"192.168.1.1"; }
 }
 
 // Get the current local IP address from the system
@@ -994,7 +998,9 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
     }
     
     // Get spoofed IP values from profile
+    @try {
     NSString *spoofedIPv4 = getProfileLocalIPAddress();
+    if (!spoofedIPv4) return result;
     NSString *spoofedIPv6 = [NetworkManager getSavedLocalIPv6Address];
     
     // Check if we have any custom IP to spoof (not default values)
@@ -1060,6 +1066,7 @@ static int hooked_getifaddrs(struct ifaddrs **ifap) {
     }
     
     return result;
+    } @catch (NSException *e) { return result; }
 }
 
 #pragma mark - Network.framework Hooks (iOS 12+)
