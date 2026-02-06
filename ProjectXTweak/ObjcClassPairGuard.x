@@ -9,6 +9,7 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <syslog.h>
+#include <string.h>
 
 static Class (*orig_objc_allocateClassPair)(Class superclass, const char *name, size_t extraBytes);
 static void (*orig_objc_registerClassPair)(Class cls);

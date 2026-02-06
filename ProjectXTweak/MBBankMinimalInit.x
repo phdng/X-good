@@ -107,6 +107,14 @@ static void PXWriteLine(const char *line) {
     (void)close(fd);
 }
 
+static void PXWriteLineKV(const char *k, const char *v) {
+    char buf[512];
+    if (!k) k = "(null)";
+    if (!v) v = "(null)";
+    (void)snprintf(buf, sizeof(buf), "%s: %s", k, v);
+    PXWriteLine(buf);
+}
+
 // --- libc file probes ---
 static int (*orig_stat)(const char *, struct stat *);
 static int hook_stat(const char *path, struct stat *st) {
@@ -404,62 +412,52 @@ __attribute__((constructor(101)))
 static void PXInstallMBBankMinimal(void) {
     if (!PXIsMBBankProcess()) return;
 
+    PXWriteLine("[ProjectX] MBBankMinimalInit begin");
+
     // Install hooks via RTLD_DEFAULT (symbols are in process images)
     void *sym = NULL;
 
+    PXWriteLine("install stat");
     sym = dlsym(RTLD_DEFAULT, "stat");
     if (sym) MSHookFunction(sym, (void *)hook_stat, (void **)&orig_stat);
+    PXWriteLine("install lstat");
     sym = dlsym(RTLD_DEFAULT, "lstat");
     if (sym) MSHookFunction(sym, (void *)hook_lstat, (void **)&orig_lstat);
+    PXWriteLine("install access");
     sym = dlsym(RTLD_DEFAULT, "access");
     if (sym) MSHookFunction(sym, (void *)hook_access, (void **)&orig_access);
+    PXWriteLine("install open");
     sym = dlsym(RTLD_DEFAULT, "open");
     if (sym) MSHookFunction(sym, (void *)hook_open, (void **)&orig_open);
+    PXWriteLine("install openat");
     sym = dlsym(RTLD_DEFAULT, "openat");
     if (sym) MSHookFunction(sym, (void *)hook_openat, (void **)&orig_openat);
+    PXWriteLine("install opendir");
     sym = dlsym(RTLD_DEFAULT, "opendir");
     if (sym) MSHookFunction(sym, (void *)hook_opendir, (void **)&orig_opendir);
 
-    // dyld enumeration
-    sym = dlsym(RTLD_DEFAULT, "_dyld_image_count");
-    if (sym) MSHookFunction(sym, (void *)hook__dyld_image_count, (void **)&orig__dyld_image_count);
-    sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_name");
-    if (sym) MSHookFunction(sym, (void *)hook__dyld_get_image_name, (void **)&orig__dyld_get_image_name);
-    sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_header");
-    if (sym) MSHookFunction(sym, (void *)hook__dyld_get_image_header, (void **)&orig__dyld_get_image_header);
-    sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_vmaddr_slide");
-    if (sym) MSHookFunction(sym, (void *)hook__dyld_get_image_vmaddr_slide, (void **)&orig__dyld_get_image_vmaddr_slide);
-
-    sym = dlsym(RTLD_DEFAULT, "dl_iterate_phdr");
-    if (sym) MSHookFunction(sym, (void *)hook_dl_iterate_phdr, (void **)&orig_dl_iterate_phdr);
+    // dyld enumeration (optional). Disable for now to maximize stability.
+    // If MB Bank passes launch, we can re-enable gradually.
+    PXWriteLine("skip dyld hooks (stability mode)");
 
     // ObjC runtime images
+    PXWriteLine("install objc_copyImageNames");
     sym = dlsym(RTLD_DEFAULT, "objc_copyImageNames");
     if (sym) MSHookFunction(sym, (void *)hook_objc_copyImageNames, (void **)&orig_objc_copyImageNames);
+    PXWriteLine("install class_getImageName");
     sym = dlsym(RTLD_DEFAULT, "class_getImageName");
     if (sym) MSHookFunction(sym, (void *)hook_class_getImageName, (void **)&orig_class_getImageName);
 
     // libproc
+    PXWriteLine("install proc_regionfilename");
     sym = dlsym(RTLD_DEFAULT, "proc_regionfilename");
     if (sym) MSHookFunction(sym, (void *)hook_proc_regionfilename, (void **)&orig_proc_regionfilename);
 
-    // dlopen/dlsym
-    sym = dlsym(RTLD_DEFAULT, "dlopen");
-    if (sym) MSHookFunction(sym, (void *)hook_dlopen, (void **)&orig_dlopen);
-    sym = dlsym(RTLD_DEFAULT, "dlsym");
-    if (sym) MSHookFunction(sym, (void *)hook_dlsym, (void **)&orig_dlsym);
+    // dlopen/dlsym (optional). Disable for stability for now.
+    PXWriteLine("skip dlopen/dlsym hooks (stability mode)");
 
-    // anti-terminate (caller gated)
-    sym = dlsym(RTLD_DEFAULT, "abort");
-    if (sym) MSHookFunction(sym, (void *)hook_abort, (void **)&orig_abort);
-    sym = dlsym(RTLD_DEFAULT, "raise");
-    if (sym) MSHookFunction(sym, (void *)hook_raise, (void **)&orig_raise);
-    sym = dlsym(RTLD_DEFAULT, "pthread_kill");
-    if (sym) MSHookFunction(sym, (void *)hook_pthread_kill, (void **)&orig_pthread_kill);
-    sym = dlsym(RTLD_DEFAULT, "exit");
-    if (sym) MSHookFunction(sym, (void *)hook_exit, (void **)&orig_exit);
-    sym = dlsym(RTLD_DEFAULT, "_exit");
-    if (sym) MSHookFunction(sym, (void *)hook__exit, (void **)&orig__exit);
+    // anti-terminate (optional). Disable for stability for now.
+    PXWriteLine("skip anti-terminate hooks (stability mode)");
 
     PXWriteLine("[ProjectX] MBBankMinimalInit installed");
 }
