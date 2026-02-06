@@ -2180,3 +2180,155 @@ void PXJBInstallTaskInfoHook(void *sym) {
     if (!sym) return;
     MSHookFunction(sym, (void *)hook_task_info, (void **)&orig_task_info);
 }
+
+// ============================================================================
+// VGuard SDK Bypass (V-Key V-OS Mobile App Protection)
+// Used by banking apps like MB Bank (com.mbmobile)
+// ============================================================================
+
+// Hook abort() to prevent VGuard from crashing the app
+static void (*orig_abort)(void);
+static void hook_abort(void) {
+    if (PXJBShouldBypassCached()) {
+        PXLog(@"[JailbreakBypass] Blocked abort() call from VGuard");
+        // Don't call abort - just return and let the app continue
+        return;
+    }
+    if (orig_abort) orig_abort();
+}
+
+// Hook raise() which may also be used to terminate
+static int (*orig_raise)(int sig);
+static int hook_raise(int sig) {
+    if (PXJBShouldBypassCached()) {
+        // Block SIGABRT (6), SIGKILL (9), SIGTERM (15)
+        if (sig == SIGABRT || sig == SIGKILL || sig == SIGTERM) {
+            PXLog(@"[JailbreakBypass] Blocked raise(%d) from VGuard", sig);
+            return 0;
+        }
+    }
+    return orig_raise ? orig_raise(sig) : -1;
+}
+
+// Hook exit() to prevent app termination
+static void (*orig_exit_vg)(int status);
+static void hook_exit_vg(int status) {
+    if (PXJBShouldBypassCached() && status != 0) {
+        PXLog(@"[JailbreakBypass] Blocked exit(%d) from VGuard", status);
+        return;
+    }
+    if (orig_exit_vg) orig_exit_vg(status);
+}
+
+// Hook _exit() as well
+static void (*orig__exit_vg)(int status);
+static void hook__exit_vg(int status) {
+    if (PXJBShouldBypassCached() && status != 0) {
+        PXLog(@"[JailbreakBypass] Blocked _exit(%d) from VGuard", status);
+        return;
+    }
+    if (orig__exit_vg) orig__exit_vg(status);
+}
+
+void PXJBInstallVGuardBypass(void) {
+    void *sym = NULL;
+    
+    // Hook abort
+    sym = FindSymbol(NULL, "abort");
+    if (sym) MSHookFunction(sym, (void *)hook_abort, (void **)&orig_abort);
+    
+    // Hook raise
+    sym = FindSymbol(NULL, "raise");
+    if (sym) MSHookFunction(sym, (void *)hook_raise, (void **)&orig_raise);
+    
+    // Hook exit
+    sym = FindSymbol(NULL, "exit");
+    if (sym) MSHookFunction(sym, (void *)hook_exit_vg, (void **)&orig_exit_vg);
+    
+    // Hook _exit
+    sym = FindSymbol(NULL, "_exit");
+    if (sym) MSHookFunction(sym, (void *)hook__exit_vg, (void **)&orig__exit_vg);
+    
+    PXLog(@"[JailbreakBypass] VGuard bypass hooks installed");
+}
+
+// VGuard ObjC class hooks
+%hook v_VPrivateUtility
+
+// Block the exception handler that calls abort()
++ (void)vGuardExceptionHandler:(id)arg1 {
+    if (PXJBShouldBypassCached()) {
+        PXLog(@"[JailbreakBypass] Blocked v_VPrivateUtility vGuardExceptionHandler");
+        return;
+    }
+    %orig;
+}
+
++ (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isJailBroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)checkJailbreak { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)detectJailbreak { if (PXJBShouldBypassCached()) return NO; return %orig; }
+
+%end
+
+%hook VGuard
+
++ (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
+- (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isDeviceRooted { if (PXJBShouldBypassCached()) return NO; return %orig; }
+- (BOOL)isDeviceRooted { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isDebuggerAttached { if (PXJBShouldBypassCached()) return NO; return %orig; }
+- (BOOL)isDebuggerAttached { if (PXJBShouldBypassCached()) return NO; return %orig; }
+
+%end
+
+%hook VOSIntegrity
+
++ (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
+- (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isDeviceCompromised { if (PXJBShouldBypassCached()) return NO; return %orig; }
+- (BOOL)isDeviceCompromised { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)checkIntegrity { if (PXJBShouldBypassCached()) return YES; return %orig; }
+- (BOOL)checkIntegrity { if (PXJBShouldBypassCached()) return YES; return %orig; }
+
+%end
+
+%hook SecurityCheck
+
++ (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
+- (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isJailBroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
+- (BOOL)isJailBroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isRooted { if (PXJBShouldBypassCached()) return NO; return %orig; }
+- (BOOL)isRooted { if (PXJBShouldBypassCached()) return NO; return %orig; }
+
+%end
+
+%hook DeviceIntegrityChecker
+
++ (BOOL)isDeviceCompromised { if (PXJBShouldBypassCached()) return NO; return %orig; }
+- (BOOL)isDeviceCompromised { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
+- (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
+
+%end
+
+// Initialize VGuard bypass - called from main %ctor
+__attribute__((constructor)) static void PXJBVGuardCtorInit(void) {
+    @autoreleasepool {
+        if (PXJBIsCriticalProcess()) return;
+        
+        // Check if this is a banking app that uses VGuard
+        NSString *bundleID = PXMainBundleID();
+        if ([bundleID isEqualToString:@"com.mbmobile"] ||      // MB Bank
+            [bundleID hasPrefix:@"com.vietcombank."] ||        // Vietcombank
+            [bundleID hasPrefix:@"com.techcombank."] ||        // Techcombank
+            [bundleID hasPrefix:@"com.bidv."] ||               // BIDV
+            [bundleID hasPrefix:@"com.vpbank."] ||             // VPBank
+            [bundleID hasPrefix:@"vn.com.acb."] ||             // ACB
+            [bundleID hasPrefix:@"com.sacombank."]) {          // Sacombank
+            PXJBInstallVGuardBypass();
+            PXLog(@"[JailbreakBypass] VGuard bypass enabled for %@", bundleID);
+        }
+    }
+}
