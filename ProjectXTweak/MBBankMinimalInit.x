@@ -9,6 +9,11 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#if __has_include(<sys/ucontext.h>)
+#include <sys/ucontext.h>
+#elif __has_include(<ucontext.h>)
+#include <ucontext.h>
+#endif
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -138,10 +143,11 @@ static int PXReadMode(void) {
     buf[n] = '\0';
     // Parse int
     int v = atoi(buf);
+    // -4: install SIGILL handler only
     // -3: hook task_info(TASK_DYLD_INFO) sanitize only
     // -2: install nothing (injection-only test)
     // -1: patch pthread_mach_thread_np only
-    if (v < -3) v = -3;
+    if (v < -4) v = -4;
     if (v > 4) v = 4;
     return v;
 }
@@ -152,6 +158,46 @@ static mach_port_t hook_pthread_mach_thread_np(pthread_t thread) {
     (void)thread;
     // Avoid calling the original: in the failing case, the stub itself traps.
     return mach_thread_self();
+}
+
+// --- SIGILL recovery (best-effort) ---
+static void PXSigillHandler(int sig, siginfo_t *info, void *uap) {
+    (void)info;
+    if (sig != SIGILL || !uap) return;
+
+#if defined(__aarch64__)
+    ucontext_t *uc = (ucontext_t *)uap;
+    // Darwin arm64 layout
+    uintptr_t pc = 0;
+    uintptr_t lr = 0;
+    uintptr_t x0 = 0;
+
+    // These fields exist on iOS arm64.
+    pc = (uintptr_t)uc->uc_mcontext->__ss.__pc;
+    lr = (uintptr_t)uc->uc_mcontext->__ss.__lr;
+    x0 = (uintptr_t)uc->uc_mcontext->__ss.__x[0];
+
+    char buf[256];
+    (void)snprintf(buf, sizeof(buf), "SIGILL caught pc=0x%lx lr=0x%lx x0=0x%lx", (unsigned long)pc, (unsigned long)lr, (unsigned long)x0);
+    PXWriteLine(buf);
+
+    // Treat this like a forced crash. Skip to LR and return a benign value.
+    if (lr != 0) {
+        uc->uc_mcontext->__ss.__x[0] = (uint64_t)mach_thread_self();
+        uc->uc_mcontext->__ss.__pc = (uint64_t)lr;
+        return;
+    }
+#endif
+}
+
+static void PXInstallSigillHandler(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = PXSigillHandler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGILL, &sa, NULL);
+    PXWriteLine("installed SIGILL handler");
 }
 
 // --- dyld_all_image_infos sanitization via task_info(TASK_DYLD_INFO) ---
@@ -574,6 +620,13 @@ static void PXInstallMBBankMinimal(void) {
 
     if (mode == -2) {
         PXWriteLine("mode -2: no hooks installed");
+        PXWriteLine("[ProjectX] MBBankMinimalInit v3 installed");
+        return;
+    }
+
+    if (mode == -4) {
+        PXWriteLine("mode -4: SIGILL handler only");
+        PXInstallSigillHandler();
         PXWriteLine("[ProjectX] MBBankMinimalInit v3 installed");
         return;
     }
