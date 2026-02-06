@@ -23,6 +23,15 @@
 
 #include <mach-o/dyld.h>
 #include <mach/mach.h>
+#if __has_include(<mach/task_info.h>)
+#include <mach/task_info.h>
+#endif
+#if __has_include(<mach/mach_vm.h>)
+#include <mach/mach_vm.h>
+#endif
+#if __has_include(<mach-o/dyld_images.h>)
+#include <mach-o/dyld_images.h>
+#endif
 
 #import <objc/runtime.h>
 
@@ -132,9 +141,10 @@ static int PXReadMode(void) {
     buf[n] = '\0';
     // Parse int
     int v = atoi(buf);
+    // -3: hook task_info(TASK_DYLD_INFO) sanitize only
     // -2: install nothing (injection-only test)
     // -1: patch pthread_mach_thread_np only
-    if (v < -2) v = -2;
+    if (v < -3) v = -3;
     if (v > 4) v = 4;
     return v;
 }
@@ -145,6 +155,121 @@ static mach_port_t hook_pthread_mach_thread_np(pthread_t thread) {
     (void)thread;
     // Avoid calling the original: in the failing case, the stub itself traps.
     return mach_thread_self();
+}
+
+// --- dyld_all_image_infos sanitization via task_info(TASK_DYLD_INFO) ---
+static kern_return_t (*orig_task_info)(task_t, task_flavor_t, task_info_t, mach_msg_type_number_t *);
+static const struct dyld_all_image_infos *(*orig__dyld_get_all_image_infos)(void);
+
+static const struct dyld_all_image_infos *gSanitizedInfos = NULL;
+static struct dyld_image_info *gSanitizedImages = NULL;
+static uint32_t gSanitizedCount = 0;
+static const struct dyld_image_info *gLastSrcArray = NULL;
+static uint32_t gLastSrcCount = 0;
+
+static bool PXShouldHideSubstrateCyOnly(const char *path) {
+    if (!path || !path[0]) return false;
+    // Keep narrow to substrate/cy as requested.
+    if (PXStrContainsNoCaseC(path, "/usr/lib/substrate/")) return true;
+    if (PXStrContainsNoCaseC(path, "/library/caches/cy-")) return true;
+    if (PXStrContainsNoCaseC(path, "substrateinserter")) return true;
+    if (PXStrContainsNoCaseC(path, "substratebootstrap")) return true;
+    if (PXStrContainsNoCaseC(path, "substrateloader")) return true;
+    if (PXStrContainsNoCaseC(path, "libsubstrate")) return true;
+    // Some caches embed the cy- token without full path.
+    if (PXStrContainsNoCaseC(path, "cy-")) return true;
+    return false;
+}
+
+static const struct dyld_all_image_infos *PXBuildSanitizedInfos(const struct dyld_all_image_infos *src) {
+    if (!src) return NULL;
+    const struct dyld_image_info *arr = src->infoArray;
+    uint32_t cnt = (uint32_t)src->infoArrayCount;
+    if (!arr || cnt == 0) return src;
+
+    if (gSanitizedInfos && gSanitizedImages && gLastSrcArray == arr && gLastSrcCount == cnt) {
+        return gSanitizedInfos;
+    }
+
+    // Free previous cache.
+    if (gSanitizedInfos) {
+        free((void *)gSanitizedInfos);
+        gSanitizedInfos = NULL;
+    }
+    if (gSanitizedImages) {
+        free(gSanitizedImages);
+        gSanitizedImages = NULL;
+    }
+    gSanitizedCount = 0;
+
+    struct dyld_image_info *filtered = (struct dyld_image_info *)calloc(cnt, sizeof(struct dyld_image_info));
+    if (!filtered) return src;
+
+    uint32_t j = 0;
+    for (uint32_t i = 0; i < cnt; i++) {
+        const char *p = (const char *)arr[i].imageFilePath;
+        if (PXShouldHideSubstrateCyOnly(p)) continue;
+        filtered[j++] = arr[i];
+    }
+
+    struct dyld_all_image_infos *copy = (struct dyld_all_image_infos *)malloc(sizeof(struct dyld_all_image_infos));
+    if (!copy) {
+        free(filtered);
+        return src;
+    }
+    memcpy(copy, src, sizeof(struct dyld_all_image_infos));
+    copy->infoArray = filtered;
+    copy->infoArrayCount = j;
+
+    gSanitizedInfos = copy;
+    gSanitizedImages = filtered;
+    gSanitizedCount = j;
+    gLastSrcArray = arr;
+    gLastSrcCount = cnt;
+
+    return gSanitizedInfos;
+}
+
+static kern_return_t hook_task_info(task_t target_task, task_flavor_t flavor, task_info_t task_info_out, mach_msg_type_number_t *task_info_outCnt) {
+    if (!orig_task_info) return KERN_INVALID_ARGUMENT;
+    kern_return_t kr = orig_task_info(target_task, flavor, task_info_out, task_info_outCnt);
+    if (kr != KERN_SUCCESS) return kr;
+
+    if (target_task != mach_task_self()) return kr;
+#ifdef TASK_DYLD_INFO
+    if (flavor != TASK_DYLD_INFO) return kr;
+#else
+    return kr;
+#endif
+
+    if (!task_info_out || !task_info_outCnt) return kr;
+    if (*task_info_outCnt < TASK_DYLD_INFO_COUNT) return kr;
+
+    task_dyld_info_data_t *dyldInfo = (task_dyld_info_data_t *)task_info_out;
+    const struct dyld_all_image_infos *src = (const struct dyld_all_image_infos *)(uintptr_t)dyldInfo->all_image_info_addr;
+    const struct dyld_all_image_infos *san = PXBuildSanitizedInfos(src);
+    if (san) {
+        // Log caller + before/after counts (best-effort).
+        void *ret = __builtin_return_address(0);
+        Dl_info di;
+        const char *caller = NULL;
+        if (dladdr(ret, &di) && di.dli_fname) caller = di.dli_fname;
+        char buf[512];
+        uint32_t before = src ? (uint32_t)src->infoArrayCount : 0;
+        uint32_t after = (uint32_t)san->infoArrayCount;
+        (void)snprintf(buf, sizeof(buf), "TASK_DYLD_INFO caller=%s before=%u after=%u", caller ? caller : "(null)", before, after);
+        PXWriteLine(buf);
+
+        dyldInfo->all_image_info_addr = (mach_vm_address_t)(uintptr_t)san;
+        // Keep size unchanged to reduce suspicion.
+    }
+    return kr;
+}
+
+static const struct dyld_all_image_infos *hook__dyld_get_all_image_infos(void) {
+    const struct dyld_all_image_infos *src = orig__dyld_get_all_image_infos ? orig__dyld_get_all_image_infos() : NULL;
+    const struct dyld_all_image_infos *san = PXBuildSanitizedInfos(src);
+    return san ? san : src;
 }
 
 // --- libc file probes ---
@@ -458,6 +583,29 @@ static void PXInstallMBBankMinimal(void) {
 
     // Install hooks via RTLD_DEFAULT (symbols are in process images)
     void *sym = NULL;
+
+    // Optional: sanitize TASK_DYLD_INFO very early. This is the main bypass for die-on-injection.
+    if (mode == -3 || mode >= 0) {
+        PXWriteLine("install task_info(TASK_DYLD_INFO) sanitizer");
+        sym = dlsym(RTLD_DEFAULT, "task_info");
+        if (sym) {
+            MSHookFunction(sym, (void *)hook_task_info, (void **)&orig_task_info);
+        } else {
+            PXWriteLine("task_info symbol not found");
+        }
+
+        sym = dlsym(RTLD_DEFAULT, "_dyld_get_all_image_infos");
+        if (sym) {
+            MSHookFunction(sym, (void *)hook__dyld_get_all_image_infos, (void **)&orig__dyld_get_all_image_infos);
+            PXWriteLine("hooked _dyld_get_all_image_infos");
+        }
+    }
+
+    if (mode == -3) {
+        PXWriteLine("mode -3: task_info sanitizer only");
+        PXWriteLine("[ProjectX] MBBankMinimalInit v3 installed");
+        return;
+    }
 
     if (mode == -1) {
         PXWriteLine("mode -1: patch pthread_mach_thread_np only");
