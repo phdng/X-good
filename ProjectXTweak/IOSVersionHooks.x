@@ -223,7 +223,6 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
     @try {
         // Basic validation
         if (!bundleID) {
-            NSLog(@"[iosversion] Skipping iOS version spoofing for nil bundleID");
             return NO;
         }
 
@@ -259,13 +258,8 @@ static BOOL shouldSpoofForBundle(NSString *bundleID) {
         cachedBundleDecisions[bundleID] = @(isScoped);
         cachedBundleDecisions[[bundleID stringByAppendingString:@"_timestamp"]] = [NSDate date];
         
-        if (isScoped) {
-            NSLog(@"[iosversion] iOS Version spoofing enabled for %@", bundleID);
-        }
-        
         return isScoped;
     } @catch (NSException *e) {
-        NSLog(@"[iosversion] Error in shouldSpoofForBundle: %@", e);
         return NO; // Default to NO for safety
     }
 }
@@ -895,22 +889,15 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
         if (shouldSpoofForBundle(bundleID)) {
             NSString *spoofedVersion = getSpoofedSystemVersion();
             if (spoofedVersion) {
-                NSOperatingSystemVersion originalVersion = %orig;
                 NSOperatingSystemVersion spoofedStructVersion = getOperatingSystemVersion(spoofedVersion);
                 
-                NSLog(@"[iosversion] NSProcessInfo.operatingSystemVersion: %ld.%ld.%ld → %ld.%ld.%ld", 
-                      (long)originalVersion.majorVersion, 
-                      (long)originalVersion.minorVersion, 
-                      (long)originalVersion.patchVersion,
-                      (long)spoofedStructVersion.majorVersion, 
-                      (long)spoofedStructVersion.minorVersion, 
-                      (long)spoofedStructVersion.patchVersion);
+                // Avoid NSLog here: can run early and cause instability.
                 
                 return spoofedStructVersion;
             }
         }
     } @catch (NSException *e) {
-        NSLog(@"[iosversion] Error in operatingSystemVersion hook: %@", e);
+        (void)e;
     }
     return %orig;
 }
@@ -932,16 +919,13 @@ static void modifyUserAgentString(NSString **userAgentString, NSString *original
                               (spoofedStructVersion.minorVersion == version.minorVersion) && 
                               (spoofedStructVersion.patchVersion >= version.patchVersion));
                 
-                BOOL originalResult = %orig;
-                NSLog(@"[iosversion] NSProcessInfo.isOperatingSystemAtLeastVersion: %ld.%ld.%ld, original: %d → spoofed: %d", 
-                      (long)version.majorVersion, (long)version.minorVersion, (long)version.patchVersion,
-                      originalResult, result);
+                // Avoid NSLog here: can run early and cause instability.
                 
                 return result;
             }
         }
     } @catch (NSException *e) {
-        NSLog(@"[iosversion] Error in isOperatingSystemAtLeastVersion hook: %@", e);
+        (void)e;
     }
     return %orig;
 }
@@ -1873,6 +1857,13 @@ static CFTypeRef (*original_CFBundleGetValueForInfoDictionaryKey)(CFBundleRef bu
 CFTypeRef replaced_CFBundleGetValueForInfoDictionaryKey(CFBundleRef bundle, CFStringRef key) {
     @try {
         if (!bundle || !key) return NULL;
+
+        // Only intercept keys we actively spoof.
+        BOOL isAppVersionKey = CFEqual(key, CFSTR("CFBundleShortVersionString")) || CFEqual(key, CFSTR("CFBundleVersion"));
+        BOOL isSystemVersionKey = CFEqual(key, CFSTR("MinimumOSVersion")) || CFEqual(key, CFSTR("DTPlatformVersion")) || CFEqual(key, CFSTR("DTSDKName"));
+        if (!isAppVersionKey && !isSystemVersionKey) {
+            return original_CFBundleGetValueForInfoDictionaryKey ? original_CFBundleGetValueForInfoDictionaryKey(bundle, key) : NULL;
+        }
         
         // Get the bundle ID for CFBundle
         CFStringRef bundleID = CFBundleGetIdentifier(bundle);
@@ -1880,7 +1871,7 @@ CFTypeRef replaced_CFBundleGetValueForInfoDictionaryKey(CFBundleRef bundle, CFSt
         
         if (shouldSpoofForBundle(nsBundleID)) {
             // App-specific version/build spoofing (only for main bundle)
-            if (CFEqual(key, CFSTR("CFBundleShortVersionString")) || CFEqual(key, CFSTR("CFBundleVersion"))) {
+            if (isAppVersionKey) {
                 NSString *mainBundleID = getCurrentBundleID();
                 if (mainBundleID.length && [nsBundleID isEqualToString:mainBundleID]) {
                     NSString *spoofVer = nil;
@@ -1897,16 +1888,9 @@ CFTypeRef replaced_CFBundleGetValueForInfoDictionaryKey(CFBundleRef bundle, CFSt
             }
 
             // Check for system version keys
-            if (CFEqual(key, CFSTR("MinimumOSVersion")) || 
-                CFEqual(key, CFSTR("DTPlatformVersion")) ||
-                CFEqual(key, CFSTR("DTSDKName"))) {
-                
+            if (isSystemVersionKey) {
                 NSString *spoofedVersion = getSpoofedSystemVersion();
                 if (spoofedVersion) {
-                    // Log what we're spoofing
-                    NSLog(@"[iosversion] 💉 Spoofing %@ for bundle %@ to %@", 
-                          (__bridge NSString*)key, nsBundleID, spoofedVersion);
-                    
                     // Create a CFString from our spoofed version
                     if (CFEqual(key, CFSTR("DTPlatformVersion")) || 
                         CFEqual(key, CFSTR("DTSDKName"))) {
@@ -1922,7 +1906,7 @@ CFTypeRef replaced_CFBundleGetValueForInfoDictionaryKey(CFBundleRef bundle, CFSt
             }
         }
     } @catch (NSException *e) {
-        NSLog(@"[iosversion] ❌ Error in CFBundleGetValueForInfoDictionaryKey hook: %@", e);
+        // Avoid logging here: this hook can run extremely early.
     }
     
     // Call original function if available, otherwise return NULL
@@ -1936,7 +1920,6 @@ CFTypeRef replaced_CFBundleGetValueForInfoDictionaryKey(CFBundleRef bundle, CFSt
             return CFStringCreateWithCString(NULL, [actualVersion UTF8String], kCFStringEncodingUTF8);
         }
         
-        NSLog(@"[iosversion] ℹ️ No original function for CFBundleGetValueForInfoDictionaryKey, returning NULL");
         return NULL;
     }
 }

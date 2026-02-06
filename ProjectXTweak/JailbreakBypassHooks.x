@@ -61,6 +61,24 @@ struct dl_phdr_info {
 #endif
 #define PXLog(...) do {} while(0)
 
+// Safe debug logging (file write) to avoid NSLog/CFLog during early init.
+static const char *PXJBDebugLogPath(void) {
+    const char *tmp = getenv("TMPDIR");
+    if (tmp && tmp[0] != '\0') return tmp;
+    return "/tmp/";
+}
+
+static void PXJBDebugWriteLine(const char *line) {
+    if (!line) return;
+    char path[512];
+    (void)snprintf(path, sizeof(path), "%s%s", PXJBDebugLogPath(), "projectx_jb_debug.log");
+    int fd = open(path, O_CREAT | O_WRONLY | O_APPEND, 0644);
+    if (fd < 0) return;
+    (void)write(fd, line, (size_t)strlen(line));
+    (void)write(fd, "\n", 1);
+    (void)close(fd);
+}
+
 @interface IdentifierManager : NSObject
 + (instancetype)sharedManager;
 - (BOOL)isApplicationEnabled:(NSString *)bundleID;
@@ -288,7 +306,9 @@ static void PXJBLogBlockedOncePerSecond(const char *what, const char *detail) {
     last = now;
     if (!what) what = "(unknown)";
     if (!detail) detail = "";
-    PXLog(@"[JailbreakBypass][debug] blocked %s %s", what, detail);
+    char buf[768];
+    (void)snprintf(buf, sizeof(buf), "[JailbreakBypass][debug] blocked %s %s", what, detail);
+    PXJBDebugWriteLine(buf);
 }
 
 static BOOL PXJBSyscallBypassEnabled(void) {
