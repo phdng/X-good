@@ -79,6 +79,13 @@ static void PXJBDebugWriteLine(const char *line) {
     (void)close(fd);
 }
 
+__attribute__((constructor(101)))
+static void PXJBDebugEarlyMarker(void) {
+    // Best-effort marker so we can tell the dylib loaded at all.
+    // Do not gate on scope/bundle; keep this extremely small.
+    PXJBDebugWriteLine("[JailbreakBypass][debug] dylib loaded");
+}
+
 @interface IdentifierManager : NSObject
 + (instancetype)sharedManager;
 - (BOOL)isApplicationEnabled:(NSString *)bundleID;

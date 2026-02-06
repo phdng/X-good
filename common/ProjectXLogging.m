@@ -4,6 +4,13 @@
 
 // Global logging function
 void PXLog(NSString *format, ...) {
+    // Some protected apps (e.g., MB Bank) have been observed to crash (SIGILL)
+    // when logging occurs during early init. Disable ProjectX logging there.
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
+
     static NSDateFormatter *dateFormatter = nil;
     static dispatch_once_t onceToken;
     dispatch_once(&onceToken, ^{
