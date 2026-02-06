@@ -14,6 +14,7 @@
 #import <stdlib.h>
 #import <spawn.h>
 #import <signal.h>
+#import <pthread.h>
 #import <sys/stat.h>
 #import <sys/socket.h>
 #import <sys/un.h>
@@ -2273,11 +2274,35 @@ void PXJBInstallDyldHooks(void) {
 // Flag to indicate VGuard bypass is active for this process
 static volatile BOOL gVGuardBypassActive = NO;
 
+// Helper to check if current app is MB Bank (for emergency fallback)
+static BOOL PXJBIsMBBank(void) {
+    static BOOL checked = NO;
+    static BOOL isMBBank = NO;
+    if (!checked) {
+        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
+        isMBBank = [bundleID isEqualToString:@"com.mbmobile"];
+        checked = YES;
+    }
+    return isMBBank;
+}
+
+// Hook pthread_kill to block SIGABRT (this is what __abort uses internally)
+static int (*orig_pthread_kill)(pthread_t, int);
+static int hook_pthread_kill(pthread_t thread, int sig) {
+    if (sig == SIGABRT) {
+        if (gVGuardBypassActive || gDyldHooksEnabled || PXJBIsMBBank()) {
+            PXLog(@"[JailbreakBypass] Blocked pthread_kill(SIGABRT)");
+            return 0;
+        }
+    }
+    return orig_pthread_kill ? orig_pthread_kill(thread, sig) : -1;
+}
+
 // Hook abort() to prevent VGuard from crashing the app
 static void (*orig_abort)(void);
 static void hook_abort(void) {
-    // Block abort if any bypass is enabled
-    if (gVGuardBypassActive || gDyldHooksEnabled || PXJBShouldBypassCached()) {
+    // Block abort for banking apps
+    if (gVGuardBypassActive || gDyldHooksEnabled || PXJBShouldBypassCached() || PXJBIsMBBank()) {
         PXLog(@"[JailbreakBypass] Blocked abort() call");
         return;
     }
@@ -2287,10 +2312,10 @@ static void hook_abort(void) {
 // Hook raise() which may also be used to terminate
 static int (*orig_raise)(int sig);
 static int hook_raise(int sig) {
-    if (gVGuardBypassActive) {
+    if (gVGuardBypassActive || PXJBIsMBBank()) {
         // Block SIGABRT (6), SIGKILL (9), SIGTERM (15)
         if (sig == SIGABRT || sig == SIGKILL || sig == SIGTERM) {
-            PXLog(@"[JailbreakBypass] Blocked raise(%d) from VGuard", sig);
+            PXLog(@"[JailbreakBypass] Blocked raise(%d)", sig);
             return 0;
         }
     }
@@ -2514,6 +2539,8 @@ __attribute__((constructor(101))) static void PXJBBankingAppCtorInit(void) {
         if (sym) MSHookFunction(sym, (void *)hook_abort, (void **)&orig_abort);
         sym = FindSymbol(NULL, "raise");
         if (sym) MSHookFunction(sym, (void *)hook_raise, (void **)&orig_raise);
+        sym = FindSymbol(NULL, "pthread_kill");
+        if (sym) MSHookFunction(sym, (void *)hook_pthread_kill, (void **)&orig_pthread_kill);
         sym = FindSymbol(NULL, "exit");
         if (sym) MSHookFunction(sym, (void *)hook_exit_vg, (void **)&orig_exit_vg);
         sym = FindSymbol(NULL, "_exit");
