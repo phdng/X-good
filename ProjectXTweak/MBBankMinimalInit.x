@@ -143,11 +143,12 @@ static int PXReadMode(void) {
     buf[n] = '\0';
     // Parse int
     int v = atoi(buf);
+    // -5: SIGILL handler + TASK_DYLD_INFO sanitizer only
     // -4: install SIGILL handler only
     // -3: hook task_info(TASK_DYLD_INFO) sanitize only
     // -2: install nothing (injection-only test)
     // -1: patch pthread_mach_thread_np only
-    if (v < -4) v = -4;
+    if (v < -5) v = -5;
     if (v > 4) v = 4;
     return v;
 }
@@ -161,6 +162,33 @@ static mach_port_t hook_pthread_mach_thread_np(pthread_t thread) {
 }
 
 // --- SIGILL recovery (best-effort) ---
+static struct sigaction gPrevSigill;
+
+static bool PXIsPthreadMachThreadStub(uintptr_t pc) {
+    Dl_info di;
+    if (!dladdr((void *)pc, &di)) return false;
+    if (di.dli_sname && strstr(di.dli_sname, "pthread_mach_thread_np")) return true;
+    if (di.dli_fname && PXStrContainsNoCaseC(di.dli_fname, "libsystem_pthread")) return true;
+    return false;
+}
+
+static void PXSigillChainOrDie(int sig, siginfo_t *info, void *uap) {
+    if (gPrevSigill.sa_flags & SA_SIGINFO) {
+        if (gPrevSigill.sa_sigaction) {
+            gPrevSigill.sa_sigaction(sig, info, uap);
+            return;
+        }
+    } else {
+        if (gPrevSigill.sa_handler && gPrevSigill.sa_handler != SIG_DFL && gPrevSigill.sa_handler != SIG_IGN) {
+            gPrevSigill.sa_handler(sig);
+            return;
+        }
+    }
+    // Default: re-raise to terminate.
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
 static void PXSigillHandler(int sig, siginfo_t *info, void *uap) {
     (void)info;
     if (sig != SIGILL || !uap) return;
@@ -177,16 +205,23 @@ static void PXSigillHandler(int sig, siginfo_t *info, void *uap) {
     lr = (uintptr_t)uc->uc_mcontext->__ss.__lr;
     x0 = (uintptr_t)uc->uc_mcontext->__ss.__x[0];
 
+    if (!PXIsPthreadMachThreadStub(pc)) {
+        PXSigillChainOrDie(sig, info, uap);
+        return;
+    }
+
     char buf[256];
     (void)snprintf(buf, sizeof(buf), "SIGILL caught pc=0x%lx lr=0x%lx x0=0x%lx", (unsigned long)pc, (unsigned long)lr, (unsigned long)x0);
     PXWriteLine(buf);
 
-    // Treat this like a forced crash. Skip to LR and return a benign value.
+    // Treat this like a forced crash. Skip to LR when possible; otherwise advance PC.
+    uc->uc_mcontext->__ss.__x[0] = (uint64_t)mach_thread_self();
     if (lr != 0) {
-        uc->uc_mcontext->__ss.__x[0] = (uint64_t)mach_thread_self();
         uc->uc_mcontext->__ss.__pc = (uint64_t)lr;
-        return;
+    } else {
+        uc->uc_mcontext->__ss.__pc = (uint64_t)(pc + 4);
     }
+    return;
 #endif
 }
 
@@ -196,7 +231,7 @@ static void PXInstallSigillHandler(void) {
     sa.sa_sigaction = PXSigillHandler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = SA_SIGINFO;
-    sigaction(SIGILL, &sa, NULL);
+    sigaction(SIGILL, &sa, &gPrevSigill);
     PXWriteLine("installed SIGILL handler");
 }
 
@@ -631,6 +666,27 @@ static void PXInstallMBBankMinimal(void) {
         return;
     }
 
+    if (mode == -5) {
+        PXWriteLine("mode -5: SIGILL + TASK_DYLD_INFO sanitizer only");
+        PXInstallSigillHandler();
+
+        PXWriteLine("install task_info(TASK_DYLD_INFO) sanitizer");
+        void *ts = dlsym(RTLD_DEFAULT, "task_info");
+        if (ts) {
+            MSHookFunction(ts, (void *)hook_task_info, (void **)&orig_task_info);
+        } else {
+            PXWriteLine("task_info symbol not found");
+        }
+        void *ai = dlsym(RTLD_DEFAULT, "_dyld_get_all_image_infos");
+        if (ai) {
+            MSHookFunction(ai, (void *)hook__dyld_get_all_image_infos, (void **)&orig__dyld_get_all_image_infos);
+            PXWriteLine("hooked _dyld_get_all_image_infos");
+        }
+
+        PXWriteLine("[ProjectX] MBBankMinimalInit v3 installed");
+        return;
+    }
+
     // Install hooks via RTLD_DEFAULT (symbols are in process images)
     void *sym = NULL;
 
@@ -652,6 +708,8 @@ static void PXInstallMBBankMinimal(void) {
     }
 
     if (mode == -3) {
+        PXWriteLine("install SIGILL handler (for early die-on-injection)");
+        PXInstallSigillHandler();
         PXWriteLine("mode -3: task_info sanitizer only");
         PXWriteLine("[ProjectX] MBBankMinimalInit v3 installed");
         return;
