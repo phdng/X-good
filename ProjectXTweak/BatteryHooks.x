@@ -1,6 +1,7 @@
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import <substrate.h>
+#include <string.h>
 #import "BatteryManager.h"
 #import "IdentifierManager.h"
 
@@ -210,6 +211,10 @@ static NSInteger hook_batteryState(UIDevice *self, SEL _cmd) {
 }
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         Class deviceClass = objc_getClass("UIDevice");
         if (deviceClass) {

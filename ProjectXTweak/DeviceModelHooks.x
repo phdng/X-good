@@ -5,6 +5,7 @@
 #import "ProjectXLogging.h"
 #import "HookOwnership.h"
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <UIKit/UIKit.h>
 #import <sys/utsname.h>
 #import <sys/sysctl.h>
@@ -887,6 +888,10 @@ static void logDeviceModelAccess(const char* method, NSString* bundleID) {
 }
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         PXLog(@"[model] Initializing device model spoofing hooks");
         

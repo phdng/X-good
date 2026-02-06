@@ -6,6 +6,7 @@
 #import <Foundation/Foundation.h>
 #import <objc/message.h>
 #import <syslog.h>
+#include <string.h>
 
 #import "PXScope.h"
 
@@ -65,6 +66,10 @@ static void PXDisableFIRPerformance(void) {
 
 __attribute__((constructor(101)))
 static void PXFirebasePerfDisableCtor(void) {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         // Try early (some apps start Firebase very early).
         if (PXIsInProjectXScope()) {

@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <UIKit/UIKit.h>
 #import <WebKit/WebKit.h>
 #import "ProjectXLogging.h"
@@ -470,6 +471,10 @@ static void refreshSettings(CFNotificationCenterRef center, void *observer, CFSt
 #pragma mark - Constructor
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         PXLog(@"[CanvasFingerprint] Initializing Canvas Fingerprint Protection hooks");
         BOOL allowSafari = PXAllowUnscopedSafariStack() && (isCanvasFingerprintProtectionEnabledForCurrentApp() || PXFullSpoofTestModeEnabled() || PXDisplayWebScreenSpoofEnabled());

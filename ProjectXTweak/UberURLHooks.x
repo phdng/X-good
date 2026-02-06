@@ -1,5 +1,6 @@
 // UberURLHooks.x - Low-level hooks for capturing Uber order IDs
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <UIKit/UIKit.h>
 #import <SystemConfiguration/SystemConfiguration.h>
 #import <netinet/in.h>
@@ -877,6 +878,10 @@ static void performDelayedSetup(void) {
 }
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     // Only hook in the Uber or DoorDash applications
     NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
     NSString *processName = [[[NSProcessInfo processInfo] processName] lowercaseString];

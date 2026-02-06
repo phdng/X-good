@@ -4,6 +4,7 @@
 #import "ProjectXLogging.h"
 #import "HookOwnership.h"
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <sys/mount.h>
 #import <dlfcn.h>
 #import <substrate.h>
@@ -988,6 +989,10 @@ static CFTypeRef replaced_IORegistryEntryCreateCFProperty(io_registry_entry_t en
 
 // Setup hooks - Use %ctor for constructor, runs when module loads
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         @try {
             PXLog(@"[StorageHooks] Initializing storage hooks");

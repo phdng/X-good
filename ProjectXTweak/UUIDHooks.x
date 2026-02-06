@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
@@ -1095,6 +1096,10 @@ static void setupAdditionalSystemUUIDHooks() {
 
 // Update constructor to initialize the additional hooks
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         // Delay hook initialization to ensure everything is properly set up
         // This helps avoid early hooking that might cause crashes

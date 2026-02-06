@@ -1,5 +1,6 @@
 // Test using +load method instead of constructor
 #import <Foundation/Foundation.h>
+#include <string.h>
 
 @interface AAA_TestLoader : NSObject
 @end
@@ -19,6 +20,10 @@
 // Constructor using __attribute__((constructor))
 __attribute__((constructor))
 static void AAA_TestCtor_init(void) {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     [@"AAA_TEST_CTOR_RAN" writeToFile:@"/var/mobile/Library/Logs/ProjectX/AAA_ctor_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [@"AAA_TEST_CTOR_RAN" writeToFile:@"/tmp/AAA_ctor_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     [@"AAA_TEST_CTOR_RAN" writeToFile:@"/var/mobile/AAA_ctor_test.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];

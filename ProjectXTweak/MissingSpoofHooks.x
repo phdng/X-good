@@ -4,6 +4,7 @@
 #import <substrate.h>
 #import <objc/runtime.h>
 #import <dlfcn.h>
+#include <string.h>
 #import "ProjectXLogging.h"
 
 #import "PXScope.h"
@@ -207,6 +208,10 @@ static id new_MTLCreateSystemDefaultDevice(void) {
 }
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         PXLog(@"[MissingHooks] Init");
         // Hook Metal Create function

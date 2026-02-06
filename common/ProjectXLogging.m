@@ -1,6 +1,7 @@
 #import "ProjectXLogging.h"
 #import <Foundation/Foundation.h>
 #import <os/log.h>
+#include <string.h>
 
 // Global logging function
 void PXLog(NSString *format, ...) {

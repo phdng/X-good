@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <UIKit/UIKit.h>
 #import <objc/runtime.h>
 #import "ProjectXLogging.h"
@@ -625,6 +626,10 @@ static BOOL isUUIDKey(NSString *key) {
 #pragma mark - Constructor
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         // Skip for system processes
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];

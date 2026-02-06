@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <UIKit/UIKit.h>
 #import <SystemConfiguration/CaptiveNetwork.h>
 #import <NetworkExtension/NetworkExtension.h>
@@ -771,6 +772,10 @@ static void settingsChanged(CFNotificationCenterRef center, void *observer, CFSt
 #pragma mark - Constructor
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         @try {
             PXLog(@"[WiFiHook] Initializing WiFi hooks");

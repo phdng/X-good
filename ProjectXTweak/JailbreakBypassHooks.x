@@ -1947,6 +1947,10 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
 %end
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         // Install C hooks unconditionally; gate inside hooks for scoped apps.
         if (PXJBIsCriticalProcess()) return;

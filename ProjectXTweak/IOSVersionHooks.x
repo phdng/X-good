@@ -12,6 +12,7 @@
 // #import <ellekit/ellekit.h> // Removed for rootful - using Substrate
 #import <mach/mach_time.h>
 #import <dispatch/dispatch.h>
+#include <string.h>
 
 #import "PXScope.h"
 
@@ -2013,6 +2014,10 @@ static BOOL isCriticalSystemProcess(NSString *bundleID) {
 }
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         // Get the bundle ID for scope checking
         NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];

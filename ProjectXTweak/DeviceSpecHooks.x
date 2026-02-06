@@ -5,6 +5,7 @@
 #import "ProjectXLogging.h"
 #import "HookOwnership.h"
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <UIKit/UIKit.h>
 #import <AVFoundation/AVFoundation.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -1168,6 +1169,10 @@ static void refreshCaches(CFNotificationCenterRef center, void *observer, CFStri
 #pragma mark - Constructor
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         @try {
             PXLog(@"[DeviceSpec] Initializing device specifications spoofing hooks");

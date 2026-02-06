@@ -3,6 +3,7 @@
 #import "ProfileManager.h"
 #import "ProjectXLogging.h"
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <sys/sysctl.h>
 #import <sys/time.h>
 #import <mach/mach.h>
@@ -593,6 +594,10 @@ static void installSystemCallHooks(void) {
 // This eliminates crashes in non-scoped apps
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         @try {
             NSString *bundleID = getCurrentBundleID();

@@ -1,5 +1,6 @@
 #import "DomainBlockingSettings.h"
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <sys/socket.h>
 #import <netdb.h>
 #import <arpa/inet.h>
@@ -648,6 +649,10 @@ static int hooked_getnameinfo(const struct sockaddr *sa, socklen_t salen, char *
 #pragma mark - Unified Constructor
 
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         // Initialize cache
         scopedAppsCache = [NSMutableDictionary dictionary];

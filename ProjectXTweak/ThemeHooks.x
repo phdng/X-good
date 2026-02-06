@@ -1,4 +1,5 @@
 #import <Foundation/Foundation.h>
+#include <string.h>
 #import <UIKit/UIKit.h>
 #import "ProjectXLogging.h"
 #import <objc/runtime.h>
@@ -458,6 +459,10 @@ static void themeSettingsChanged(CFNotificationCenterRef center, void *observer,
 
 // Constructor to initialize hooks
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
     @autoreleasepool {
         @try {
             PXLog(@"[ThemeHooks] Initializing theme hooks");

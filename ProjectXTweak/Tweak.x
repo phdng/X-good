@@ -3272,6 +3272,11 @@ static char* hook_GSSystemGetSerialNo(void) {
 
 // Constructor
 %ctor {
+    extern const char *__progname;
+    if (__progname && strcmp(__progname, "MB Bank") == 0) {
+        return;
+    }
+
     // VERIFICATION: Create flag file FIRST - before anything else that might crash
     [@"ctor_entry" writeToFile:@"/tmp/weaponx_ctor_started.txt" atomically:YES encoding:NSUTF8StringEncoding error:nil];
     
