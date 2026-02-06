@@ -2383,24 +2383,47 @@ void PXJBInstallVGuardBypass(void) {
 
 // Initialize Banking App bypass VERY EARLY using constructor priority
 // Priority 101 runs before most other constructors (lower = earlier)
+// Initialize Banking App bypass VERY EARLY using constructor priority
+// Priority 101 runs before most other constructors (lower = earlier)
 __attribute__((constructor(101))) static void PXJBBankingAppCtorInit(void) {
     // Use __progname to check bundle BEFORE NSBundle is fully initialized
     extern const char *__progname;
-    BOOL isMBBank = NO;
+    BOOL shouldInitBankingHooks = NO;
+    NSString *bundleID = nil;
     
+    // Check executable name first (fastest, no ObjC runtime needed)
     if (__progname) {
-        // Check for MB Bank - use strcmp for exact match or strstr for contains
         if (strcmp(__progname, "MB Bank") == 0 ||
             strstr(__progname, "MBBank") ||
             strstr(__progname, "mbmobile")) {
-            isMBBank = YES;
+            shouldInitBankingHooks = YES;
         }
     }
     
-    if (isMBBank) {
-        // Install abort hook IMMEDIATELY for banking apps
+    // If not detected by name, check Bundle ID (slower, but covers other apps)
+    if (!shouldInitBankingHooks) {
+        @autoreleasepool {
+            if (!PXJBIsCriticalProcess()) {
+                bundleID = PXMainBundleID();
+                if (bundleID) {
+                    if ([bundleID isEqualToString:@"com.mbmobile"] ||      // MB Bank
+                        [bundleID hasPrefix:@"com.vietcombank."] ||        // Vietcombank
+                        [bundleID hasPrefix:@"com.techcombank."] ||        // Techcombank
+                        [bundleID hasPrefix:@"com.bidv."] ||               // BIDV
+                        [bundleID hasPrefix:@"com.vpbank."] ||             // VPBank
+                        [bundleID hasPrefix:@"vn.com.acb."] ||             // ACB
+                        [bundleID hasPrefix:@"com.sacombank."]) {          // Sacombank
+                        shouldInitBankingHooks = YES;
+                    }
+                }
+            }
+        }
+    }
+    
+    if (shouldInitBankingHooks) {
         gVGuardBypassActive = YES;
         
+        // Install C hooks immediately to block abort()
         void *sym = FindSymbol(NULL, "abort");
         if (sym) MSHookFunction(sym, (void *)hook_abort, (void **)&orig_abort);
         sym = FindSymbol(NULL, "raise");
@@ -2410,31 +2433,14 @@ __attribute__((constructor(101))) static void PXJBBankingAppCtorInit(void) {
         sym = FindSymbol(NULL, "_exit");
         if (sym) MSHookFunction(sym, (void *)hook__exit_vg, (void **)&orig__exit_vg);
         
-        // Initialize ObjC hooks for security SDKs
+        // Initialize ObjC hooks - ONLY CALLED ONCE
         %init(VGuardHooks);
         %init(ZDefendHooks);
         
-        PXLog(@"[JailbreakBypass] Banking app bypass enabled for: %s", __progname);
-        return;
-    }
-    
-    // Fallback: check NSBundle for other banking apps
-    @autoreleasepool {
-        if (PXJBIsCriticalProcess()) return;
-        
-        NSString *bundleID = PXMainBundleID();
-        if ([bundleID isEqualToString:@"com.mbmobile"] ||      // MB Bank
-            [bundleID hasPrefix:@"com.vietcombank."] ||        // Vietcombank
-            [bundleID hasPrefix:@"com.techcombank."] ||        // Techcombank
-            [bundleID hasPrefix:@"com.bidv."] ||               // BIDV
-            [bundleID hasPrefix:@"com.vpbank."] ||             // VPBank
-            [bundleID hasPrefix:@"vn.com.acb."] ||             // ACB
-            [bundleID hasPrefix:@"com.sacombank."]) {          // Sacombank
-            
-            PXJBInstallVGuardBypass();
-            %init(VGuardHooks);
-            %init(ZDefendHooks);
+        if (bundleID) {
             PXLog(@"[JailbreakBypass] Banking bypass enabled for %@", bundleID);
+        } else {
+            PXLog(@"[JailbreakBypass] Banking bypass enabled for exec: %s", __progname);
         }
     }
 }
