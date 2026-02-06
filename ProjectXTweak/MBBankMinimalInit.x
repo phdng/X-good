@@ -26,9 +26,6 @@
 #if __has_include(<mach/task_info.h>)
 #include <mach/task_info.h>
 #endif
-#if __has_include(<mach/mach_vm.h>)
-#include <mach/mach_vm.h>
-#endif
 #if __has_include(<mach-o/dyld_images.h>)
 #include <mach-o/dyld_images.h>
 #endif
@@ -260,7 +257,7 @@ static kern_return_t hook_task_info(task_t target_task, task_flavor_t flavor, ta
         (void)snprintf(buf, sizeof(buf), "TASK_DYLD_INFO caller=%s before=%u after=%u", caller ? caller : "(null)", before, after);
         PXWriteLine(buf);
 
-        dyldInfo->all_image_info_addr = (mach_vm_address_t)(uintptr_t)san;
+        dyldInfo->all_image_info_addr = (typeof(dyldInfo->all_image_info_addr))(uintptr_t)san;
         // Keep size unchanged to reduce suspicion.
     }
     return kr;
