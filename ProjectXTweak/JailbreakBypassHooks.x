@@ -2186,12 +2186,17 @@ void PXJBInstallTaskInfoHook(void *sym) {
 // Used by banking apps like MB Bank (com.mbmobile)
 // ============================================================================
 
+// Flag to indicate VGuard bypass is active for this process
+static volatile BOOL gVGuardBypassActive = NO;
+
 // Hook abort() to prevent VGuard from crashing the app
 static void (*orig_abort)(void);
 static void hook_abort(void) {
-    if (PXJBShouldBypassCached()) {
+    // For VGuard-protected apps, ALWAYS block abort() when bypass is installed
+    if (gVGuardBypassActive) {
         PXLog(@"[JailbreakBypass] Blocked abort() call from VGuard");
         // Don't call abort - just return and let the app continue
+        // Use a long sleep + return to prevent the caller from retrying immediately
         return;
     }
     if (orig_abort) orig_abort();
@@ -2200,7 +2205,7 @@ static void hook_abort(void) {
 // Hook raise() which may also be used to terminate
 static int (*orig_raise)(int sig);
 static int hook_raise(int sig) {
-    if (PXJBShouldBypassCached()) {
+    if (gVGuardBypassActive) {
         // Block SIGABRT (6), SIGKILL (9), SIGTERM (15)
         if (sig == SIGABRT || sig == SIGKILL || sig == SIGTERM) {
             PXLog(@"[JailbreakBypass] Blocked raise(%d) from VGuard", sig);
@@ -2213,7 +2218,7 @@ static int hook_raise(int sig) {
 // Hook exit() to prevent app termination
 static void (*orig_exit_vg)(int status);
 static void hook_exit_vg(int status) {
-    if (PXJBShouldBypassCached() && status != 0) {
+    if (gVGuardBypassActive && status != 0) {
         PXLog(@"[JailbreakBypass] Blocked exit(%d) from VGuard", status);
         return;
     }
@@ -2223,7 +2228,7 @@ static void hook_exit_vg(int status) {
 // Hook _exit() as well
 static void (*orig__exit_vg)(int status);
 static void hook__exit_vg(int status) {
-    if (PXJBShouldBypassCached() && status != 0) {
+    if (gVGuardBypassActive && status != 0) {
         PXLog(@"[JailbreakBypass] Blocked _exit(%d) from VGuard", status);
         return;
     }
@@ -2231,6 +2236,9 @@ static void hook__exit_vg(int status) {
 }
 
 void PXJBInstallVGuardBypass(void) {
+    // Enable the bypass flag FIRST
+    gVGuardBypassActive = YES;
+    
     void *sym = NULL;
     
     // Hook abort
@@ -2249,7 +2257,7 @@ void PXJBInstallVGuardBypass(void) {
     sym = FindSymbol(NULL, "_exit");
     if (sym) MSHookFunction(sym, (void *)hook__exit_vg, (void **)&orig__exit_vg);
     
-    PXLog(@"[JailbreakBypass] VGuard bypass hooks installed");
+    PXLog(@"[JailbreakBypass] VGuard bypass hooks installed (abort blocked)");
 }
 
 // VGuard ObjC class hooks
@@ -2317,12 +2325,103 @@ void PXJBInstallVGuardBypass(void) {
 
 %end // %group VGuardHooks
 
-// Initialize VGuard bypass - called from main %ctor
-__attribute__((constructor)) static void PXJBVGuardCtorInit(void) {
+// ============================================================================
+// ZDefend (Zimperium) and MBRaspSdk Bypass Group
+// Used by MB Bank new versions
+// ============================================================================
+%group ZDefendHooks
+
+// Zimperium ZDefend hooks
+%hook ZDefend
+
++ (BOOL)isDeviceCompromised { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isDeviceCompromised { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)isTampered { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isTampered { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)isRooted { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isRooted { if (gVGuardBypassActive) return NO; return %orig; }
+
+%end
+
+// MB Bank RASP SDK hooks
+%hook MBRaspSdk
+
++ (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)checkSecurity { if (gVGuardBypassActive) return YES; return %orig; }
+- (BOOL)checkSecurity { if (gVGuardBypassActive) return YES; return %orig; }
++ (BOOL)isDeviceSecure { if (gVGuardBypassActive) return YES; return %orig; }
+- (BOOL)isDeviceSecure { if (gVGuardBypassActive) return YES; return %orig; }
+
+%end
+
+// LVerifier hooks  
+%hook LVerifier
+
++ (BOOL)verify { if (gVGuardBypassActive) return YES; return %orig; }
+- (BOOL)verify { if (gVGuardBypassActive) return YES; return %orig; }
++ (BOOL)isValid { if (gVGuardBypassActive) return YES; return %orig; }
+- (BOOL)isValid { if (gVGuardBypassActive) return YES; return %orig; }
++ (BOOL)isCompromised { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isCompromised { if (gVGuardBypassActive) return NO; return %orig; }
+
+%end
+
+// blueshield hooks
+%hook BlueShield
+
++ (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)checkIntegrity { if (gVGuardBypassActive) return YES; return %orig; }
+- (BOOL)checkIntegrity { if (gVGuardBypassActive) return YES; return %orig; }
+
+%end
+
+%end // %group ZDefendHooks
+
+// Initialize Banking App bypass VERY EARLY using constructor priority
+// Priority 101 runs before most other constructors (lower = earlier)
+__attribute__((constructor(101))) static void PXJBBankingAppCtorInit(void) {
+    // Use __progname to check bundle BEFORE NSBundle is fully initialized
+    extern const char *__progname;
+    BOOL isMBBank = NO;
+    
+    if (__progname) {
+        // Check for MB Bank - use strcmp for exact match or strstr for contains
+        if (strcmp(__progname, "MB Bank") == 0 ||
+            strstr(__progname, "MBBank") ||
+            strstr(__progname, "mbmobile")) {
+            isMBBank = YES;
+        }
+    }
+    
+    if (isMBBank) {
+        // Install abort hook IMMEDIATELY for banking apps
+        gVGuardBypassActive = YES;
+        
+        void *sym = FindSymbol(NULL, "abort");
+        if (sym) MSHookFunction(sym, (void *)hook_abort, (void **)&orig_abort);
+        sym = FindSymbol(NULL, "raise");
+        if (sym) MSHookFunction(sym, (void *)hook_raise, (void **)&orig_raise);
+        sym = FindSymbol(NULL, "exit");
+        if (sym) MSHookFunction(sym, (void *)hook_exit_vg, (void **)&orig_exit_vg);
+        sym = FindSymbol(NULL, "_exit");
+        if (sym) MSHookFunction(sym, (void *)hook__exit_vg, (void **)&orig__exit_vg);
+        
+        // Initialize ObjC hooks for security SDKs
+        %init(VGuardHooks);
+        %init(ZDefendHooks);
+        
+        PXLog(@"[JailbreakBypass] Banking app bypass enabled for: %s", __progname);
+        return;
+    }
+    
+    // Fallback: check NSBundle for other banking apps
     @autoreleasepool {
         if (PXJBIsCriticalProcess()) return;
         
-        // Check if this is a banking app that uses VGuard
         NSString *bundleID = PXMainBundleID();
         if ([bundleID isEqualToString:@"com.mbmobile"] ||      // MB Bank
             [bundleID hasPrefix:@"com.vietcombank."] ||        // Vietcombank
@@ -2334,7 +2433,9 @@ __attribute__((constructor)) static void PXJBVGuardCtorInit(void) {
             
             PXJBInstallVGuardBypass();
             %init(VGuardHooks);
-            PXLog(@"[JailbreakBypass] VGuard bypass enabled for %@", bundleID);
+            %init(ZDefendHooks);
+            PXLog(@"[JailbreakBypass] Banking bypass enabled for %@", bundleID);
         }
     }
 }
+
