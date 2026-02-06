@@ -2,11 +2,6 @@
 #import "IdentifierManager.h"
 #import "StorageManager.h"
 #import "ProjectXLogging.h"
-// DISABLE LOGGING FOR THIS FILE to prevent SIGILL during early init
-#ifdef PXLog
-#undef PXLog
-#endif
-#define PXLog(...) do {} while(0)
 #import "HookOwnership.h"
 #import <Foundation/Foundation.h>
 #import <sys/mount.h>
@@ -60,19 +55,7 @@ static NSDictionary *loadScopedApps(void);
 static BOOL isInScopedAppsList(void);
 
 // Get the current bundle ID
-// Get the current bundle ID
 static NSString *getCurrentBundleID(void) {
-    // Check __progname first for safety during early init
-    extern const char *__progname;
-    if (__progname) {
-        if (strcmp(__progname, "MB Bank") == 0 || 
-            strstr(__progname, "MBBank") || 
-            strstr(__progname, "mbmobile") ||
-            (strlen(__progname) >= 2 && __progname[0] == 'M' && __progname[1] == 'B')) {
-            return @"com.mbmobile"; // Hardcoded for safety
-        }
-    }
-
     @try {
         NSBundle *mainBundle = [NSBundle mainBundle];
         if (!mainBundle) {
@@ -312,15 +295,7 @@ static uint64_t calculateBlockCount(uint64_t bytes, uint32_t blockSize) {
 
 // Helper function to check if storage spoofing should be applied
 // This centralizes the bundleID checks to avoid repeating them in every hook
-// Helper function to check if storage spoofing should be applied
-// This centralizes the bundleID checks to avoid repeating them in every hook
 static BOOL shouldApplyStorageSpoofing() {
-    // Safety check: Don't run if Foundation isn't ready
-    if (!NSClassFromString(@"NSBundle")) return NO;
-    @try {
-        if (![NSBundle mainBundle]) return NO;
-    } @catch (NSException *e) { return NO; }
-
     static NSMutableDictionary *cachedDecisions = nil;
     static NSTimeInterval lastCleanupTime = 0;
     NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
