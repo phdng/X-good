@@ -2197,110 +2197,52 @@ void PXJBInstallTaskInfoHook(void *sym) {
 #include <mach-o/dyld.h>
 
 // Cache visible image indices
-static uint32_t *gVisibleImageIndices = NULL;
-static uint32_t gVisibleImageCount = 0;
-static uint32_t gLastRealImageCount = 0;
-static volatile BOOL gDyldHooksEnabled = NO;
-
-// Forward declare original function pointers
-static uint32_t (*orig_dyld_image_count)(void);
-static const char * (*orig_dyld_get_image_name)(uint32_t);
-
-static void PXJBRebuildVisibleImageMap(void) {
-    // Use ORIGINAL functions to avoid recursion
-    if (!orig_dyld_image_count || !orig_dyld_get_image_name) return;
-    uint32_t realCount = orig_dyld_image_count();
-    if (gVisibleImageIndices && gLastRealImageCount == realCount) return;
-    
-    if (gVisibleImageIndices) { free(gVisibleImageIndices); gVisibleImageIndices = NULL; }
-    gVisibleImageIndices = (uint32_t *)malloc(sizeof(uint32_t) * realCount);
-    if (!gVisibleImageIndices) { gVisibleImageCount = realCount; gLastRealImageCount = realCount; return; }
-    
-    uint32_t visibleIdx = 0;
-    for (uint32_t i = 0; i < realCount; i++) {
-        const char *name = orig_dyld_get_image_name(i);
-        if (!name) continue;
-        if (PXJBShouldHideImageName(name)) continue;
-        gVisibleImageIndices[visibleIdx++] = i;
-    }
-    gVisibleImageCount = visibleIdx;
-    gLastRealImageCount = realCount;
-}
-
-static uint32_t hook_dyld_image_count(void) {
-    if (!gDyldHooksEnabled || !orig_dyld_image_count) return orig_dyld_image_count ? orig_dyld_image_count() : 0;
-    PXJBRebuildVisibleImageMap();
-    return gVisibleImageCount;
-}
-
-static const char * hook_dyld_get_image_name(uint32_t image_index) {
-    if (!gDyldHooksEnabled || !orig_dyld_get_image_name) return orig_dyld_get_image_name ? orig_dyld_get_image_name(image_index) : NULL;
-    PXJBRebuildVisibleImageMap();
-    if (image_index >= gVisibleImageCount) return NULL;
-    return orig_dyld_get_image_name(gVisibleImageIndices[image_index]);
-}
-
-static const struct mach_header * (*orig_dyld_get_image_header)(uint32_t);
-static const struct mach_header * hook_dyld_get_image_header(uint32_t image_index) {
-    if (!gDyldHooksEnabled) return orig_dyld_get_image_header(image_index);
-    PXJBRebuildVisibleImageMap();
-    if (image_index >= gVisibleImageCount) return NULL;
-    return orig_dyld_get_image_header(gVisibleImageIndices[image_index]);
-}
-
-static intptr_t (*orig_dyld_get_image_vmaddr_slide)(uint32_t);
-static intptr_t hook_dyld_get_image_vmaddr_slide(uint32_t image_index) {
-    if (!gDyldHooksEnabled) return orig_dyld_get_image_vmaddr_slide(image_index);
-    PXJBRebuildVisibleImageMap();
-    if (image_index >= gVisibleImageCount) return 0;
-    return orig_dyld_get_image_vmaddr_slide(gVisibleImageIndices[image_index]);
-}
-
-void PXJBInstallDyldHooks(void) {
-    void *sym = dlsym(RTLD_DEFAULT, "_dyld_image_count");
-    if (sym) MSHookFunction(sym, (void *)hook_dyld_image_count, (void **)&orig_dyld_image_count);
-    sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_name");
-    if (sym) MSHookFunction(sym, (void *)hook_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
-    sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_header");
-    if (sym) MSHookFunction(sym, (void *)hook_dyld_get_image_header, (void **)&orig_dyld_get_image_header);
-    sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_vmaddr_slide");
-    if (sym) MSHookFunction(sym, (void *)hook_dyld_get_image_vmaddr_slide, (void **)&orig_dyld_get_image_vmaddr_slide);
-    gDyldHooksEnabled = YES;
-    // Note: Don't use PXLog here - CoreFoundation may not be ready during early init
-}
-
 // ============================================================================
 // VGuard SDK Bypass (V-Key V-OS Mobile App Protection)
 // Used by banking apps like MB Bank (com.mbmobile)
 // ============================================================================
 
-// Flag to indicate VGuard bypass is active for this process
+// Flag to indicate MB Bank RASP bypass is active for this process.
+// This is enabled only after we confirm bundle ID + scope settings.
 static volatile BOOL gVGuardBypassActive = NO;
 
-// Helper to check if current app is MB Bank (for emergency fallback)
-// Helper to check if current app is MB Bank (for emergency fallback)
-static BOOL PXJBIsMBBank(void) {
-    if (gVGuardBypassActive) return YES;
-    
-    // Use __progname check which is safe during early init
+static BOOL PXJBIsMBBankProcess(void) {
     extern const char *__progname;
-    if (__progname) {
-        if (strcmp(__progname, "MB Bank") == 0 || 
-            strstr(__progname, "MBBank") || 
-            strstr(__progname, "mbmobile") ||
-            (strlen(__progname) >= 2 && __progname[0] == 'M' && __progname[1] == 'B')) {
-            return YES;
-        }
-    }
+    return (__progname && strcmp(__progname, "MB Bank") == 0);
+}
+
+static BOOL PXJBIsMBBankBundleIDAvaliableAndMatch(void) {
+    NSString *bid = PXMainBundleID();
+    return ([bid isKindOfClass:[NSString class]] && [bid isEqualToString:@"com.mbmobile"]);
+}
+
+static BOOL PXJBIsRaspCallerReturnAddress(void *retAddr) {
+    if (!retAddr) return NO;
+    Dl_info info;
+    if (!dladdr(retAddr, &info) || !info.dli_fname) return NO;
+    // Only match the protection SDK images to reduce false positives.
+    const char *f = info.dli_fname;
+    if (PXStrContainsNoCase(f, "/vguard.framework/")) return YES;
+    if (PXStrContainsNoCase(f, "/vosintegrity")) return YES;
+    if (PXStrContainsNoCase(f, "/zdefend")) return YES;
+    if (PXStrContainsNoCase(f, "mbraspsdk")) return YES;
+    if (PXStrContainsNoCase(f, "deviceintegrity")) return YES;
     return NO;
+}
+
+static void PXJBUpdateMBBankBypassActive(void) {
+    if (!PXJBIsMBBankProcess()) return;
+    if (!PXJBIsMBBankBundleIDAvaliableAndMatch()) return;
+    // Respect user scope + global jb detection toggle.
+    gVGuardBypassActive = PXJBShouldBypassCached();
 }
 
 // Hook pthread_kill to block SIGABRT (this is what __abort uses internally)
 static int (*orig_pthread_kill)(pthread_t, int);
 static int hook_pthread_kill(pthread_t thread, int sig) {
-    if (sig == SIGABRT) {
-        if (gVGuardBypassActive || gDyldHooksEnabled || PXJBIsMBBank()) {
-            // Blocked - don't log here, CF may not be ready
+    if (sig == SIGABRT && gVGuardBypassActive) {
+        void *ret = __builtin_return_address(0);
+        if (PXJBIsRaspCallerReturnAddress(ret)) {
             return 0;
         }
     }
@@ -2310,9 +2252,11 @@ static int hook_pthread_kill(pthread_t thread, int sig) {
 // Hook abort() to prevent VGuard from crashing the app
 static void (*orig_abort)(void);
 static void hook_abort(void) {
-    // Block abort for banking apps - don't log, CF may not be ready
-    if (gVGuardBypassActive || gDyldHooksEnabled || PXJBShouldBypassCached() || PXJBIsMBBank()) {
-        return;
+    if (gVGuardBypassActive) {
+        void *ret = __builtin_return_address(0);
+        if (PXJBIsRaspCallerReturnAddress(ret)) {
+            return;
+        }
     }
     if (orig_abort) orig_abort();
 }
@@ -2320,10 +2264,9 @@ static void hook_abort(void) {
 // Hook raise() which may also be used to terminate
 static int (*orig_raise)(int sig);
 static int hook_raise(int sig) {
-    if (gVGuardBypassActive || PXJBIsMBBank()) {
-        // Block SIGABRT (6), SIGKILL (9), SIGTERM (15)
-        if (sig == SIGABRT || sig == SIGKILL || sig == SIGTERM) {
-            // Blocked - don't log, CF may not be ready
+    if (gVGuardBypassActive && (sig == SIGABRT || sig == SIGTERM)) {
+        void *ret = __builtin_return_address(0);
+        if (PXJBIsRaspCallerReturnAddress(ret)) {
             return 0;
         }
     }
@@ -2334,8 +2277,10 @@ static int hook_raise(int sig) {
 static void (*orig_exit_vg)(int status);
 static void hook_exit_vg(int status) {
     if (gVGuardBypassActive && status != 0) {
-        PXLog(@"[JailbreakBypass] Blocked exit(%d) from VGuard", status);
-        return;
+        void *ret = __builtin_return_address(0);
+        if (PXJBIsRaspCallerReturnAddress(ret)) {
+            return;
+        }
     }
     if (orig_exit_vg) orig_exit_vg(status);
 }
@@ -2344,35 +2289,32 @@ static void hook_exit_vg(int status) {
 static void (*orig__exit_vg)(int status);
 static void hook__exit_vg(int status) {
     if (gVGuardBypassActive && status != 0) {
-        PXLog(@"[JailbreakBypass] Blocked _exit(%d) from VGuard", status);
-        return;
+        void *ret = __builtin_return_address(0);
+        if (PXJBIsRaspCallerReturnAddress(ret)) {
+            return;
+        }
     }
     if (orig__exit_vg) orig__exit_vg(status);
 }
 
-void PXJBInstallVGuardBypass(void) {
-    // Enable the bypass flag FIRST
-    gVGuardBypassActive = YES;
-    
+static void PXJBInstallMBBankAntiTerminateHooks(void) {
+    if (!PXJBIsMBBankProcess()) return;
     void *sym = NULL;
-    
-    // Hook abort
+
     sym = FindSymbol(NULL, "abort");
     if (sym) MSHookFunction(sym, (void *)hook_abort, (void **)&orig_abort);
-    
-    // Hook raise
+
     sym = FindSymbol(NULL, "raise");
     if (sym) MSHookFunction(sym, (void *)hook_raise, (void **)&orig_raise);
-    
-    // Hook exit
+
+    sym = FindSymbol(NULL, "pthread_kill");
+    if (sym) MSHookFunction(sym, (void *)hook_pthread_kill, (void **)&orig_pthread_kill);
+
     sym = FindSymbol(NULL, "exit");
     if (sym) MSHookFunction(sym, (void *)hook_exit_vg, (void **)&orig_exit_vg);
-    
-    // Hook _exit
+
     sym = FindSymbol(NULL, "_exit");
     if (sym) MSHookFunction(sym, (void *)hook__exit_vg, (void **)&orig__exit_vg);
-    
-    PXLog(@"[JailbreakBypass] VGuard bypass hooks installed (abort blocked)");
 }
 
 // VGuard ObjC class hooks
@@ -2382,59 +2324,58 @@ void PXJBInstallVGuardBypass(void) {
 
 // Block the exception handler that calls abort()
 + (void)vGuardExceptionHandler:(id)arg1 {
-    if (PXJBShouldBypassCached()) {
-        PXLog(@"[JailbreakBypass] Blocked v_VPrivateUtility vGuardExceptionHandler");
+    if (gVGuardBypassActive) {
         return;
     }
     %orig;
 }
 
-+ (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-+ (BOOL)isJailBroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-+ (BOOL)checkJailbreak { if (PXJBShouldBypassCached()) return NO; return %orig; }
-+ (BOOL)detectJailbreak { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)isJailBroken { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)checkJailbreak { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)detectJailbreak { if (gVGuardBypassActive) return NO; return %orig; }
 
 %end
 
 %hook VGuard
 
-+ (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-- (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-+ (BOOL)isDeviceRooted { if (PXJBShouldBypassCached()) return NO; return %orig; }
-- (BOOL)isDeviceRooted { if (PXJBShouldBypassCached()) return NO; return %orig; }
-+ (BOOL)isDebuggerAttached { if (PXJBShouldBypassCached()) return NO; return %orig; }
-- (BOOL)isDebuggerAttached { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)isDeviceRooted { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isDeviceRooted { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)isDebuggerAttached { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isDebuggerAttached { if (gVGuardBypassActive) return NO; return %orig; }
 
 %end
 
 %hook VOSIntegrity
 
-+ (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-- (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-+ (BOOL)isDeviceCompromised { if (PXJBShouldBypassCached()) return NO; return %orig; }
-- (BOOL)isDeviceCompromised { if (PXJBShouldBypassCached()) return NO; return %orig; }
-+ (BOOL)checkIntegrity { if (PXJBShouldBypassCached()) return YES; return %orig; }
-- (BOOL)checkIntegrity { if (PXJBShouldBypassCached()) return YES; return %orig; }
++ (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)isDeviceCompromised { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isDeviceCompromised { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)checkIntegrity { if (gVGuardBypassActive) return YES; return %orig; }
+- (BOOL)checkIntegrity { if (gVGuardBypassActive) return YES; return %orig; }
 
 %end
 
 %hook SecurityCheck
 
-+ (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-- (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-+ (BOOL)isJailBroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-- (BOOL)isJailBroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-+ (BOOL)isRooted { if (PXJBShouldBypassCached()) return NO; return %orig; }
-- (BOOL)isRooted { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)isJailBroken { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isJailBroken { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)isRooted { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isRooted { if (gVGuardBypassActive) return NO; return %orig; }
 
 %end
 
 %hook DeviceIntegrityChecker
 
-+ (BOOL)isDeviceCompromised { if (PXJBShouldBypassCached()) return NO; return %orig; }
-- (BOOL)isDeviceCompromised { if (PXJBShouldBypassCached()) return NO; return %orig; }
-+ (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
-- (BOOL)isJailbroken { if (PXJBShouldBypassCached()) return NO; return %orig; }
++ (BOOL)isDeviceCompromised { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isDeviceCompromised { if (gVGuardBypassActive) return NO; return %orig; }
++ (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
+- (BOOL)isJailbroken { if (gVGuardBypassActive) return NO; return %orig; }
 
 %end
 
@@ -2496,75 +2437,85 @@ void PXJBInstallVGuardBypass(void) {
 
 %end // %group ZDefendHooks
 
-// Initialize Banking App bypass VERY EARLY using constructor priority
-// Priority 101 runs before most other constructors (lower = earlier)
-// Initialize Banking App bypass VERY EARLY using constructor priority
-// Priority 101 runs before most other constructors (lower = earlier)
-__attribute__((constructor(101))) static void PXJBBankingAppCtorInit(void) {
-    // Use __progname to check bundle BEFORE NSBundle is fully initialized
-    extern const char *__progname;
-    BOOL shouldInitBankingHooks = NO;
-    NSString *bundleID = nil;
-    
-    // Check executable name first (fastest, no ObjC runtime needed)
-    if (__progname) {
-        // MB Bank has space in name - check multiple patterns
-        if (strcmp(__progname, "MB Bank") == 0 ||
-            strstr(__progname, "MB Bank") ||
-            strstr(__progname, "MBBank") ||
-            strstr(__progname, "mbmobile") ||
-            strstr(__progname, "MB%20Bank") ||  // URL encoded space
-            (strlen(__progname) >= 2 && __progname[0] == 'M' && __progname[1] == 'B')) {  // Starts with MB
-            shouldInitBankingHooks = YES;
-        }
-    }
-    
-    // If not detected by name, check Bundle ID (slower, but covers other apps)
-    /* 
-    // DANGEROUS: Using ObjC/Foundation in constructor(101) crashes with SIGILL
-    // because Foundation is not yet initialized. Rely on __progname only for now.
-    if (!shouldInitBankingHooks) {
-        @autoreleasepool {
-            if (!PXJBIsCriticalProcess()) {
-                bundleID = PXMainBundleID();
-                if (bundleID) {
-                    if ([bundleID isEqualToString:@"com.mbmobile"] ||      // MB Bank
-                        [bundleID hasPrefix:@"com.vietcombank."] ||        // Vietcombank
-                        [bundleID hasPrefix:@"com.techcombank."] ||        // Techcombank
-                        [bundleID hasPrefix:@"com.bidv."] ||               // BIDV
-                        [bundleID hasPrefix:@"com.vpbank."] ||             // VPBank
-                        [bundleID hasPrefix:@"vn.com.acb."] ||             // ACB
-                        [bundleID hasPrefix:@"com.sacombank."]) {          // Sacombank
-                        shouldInitBankingHooks = YES;
-                    }
-                }
-            }
-        }
-    }
-    */
-    
-    if (shouldInitBankingHooks) {
-        gVGuardBypassActive = YES;
-        
-        // Install C hooks immediately to block abort()
-        void *sym = FindSymbol(NULL, "abort");
-        if (sym) MSHookFunction(sym, (void *)hook_abort, (void **)&orig_abort);
-        sym = FindSymbol(NULL, "raise");
-        if (sym) MSHookFunction(sym, (void *)hook_raise, (void **)&orig_raise);
-        sym = FindSymbol(NULL, "pthread_kill");
-        if (sym) MSHookFunction(sym, (void *)hook_pthread_kill, (void **)&orig_pthread_kill);
-        sym = FindSymbol(NULL, "exit");
-        if (sym) MSHookFunction(sym, (void *)hook_exit_vg, (void **)&orig_exit_vg);
-        sym = FindSymbol(NULL, "_exit");
-        if (sym) MSHookFunction(sym, (void *)hook__exit_vg, (void **)&orig__exit_vg);
-        
-        // Install DYLD image hiding hooks
-        PXJBInstallDyldHooks();
-        
-        // Initialize ObjC hooks - ONLY CALLED ONCE
+// MB Bank-only initialization.
+// Keep early work minimal to avoid triggering additional heuristics.
+static dispatch_once_t gMBBankObjCHooksOnce;
+
+static void PXJBInitMBBankObjCHooks(void) {
+    dispatch_once(&gMBBankObjCHooksOnce, ^{
         %init(VGuardHooks);
         %init(ZDefendHooks);
-        // Note: Don't use PXLog here - CoreFoundation may not be ready during early init
+    });
+}
+
+static const char *PXJBDyldImageNameForHeader(const struct mach_header *mh) {
+    if (!mh) return NULL;
+    uint32_t cnt = _dyld_image_count();
+    for (uint32_t i = 0; i < cnt; i++) {
+        const struct mach_header *h = _dyld_get_image_header(i);
+        if (h == mh) {
+            return _dyld_get_image_name(i);
+        }
     }
+    return NULL;
+}
+
+static BOOL PXJBIsMBBankRaspImageName(const char *name) {
+    if (!name) return NO;
+    if (PXStrContainsNoCase(name, "/vguard.framework/")) return YES;
+    if (PXStrContainsNoCase(name, "/zdefend")) return YES;
+    if (PXStrContainsNoCase(name, "mbraspsdk")) return YES;
+    if (PXStrContainsNoCase(name, "vosintegrity")) return YES;
+    return NO;
+}
+
+static void PXJBMBBankAddImage(const struct mach_header *mh, intptr_t slide) {
+    (void)slide;
+    if (!PXJBIsMBBankProcess()) return;
+    const char *name = PXJBDyldImageNameForHeader(mh);
+    if (!PXJBIsMBBankRaspImageName(name)) return;
+
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @autoreleasepool {
+            PXJBUpdateMBBankBypassActive();
+            if (gVGuardBypassActive) {
+                PXJBInitMBBankObjCHooks();
+            }
+        }
+    });
+}
+
+__attribute__((constructor(101)))
+static void PXJBMBBankEarlyInit(void) {
+    if (!PXJBIsMBBankProcess()) return;
+
+    // Install anti-terminate hooks. They only take effect once gVGuardBypassActive becomes true.
+    PXJBInstallMBBankAntiTerminateHooks();
+
+    // Register an add_image callback to init hooks when the RASP frameworks load.
+    _dyld_register_func_for_add_image(PXJBMBBankAddImage);
+
+    // Confirm bundle+scope once Foundation is up.
+    dispatch_async(dispatch_get_main_queue(), ^{
+        @autoreleasepool {
+            PXJBUpdateMBBankBypassActive();
+            if (!gVGuardBypassActive) return;
+
+            // If classes are already present, init immediately.
+            if (objc_getClass("VGuard") || objc_getClass("v_VPrivateUtility") || objc_getClass("VOSIntegrity")) {
+                PXJBInitMBBankObjCHooks();
+            }
+        }
+    });
+
+    // Retry once shortly after launch (scope cache / settings may lag).
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1 * NSEC_PER_SEC)), dispatch_get_main_queue(), ^{
+        @autoreleasepool {
+            PXJBUpdateMBBankBypassActive();
+            if (gVGuardBypassActive) {
+                PXJBInitMBBankObjCHooks();
+            }
+        }
+    });
 }
 
