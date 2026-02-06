@@ -1295,6 +1295,11 @@ static BOOL PXJBShouldHideImageName(const char *name) {
         "chimera",
         "electra",
         
+        // Our own tweak (must hide from detection)
+        "projectxtweak",
+        "projectx",
+        "weaponx",
+        
         NULL
     };
     for (int i = 0; deny[i]; i++) {
@@ -2182,6 +2187,81 @@ void PXJBInstallTaskInfoHook(void *sym) {
 }
 
 // ============================================================================
+// DYLD API Hooks - Hide injected dylibs from detection
+// ============================================================================
+
+#include <mach-o/dyld.h>
+
+// Cache visible image indices
+static uint32_t *gVisibleImageIndices = NULL;
+static uint32_t gVisibleImageCount = 0;
+static uint32_t gLastRealImageCount = 0;
+static volatile BOOL gDyldHooksEnabled = NO;
+
+static void PXJBRebuildVisibleImageMap(void) {
+    uint32_t realCount = _dyld_image_count();
+    if (gVisibleImageIndices && gLastRealImageCount == realCount) return;
+    
+    if (gVisibleImageIndices) { free(gVisibleImageIndices); gVisibleImageIndices = NULL; }
+    gVisibleImageIndices = (uint32_t *)malloc(sizeof(uint32_t) * realCount);
+    if (!gVisibleImageIndices) { gVisibleImageCount = realCount; gLastRealImageCount = realCount; return; }
+    
+    uint32_t visibleIdx = 0;
+    for (uint32_t i = 0; i < realCount; i++) {
+        const char *name = _dyld_get_image_name(i);
+        if (!name) continue;
+        if (PXJBShouldHideImageName(name)) continue;
+        gVisibleImageIndices[visibleIdx++] = i;
+    }
+    gVisibleImageCount = visibleIdx;
+    gLastRealImageCount = realCount;
+}
+
+static uint32_t (*orig_dyld_image_count)(void);
+static uint32_t hook_dyld_image_count(void) {
+    if (!gDyldHooksEnabled) return orig_dyld_image_count();
+    PXJBRebuildVisibleImageMap();
+    return gVisibleImageCount;
+}
+
+static const char * (*orig_dyld_get_image_name)(uint32_t);
+static const char * hook_dyld_get_image_name(uint32_t image_index) {
+    if (!gDyldHooksEnabled) return orig_dyld_get_image_name(image_index);
+    PXJBRebuildVisibleImageMap();
+    if (image_index >= gVisibleImageCount) return NULL;
+    return orig_dyld_get_image_name(gVisibleImageIndices[image_index]);
+}
+
+static const struct mach_header * (*orig_dyld_get_image_header)(uint32_t);
+static const struct mach_header * hook_dyld_get_image_header(uint32_t image_index) {
+    if (!gDyldHooksEnabled) return orig_dyld_get_image_header(image_index);
+    PXJBRebuildVisibleImageMap();
+    if (image_index >= gVisibleImageCount) return NULL;
+    return orig_dyld_get_image_header(gVisibleImageIndices[image_index]);
+}
+
+static intptr_t (*orig_dyld_get_image_vmaddr_slide)(uint32_t);
+static intptr_t hook_dyld_get_image_vmaddr_slide(uint32_t image_index) {
+    if (!gDyldHooksEnabled) return orig_dyld_get_image_vmaddr_slide(image_index);
+    PXJBRebuildVisibleImageMap();
+    if (image_index >= gVisibleImageCount) return 0;
+    return orig_dyld_get_image_vmaddr_slide(gVisibleImageIndices[image_index]);
+}
+
+void PXJBInstallDyldHooks(void) {
+    void *sym = dlsym(RTLD_DEFAULT, "_dyld_image_count");
+    if (sym) MSHookFunction(sym, (void *)hook_dyld_image_count, (void **)&orig_dyld_image_count);
+    sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_name");
+    if (sym) MSHookFunction(sym, (void *)hook_dyld_get_image_name, (void **)&orig_dyld_get_image_name);
+    sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_header");
+    if (sym) MSHookFunction(sym, (void *)hook_dyld_get_image_header, (void **)&orig_dyld_get_image_header);
+    sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_vmaddr_slide");
+    if (sym) MSHookFunction(sym, (void *)hook_dyld_get_image_vmaddr_slide, (void **)&orig_dyld_get_image_vmaddr_slide);
+    gDyldHooksEnabled = YES;
+    PXLog(@"[JailbreakBypass] DYLD image hiding hooks installed");
+}
+
+// ============================================================================
 // VGuard SDK Bypass (V-Key V-OS Mobile App Protection)
 // Used by banking apps like MB Bank (com.mbmobile)
 // ============================================================================
@@ -2432,6 +2512,9 @@ __attribute__((constructor(101))) static void PXJBBankingAppCtorInit(void) {
         if (sym) MSHookFunction(sym, (void *)hook_exit_vg, (void **)&orig_exit_vg);
         sym = FindSymbol(NULL, "_exit");
         if (sym) MSHookFunction(sym, (void *)hook__exit_vg, (void **)&orig__exit_vg);
+        
+        // Install DYLD image hiding hooks
+        PXJBInstallDyldHooks();
         
         // Initialize ObjC hooks - ONLY CALLED ONCE
         %init(VGuardHooks);
