@@ -54,9 +54,12 @@ struct dl_phdr_info {
 #import <substrate.h>
 
 // Optional logging macro if ProjectXLogging is present.
-#ifndef PXLog
-#define PXLog(...) NSLog(__VA_ARGS__)
+// Optional logging macro if ProjectXLogging is present.
+// DISABLE LOGGING FOR THIS FILE to prevent SIGILL during early init
+#ifdef PXLog
+#undef PXLog
 #endif
+#define PXLog(...) do {} while(0)
 
 @interface IdentifierManager : NSObject
 + (instancetype)sharedManager;
