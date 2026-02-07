@@ -58,6 +58,7 @@ static bool PXStrContainsNoCaseC(const char *haystack, const char *needle);
 static bool PXShouldHidePathOrImage(const char *s);
 static bool PXShouldHideSubstrateCyOnly(const char *path);
 static const char *PXPickFilteredCallerImage(void *ret0, void *ret1, void *ret2, void *ret3);
+static void PXTraceCallerFrom4Addrs(void *ret0, void *ret1, void *ret2, void *ret3, const char *apiName, const char *extra);
 
 static int PXReadIntFile(const char *path, int defaultValue) {
     if (!path) return defaultValue;
@@ -173,70 +174,52 @@ static void PXSignalBacktraceDump(const char *sigName) {
 static void (*orig_exit_trace)(int);
 static void hook_exit_trace(int status) {
     void *ret0 = __builtin_return_address(0);
-    void *ret1 = __builtin_return_address(1);
-    void *ret2 = __builtin_return_address(2);
-    void *ret3 = __builtin_return_address(3);
     char extra[64];
     (void)snprintf(extra, sizeof(extra), "status=%d", status);
-    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "exit", extra);
+    PXTraceCallerFrom4Addrs(ret0, NULL, NULL, NULL, "exit", extra);
     if (orig_exit_trace) orig_exit_trace(status);
 }
 
 static void (*orig__exit_trace)(int);
 static void hook__exit_trace(int status) {
     void *ret0 = __builtin_return_address(0);
-    void *ret1 = __builtin_return_address(1);
-    void *ret2 = __builtin_return_address(2);
-    void *ret3 = __builtin_return_address(3);
     char extra[64];
     (void)snprintf(extra, sizeof(extra), "status=%d", status);
-    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "_exit", extra);
+    PXTraceCallerFrom4Addrs(ret0, NULL, NULL, NULL, "_exit", extra);
     if (orig__exit_trace) orig__exit_trace(status);
 }
 
 static void (*orig_abort_trace)(void);
 static void hook_abort_trace(void) {
     void *ret0 = __builtin_return_address(0);
-    void *ret1 = __builtin_return_address(1);
-    void *ret2 = __builtin_return_address(2);
-    void *ret3 = __builtin_return_address(3);
-    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "abort", NULL);
+    PXTraceCallerFrom4Addrs(ret0, NULL, NULL, NULL, "abort", NULL);
     if (orig_abort_trace) orig_abort_trace();
 }
 
 static int (*orig_raise_trace)(int);
 static int hook_raise_trace(int sig) {
     void *ret0 = __builtin_return_address(0);
-    void *ret1 = __builtin_return_address(1);
-    void *ret2 = __builtin_return_address(2);
-    void *ret3 = __builtin_return_address(3);
     char extra[64];
     (void)snprintf(extra, sizeof(extra), "sig=%d", sig);
-    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "raise", extra);
+    PXTraceCallerFrom4Addrs(ret0, NULL, NULL, NULL, "raise", extra);
     return orig_raise_trace ? orig_raise_trace(sig) : -1;
 }
 
 static int (*orig_kill_trace)(pid_t, int);
 static int hook_kill_trace(pid_t pid, int sig) {
     void *ret0 = __builtin_return_address(0);
-    void *ret1 = __builtin_return_address(1);
-    void *ret2 = __builtin_return_address(2);
-    void *ret3 = __builtin_return_address(3);
     char extra[96];
     (void)snprintf(extra, sizeof(extra), "pid=%d sig=%d", (int)pid, sig);
-    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "kill", extra);
+    PXTraceCallerFrom4Addrs(ret0, NULL, NULL, NULL, "kill", extra);
     return orig_kill_trace ? orig_kill_trace(pid, sig) : -1;
 }
 
 static int (*orig_pthread_kill_trace)(pthread_t, int);
 static int hook_pthread_kill_trace(pthread_t thread, int sig) {
     void *ret0 = __builtin_return_address(0);
-    void *ret1 = __builtin_return_address(1);
-    void *ret2 = __builtin_return_address(2);
-    void *ret3 = __builtin_return_address(3);
     char extra[96];
     (void)snprintf(extra, sizeof(extra), "sig=%d", sig);
-    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "pthread_kill", extra);
+    PXTraceCallerFrom4Addrs(ret0, NULL, NULL, NULL, "pthread_kill", extra);
     return orig_pthread_kill_trace ? orig_pthread_kill_trace(thread, sig) : -1;
 }
 
