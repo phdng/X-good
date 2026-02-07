@@ -46,6 +46,7 @@ typedef int (*px_sysctl_f)(int *name, u_int namelen, void *oldp, size_t *oldlenp
 
 // Trace bitmask
 // 1: dyld APIs, 2: libproc APIs, 4: objc image APIs, 8: filesystem probes (substrate/cy only)
+// 16: include backtrace dump when filter hits
 static int gTraceMask = 0;
 static char gTraceFilter[64];
 
@@ -100,6 +101,25 @@ static void PXTraceWritef(const char *fmt, ...) {
     (void)vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     PXTraceWriteLine(buf);
+}
+
+static bool PXBacktraceContainsFilter(int *outMatchIdx, const char **outMatchImg, const char **outMatchSym) {
+    if (gTraceFilter[0] == '\0') return false;
+    void *stack[32];
+    int n = backtrace(stack, (int)(sizeof(stack) / sizeof(stack[0])));
+    if (n <= 0) return false;
+    for (int i = 0; i < n; i++) {
+        Dl_info di;
+        if (dladdr(stack[i], &di) && di.dli_fname) {
+            if (PXStrContainsNoCaseC(di.dli_fname, gTraceFilter)) {
+                if (outMatchIdx) *outMatchIdx = i;
+                if (outMatchImg) *outMatchImg = di.dli_fname;
+                if (outMatchSym) *outMatchSym = di.dli_sname;
+                return true;
+            }
+        }
+    }
+    return false;
 }
 
 static void PXTraceBacktrace(const char *apiName, const char *extra) {
@@ -196,8 +216,13 @@ static void PXTraceCallerFrom4Addrs(void *ret0, void *ret1, void *ret2, void *re
 
     // Filter by caller image if requested.
     const char *picked = PXPickFilteredCallerImage(ret0, ret1, ret2, ret3);
+    int btIdx = -1;
+    const char *btImg = NULL;
+    const char *btSym = NULL;
     if (gTraceFilter[0] != '\0' && !picked) {
-        return;
+        if (!PXBacktraceContainsFilter(&btIdx, &btImg, &btSym)) {
+            return;
+        }
     }
 
     Dl_info d0; const char *img0 = NULL; const char *sym0 = NULL;
@@ -209,15 +234,33 @@ static void PXTraceCallerFrom4Addrs(void *ret0, void *ret1, void *ret2, void *re
     Dl_info d3; const char *img3 = NULL; const char *sym3 = NULL;
     if (ret3 && dladdr(ret3, &d3)) { img3 = d3.dli_fname; sym3 = d3.dli_sname; }
 
-    PXTraceWritef(
-        "API=%s caller0_img=%s caller0_sym=%s caller1_img=%s caller1_sym=%s caller2_img=%s caller2_sym=%s caller3_img=%s caller3_sym=%s %s",
-        apiName,
-        img0 ? img0 : "(null)", sym0 ? sym0 : "(null)",
-        img1 ? img1 : "(null)", sym1 ? sym1 : "(null)",
-        img2 ? img2 : "(null)", sym2 ? sym2 : "(null)",
-        img3 ? img3 : "(null)", sym3 ? sym3 : "(null)",
-        extra ? extra : ""
-    );
+    if (gTraceFilter[0] != '\0' && !picked) {
+        char extra2[512];
+        (void)snprintf(extra2, sizeof(extra2), "%s filter_hit_idx=%d filter_img=%s filter_sym=%s", extra ? extra : "", btIdx, btImg ? btImg : "(null)", btSym ? btSym : "(null)");
+        PXTraceWritef(
+            "API=%s caller0_img=%s caller0_sym=%s caller1_img=%s caller1_sym=%s caller2_img=%s caller2_sym=%s caller3_img=%s caller3_sym=%s %s",
+            apiName,
+            img0 ? img0 : "(null)", sym0 ? sym0 : "(null)",
+            img1 ? img1 : "(null)", sym1 ? sym1 : "(null)",
+            img2 ? img2 : "(null)", sym2 ? sym2 : "(null)",
+            img3 ? img3 : "(null)", sym3 ? sym3 : "(null)",
+            extra2
+        );
+
+        if (gTraceMask & 16) {
+            PXTraceBacktrace(apiName, "(filter backtrace)");
+        }
+    } else {
+        PXTraceWritef(
+            "API=%s caller0_img=%s caller0_sym=%s caller1_img=%s caller1_sym=%s caller2_img=%s caller2_sym=%s caller3_img=%s caller3_sym=%s %s",
+            apiName,
+            img0 ? img0 : "(null)", sym0 ? sym0 : "(null)",
+            img1 ? img1 : "(null)", sym1 ? sym1 : "(null)",
+            img2 ? img2 : "(null)", sym2 ? sym2 : "(null)",
+            img3 ? img3 : "(null)", sym3 ? sym3 : "(null)",
+            extra ? extra : ""
+        );
+    }
 }
 
 #import <objc/runtime.h>
@@ -429,11 +472,15 @@ static void PXLogAddr(const char *label, uintptr_t addr) {
     Dl_info di;
     const char *img = NULL;
     const char *sym = NULL;
+    uintptr_t off = 0;
     if (dladdr((void *)addr, &di)) {
         img = di.dli_fname;
         sym = di.dli_sname;
+        if (di.dli_fbase) {
+            off = (uintptr_t)addr - (uintptr_t)di.dli_fbase;
+        }
     }
-    PXTraceWritef("%s=0x%lx img=%s sym=%s", label, (unsigned long)addr, img ? img : "(null)", sym ? sym : "(null)");
+    PXTraceWritef("%s=0x%lx img=%s sym=%s off=0x%lx", label, (unsigned long)addr, img ? img : "(null)", sym ? sym : "(null)", (unsigned long)off);
 }
 
 static void PXSigillChainOrDie(int sig, siginfo_t *info, void *uap) {
