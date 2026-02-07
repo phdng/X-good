@@ -9,6 +9,7 @@
 #include <fcntl.h>
 #include <pthread.h>
 #include <signal.h>
+#include <execinfo.h>
 #if __has_include(<sys/ucontext.h>)
 #include <sys/ucontext.h>
 #elif __has_include(<ucontext.h>)
@@ -91,6 +92,28 @@ static void PXTraceWritef(const char *fmt, ...) {
     PXTraceWriteLine(buf);
 }
 
+static void PXTraceBacktrace(const char *apiName, const char *extra) {
+    if (!apiName) apiName = "(api)";
+    void *stack[20];
+    int n = backtrace(stack, (int)(sizeof(stack) / sizeof(stack[0])));
+    if (n <= 0) {
+        PXTraceWritef("API=%s bt=(unavailable) %s", apiName, extra ? extra : "");
+        return;
+    }
+
+    PXTraceWritef("API=%s bt_frames=%d %s", apiName, n, extra ? extra : "");
+    for (int i = 0; i < n; i++) {
+        Dl_info di;
+        const char *img = NULL;
+        const char *sym = NULL;
+        if (dladdr(stack[i], &di)) {
+            img = di.dli_fname;
+            sym = di.dli_sname;
+        }
+        PXTraceWritef("  bt#%d addr=%p img=%s sym=%s", i, stack[i], img ? img : "(null)", sym ? sym : "(null)");
+    }
+}
+
 static uint64_t PXNowAbs(void) {
     return mach_absolute_time();
 }
@@ -154,6 +177,29 @@ static void PXTraceCallerFrom2Addrs(void *ret0, void *ret1, const char *apiName,
         sym0 ? sym0 : "(null)",
         img1 ? img1 : "(null)",
         sym1 ? sym1 : "(null)",
+        extra ? extra : ""
+    );
+}
+
+static void PXTraceCallerFrom4Addrs(void *ret0, void *ret1, void *ret2, void *ret3, const char *apiName, const char *extra) {
+    if (!apiName) apiName = "(api)";
+
+    Dl_info d0; const char *img0 = NULL; const char *sym0 = NULL;
+    if (ret0 && dladdr(ret0, &d0)) { img0 = d0.dli_fname; sym0 = d0.dli_sname; }
+    Dl_info d1; const char *img1 = NULL; const char *sym1 = NULL;
+    if (ret1 && dladdr(ret1, &d1)) { img1 = d1.dli_fname; sym1 = d1.dli_sname; }
+    Dl_info d2; const char *img2 = NULL; const char *sym2 = NULL;
+    if (ret2 && dladdr(ret2, &d2)) { img2 = d2.dli_fname; sym2 = d2.dli_sname; }
+    Dl_info d3; const char *img3 = NULL; const char *sym3 = NULL;
+    if (ret3 && dladdr(ret3, &d3)) { img3 = d3.dli_fname; sym3 = d3.dli_sname; }
+
+    PXTraceWritef(
+        "API=%s caller0_img=%s caller0_sym=%s caller1_img=%s caller1_sym=%s caller2_img=%s caller2_sym=%s caller3_img=%s caller3_sym=%s %s",
+        apiName,
+        img0 ? img0 : "(null)", sym0 ? sym0 : "(null)",
+        img1 ? img1 : "(null)", sym1 ? sym1 : "(null)",
+        img2 ? img2 : "(null)", sym2 ? sym2 : "(null)",
+        img3 ? img3 : "(null)", sym3 ? sym3 : "(null)",
         extra ? extra : ""
     );
 }
@@ -490,6 +536,8 @@ static kern_return_t (*orig_task_info_trace)(task_t, task_flavor_t, task_info_t,
 static kern_return_t hook_task_info_trace(task_t target_task, task_flavor_t flavor, task_info_t out, mach_msg_type_number_t *outCnt) {
     void *ret0 = __builtin_return_address(0);
     void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
     kern_return_t kr = orig_task_info_trace ? orig_task_info_trace(target_task, flavor, out, outCnt) : KERN_INVALID_ARGUMENT;
     if (!(gTraceMask & 1)) return kr;
 #ifdef TASK_DYLD_INFO
@@ -502,7 +550,7 @@ static kern_return_t hook_task_info_trace(task_t target_task, task_flavor_t flav
         }
         char extra[128];
         (void)snprintf(extra, sizeof(extra), "flavor=TASK_DYLD_INFO kr=%d count=%u", (int)kr, count);
-        PXTraceCallerFrom2Addrs(ret0, ret1, "task_info", extra);
+        PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "task_info", extra);
     }
 #endif
     return kr;
@@ -563,11 +611,13 @@ static px_proc_pidinfo_f orig_proc_pidinfo_trace;
 static int hook_proc_pidinfo_trace(int pid, int flavor, uint64_t arg, void *buffer, int buffersize) {
     void *ret0 = __builtin_return_address(0);
     void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
     int r = orig_proc_pidinfo_trace ? orig_proc_pidinfo_trace(pid, flavor, arg, buffer, buffersize) : -1;
     if (gTraceMask & 2) {
         char extra[128];
         (void)snprintf(extra, sizeof(extra), "pid=%d flavor=%d arg=0x%llx buf=%d r=%d", pid, flavor, (unsigned long long)arg, buffersize, r);
-        PXTraceCallerFrom2Addrs(ret0, ret1, "proc_pidinfo", extra);
+        PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "proc_pidinfo", extra);
     }
     return r;
 }

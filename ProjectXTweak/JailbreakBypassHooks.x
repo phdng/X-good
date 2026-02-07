@@ -2529,7 +2529,8 @@ static void PXJBMBBankAddImage(const struct mach_header *mh, intptr_t slide) {
 
 __attribute__((constructor(101)))
 static void PXJBMBBankEarlyInit(void) {
-    if (!PXJBIsMBBankProcess()) return;
+    // MB Bank is handled by MBBankMinimalInit.x to avoid early init crashes.
+    if (PXJBIsMBBankProcess()) return;
 
     // Install anti-terminate hooks. They only take effect once gVGuardBypassActive becomes true.
     PXJBInstallMBBankAntiTerminateHooks();
