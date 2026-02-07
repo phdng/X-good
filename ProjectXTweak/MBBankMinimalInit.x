@@ -52,6 +52,16 @@ typedef int (*px_sysctl_f)(int *name, u_int namelen, void *oldp, size_t *oldlenp
 // 128: termination tracing (exit/_exit/abort/raise/kill/pthread_kill)
 static int gTraceMask = 0;
 static char gTraceFilter[64];
+// SIGILL handling policy:
+// 0: legacy (recover on any libsystem_pthread frame)
+// 1: strict (recover only when symbol is pthread_mach_thread_np) [default]
+// 2: observe-only (log, then chain; never recover)
+static int gSigillMode = 1;
+
+#define PX_RECENT_EVENTS 40
+#define PX_RECENT_EVENT_LEN 256
+static volatile uint32_t gRecentSeq = 0;
+static char gRecentEvents[PX_RECENT_EVENTS][PX_RECENT_EVENT_LEN];
 
 // Forward declarations needed by trace helpers
 static bool PXStrContainsNoCaseC(const char *haystack, const char *needle);
@@ -105,6 +115,37 @@ static void PXTraceWritef(const char *fmt, ...) {
     (void)vsnprintf(buf, sizeof(buf), fmt, ap);
     va_end(ap);
     PXTraceWriteLine(buf);
+}
+
+static void PXRememberRecentEvent(const char *apiName,
+                                  const char *img0,
+                                  const char *sym0,
+                                  const char *img1,
+                                  const char *sym1,
+                                  const char *extra) {
+    if (!apiName) apiName = "(api)";
+    uint32_t seq = __sync_fetch_and_add(&gRecentSeq, 1);
+    uint32_t slot = seq % PX_RECENT_EVENTS;
+    (void)snprintf(gRecentEvents[slot],
+                   sizeof(gRecentEvents[slot]),
+                   "api=%s c0=%s/%s c1=%s/%s %s",
+                   apiName,
+                   img0 ? img0 : "(null)",
+                   sym0 ? sym0 : "(null)",
+                   img1 ? img1 : "(null)",
+                   sym1 ? sym1 : "(null)",
+                   extra ? extra : "");
+}
+
+static void PXDumpRecentEvents(const char *reason) {
+    uint32_t end = gRecentSeq;
+    uint32_t start = (end > PX_RECENT_EVENTS) ? (end - PX_RECENT_EVENTS) : 0;
+    PXTraceWritef("%s recent_events start=%u end=%u", reason ? reason : "(reason)", start, end);
+    for (uint32_t i = start; i < end; i++) {
+        uint32_t slot = i % PX_RECENT_EVENTS;
+        if (gRecentEvents[slot][0] == '\0') continue;
+        PXTraceWritef("  recent#%u %s", i, gRecentEvents[slot]);
+    }
 }
 
 static bool PXBacktraceContainsFilter(int *outMatchIdx, const char **outMatchImg, const char **outMatchSym) {
@@ -279,6 +320,8 @@ static void PXTraceCallerFrom2Addrs(void *ret0, void *ret1, const char *apiName,
         sym1 = d1.dli_sname;
     }
 
+    PXRememberRecentEvent(apiName, img0, sym0, img1, sym1, extra);
+
     PXTraceWritef(
         "API=%s caller0_img=%s caller0_sym=%s caller1_img=%s caller1_sym=%s %s",
         apiName,
@@ -316,6 +359,7 @@ static void PXTraceCallerFrom4Addrs(void *ret0, void *ret1, void *ret2, void *re
     if (gTraceFilter[0] != '\0' && !picked) {
         char extra2[512];
         (void)snprintf(extra2, sizeof(extra2), "%s filter_hit_idx=%d filter_img=%s filter_sym=%s", extra ? extra : "", btIdx, btImg ? btImg : "(null)", btSym ? btSym : "(null)");
+        PXRememberRecentEvent(apiName, img0, sym0, img1, sym1, extra2);
         PXTraceWritef(
             "API=%s caller0_img=%s caller0_sym=%s caller1_img=%s caller1_sym=%s caller2_img=%s caller2_sym=%s caller3_img=%s caller3_sym=%s %s",
             apiName,
@@ -330,6 +374,7 @@ static void PXTraceCallerFrom4Addrs(void *ret0, void *ret1, void *ret2, void *re
             PXTraceBacktrace(apiName, "(filter backtrace)");
         }
     } else {
+        PXRememberRecentEvent(apiName, img0, sym0, img1, sym1, extra);
         PXTraceWritef(
             "API=%s caller0_img=%s caller0_sym=%s caller1_img=%s caller1_sym=%s caller2_img=%s caller2_sym=%s caller3_img=%s caller3_sym=%s %s",
             apiName,
@@ -503,6 +548,16 @@ static void PXLoadTraceFilter(void) {
     }
 }
 
+static void PXLoadSigillMode(void) {
+    int m = PXReadIntFile("/var/mobile/Library/Logs/ProjectX/projectx_mbbank_sigill_mode", 1);
+    if (m == 1) {
+        m = PXReadIntFile("/tmp/projectx_mbbank_sigill_mode", 1);
+    }
+    if (m < 0 || m > 2) m = 1;
+    gSigillMode = m;
+    PXTraceWritef("[ProjectX] sigill_mode=%d", gSigillMode);
+}
+
 static bool PXTracePassesFilter(const char *callerImage) {
     if (gTraceFilter[0] == '\0') return true;
     if (!callerImage) return false;
@@ -542,7 +597,7 @@ static bool PXIsPthreadMachThreadStub(uintptr_t pc) {
     Dl_info di;
     if (!dladdr((void *)pc, &di)) return false;
     if (di.dli_sname && strstr(di.dli_sname, "pthread_mach_thread_np")) return true;
-    if (di.dli_fname && PXStrContainsNoCaseC(di.dli_fname, "libsystem_pthread")) return true;
+    if (gSigillMode == 0 && di.dli_fname && PXStrContainsNoCaseC(di.dli_fname, "libsystem_pthread")) return true;
     return false;
 }
 
@@ -595,16 +650,20 @@ static void PXSigillHandler(int sig, siginfo_t *info, void *uap) {
     lr = (uintptr_t)uc->uc_mcontext->__ss.__lr;
     x0 = (uintptr_t)uc->uc_mcontext->__ss.__x[0];
 
-    if (!PXIsPthreadMachThreadStub(pc)) {
+    if (!PXIsPthreadMachThreadStub(pc) || gSigillMode == 2) {
         PXSigillChainOrDie(sig, info, uap);
         return;
     }
 
-    char buf[256];
-    (void)snprintf(buf, sizeof(buf), "SIGILL caught pc=0x%lx lr=0x%lx x0=0x%lx", (unsigned long)pc, (unsigned long)lr, (unsigned long)x0);
-    PXWriteLine(buf);
-    PXLogAddr("SIGILL_pc", pc);
-    PXLogAddr("SIGILL_lr", lr);
+    static volatile uint32_t sigillCount = 0;
+    uint32_t n = __sync_add_and_fetch(&sigillCount, 1);
+    if (n <= 20 || (n % 50) == 0) {
+        char buf[256];
+        (void)snprintf(buf, sizeof(buf), "SIGILL caught n=%u pc=0x%lx lr=0x%lx x0=0x%lx", n, (unsigned long)pc, (unsigned long)lr, (unsigned long)x0);
+        PXWriteLine(buf);
+        PXLogAddr("SIGILL_pc", pc);
+        PXLogAddr("SIGILL_lr", lr);
+    }
 
     // Treat this like a forced crash. Skip to LR when possible; otherwise advance PC.
     uc->uc_mcontext->__ss.__x[0] = (uint64_t)mach_thread_self();
@@ -671,6 +730,7 @@ static void PXSigbusHandler(int sig, siginfo_t *info, void *uap) {
     PXWriteLine("SIGBUS caught");
     PXLogAddr("SIGBUS_pc", pc);
     PXLogAddr("SIGBUS_lr", lr);
+    PXDumpRecentEvents("SIGBUS");
     PXSignalBacktraceDump("SIGBUS");
 #endif
     PXSigbusChainOrDie(sig, info, uap);
@@ -688,6 +748,7 @@ static void PXSigsegvHandler(int sig, siginfo_t *info, void *uap) {
     PXWriteLine("SIGSEGV caught");
     PXLogAddr("SIGSEGV_pc", pc);
     PXLogAddr("SIGSEGV_lr", lr);
+    PXDumpRecentEvents("SIGSEGV");
     PXSignalBacktraceDump("SIGSEGV");
 #endif
     PXSigsegvChainOrDie(sig, info, uap);
@@ -1373,6 +1434,7 @@ static void PXInstallMBBankMinimal(void) {
     PXWriteLine("[ProjectX] MBBankMinimalInit v3 begin");
     PXLoadTraceMask();
     PXLoadTraceFilter();
+    PXLoadSigillMode();
 
     int mode = PXReadMode();
     char modeBuf[32];
