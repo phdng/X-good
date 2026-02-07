@@ -103,12 +103,25 @@ static bool PXShouldRateLimit(uint64_t *lastAbs, uint64_t intervalAbs) {
 }
 
 static void PXTraceCaller(const char *apiName, const char *extra) {
+    // This helper is kept for internal callers; for external attribution, use PXTraceCallerFromAddr.
     if (!apiName) apiName = "(api)";
-    void *ret = __builtin_return_address(0);
     Dl_info di;
     const char *img = NULL;
     const char *sym = NULL;
+    void *ret = __builtin_return_address(0);
     if (dladdr(ret, &di)) {
+        img = di.dli_fname;
+        sym = di.dli_sname;
+    }
+    PXTraceWritef("API=%s caller_img=%s caller_sym=%s %s", apiName, img ? img : "(null)", sym ? sym : "(null)", extra ? extra : "");
+}
+
+static void PXTraceCallerFromAddr(void *retAddr, const char *apiName, const char *extra) {
+    if (!apiName) apiName = "(api)";
+    Dl_info di;
+    const char *img = NULL;
+    const char *sym = NULL;
+    if (retAddr && dladdr(retAddr, &di)) {
         img = di.dli_fname;
         sym = di.dli_sname;
     }
@@ -445,6 +458,7 @@ static const struct dyld_all_image_infos *hook__dyld_get_all_image_infos(void) {
 // --- Trace-only hooks (do not modify behavior) ---
 static kern_return_t (*orig_task_info_trace)(task_t, task_flavor_t, task_info_t, mach_msg_type_number_t *);
 static kern_return_t hook_task_info_trace(task_t target_task, task_flavor_t flavor, task_info_t out, mach_msg_type_number_t *outCnt) {
+    void *ret = __builtin_return_address(0);
     kern_return_t kr = orig_task_info_trace ? orig_task_info_trace(target_task, flavor, out, outCnt) : KERN_INVALID_ARGUMENT;
     if (!(gTraceMask & 1)) return kr;
 #ifdef TASK_DYLD_INFO
@@ -457,7 +471,7 @@ static kern_return_t hook_task_info_trace(task_t target_task, task_flavor_t flav
         }
         char extra[128];
         (void)snprintf(extra, sizeof(extra), "flavor=TASK_DYLD_INFO kr=%d count=%u", (int)kr, count);
-        PXTraceCaller("task_info", extra);
+        PXTraceCallerFromAddr(ret, "task_info", extra);
     }
 #endif
     return kr;
@@ -465,25 +479,27 @@ static kern_return_t hook_task_info_trace(task_t target_task, task_flavor_t flav
 
 static const struct dyld_all_image_infos *(*orig__dyld_get_all_image_infos_trace)(void);
 static const struct dyld_all_image_infos *hook__dyld_get_all_image_infos_trace(void) {
+    void *ret = __builtin_return_address(0);
     const struct dyld_all_image_infos *infos = orig__dyld_get_all_image_infos_trace ? orig__dyld_get_all_image_infos_trace() : NULL;
     if (gTraceMask & 1) {
         uint32_t count = infos ? (uint32_t)infos->infoArrayCount : 0;
         char extra[96];
         (void)snprintf(extra, sizeof(extra), "count=%u", count);
-        PXTraceCaller("_dyld_get_all_image_infos", extra);
+        PXTraceCallerFromAddr(ret, "_dyld_get_all_image_infos", extra);
     }
     return infos;
 }
 
 static uint32_t (*orig__dyld_image_count_trace)(void);
 static uint32_t hook__dyld_image_count_trace(void) {
+    void *ret = __builtin_return_address(0);
     uint32_t c = orig__dyld_image_count_trace ? orig__dyld_image_count_trace() : 0;
     if (gTraceMask & 1) {
         static uint64_t last;
         if (!PXShouldRateLimit(&last, 1000000000ULL)) {
             char extra[64];
             (void)snprintf(extra, sizeof(extra), "count=%u", c);
-            PXTraceCaller("_dyld_image_count", extra);
+            PXTraceCallerFromAddr(ret, "_dyld_image_count", extra);
         }
     }
     return c;
@@ -491,9 +507,10 @@ static uint32_t hook__dyld_image_count_trace(void) {
 
 static const char *(*orig__dyld_get_image_name_trace)(uint32_t);
 static const char *hook__dyld_get_image_name_trace(uint32_t idx) {
+    void *ret = __builtin_return_address(0);
     const char *nm = orig__dyld_get_image_name_trace ? orig__dyld_get_image_name_trace(idx) : NULL;
     if ((gTraceMask & 1) && nm && PXShouldHideSubstrateCyOnly(nm)) {
-        PXTraceCaller("_dyld_get_image_name", nm);
+        PXTraceCallerFromAddr(ret, "_dyld_get_image_name", nm);
     }
     return nm;
 }
@@ -501,40 +518,44 @@ static const char *hook__dyld_get_image_name_trace(uint32_t idx) {
 static int (*orig_dl_iterate_phdr_trace)(int (*callback)(struct dl_phdr_info *info, size_t size, void *data), void *data);
 static int hook_dl_iterate_phdr_trace(int (*callback)(struct dl_phdr_info *info, size_t size, void *data), void *data) {
     if (gTraceMask & 1) {
-        PXTraceCaller("dl_iterate_phdr", NULL);
+        void *ret = __builtin_return_address(0);
+        PXTraceCallerFromAddr(ret, "dl_iterate_phdr", NULL);
     }
     return orig_dl_iterate_phdr_trace ? orig_dl_iterate_phdr_trace(callback, data) : 0;
 }
 
 static px_proc_pidinfo_f orig_proc_pidinfo_trace;
 static int hook_proc_pidinfo_trace(int pid, int flavor, uint64_t arg, void *buffer, int buffersize) {
+    void *ret = __builtin_return_address(0);
     int r = orig_proc_pidinfo_trace ? orig_proc_pidinfo_trace(pid, flavor, arg, buffer, buffersize) : -1;
     if (gTraceMask & 2) {
         char extra[128];
         (void)snprintf(extra, sizeof(extra), "pid=%d flavor=%d arg=0x%llx r=%d", pid, flavor, (unsigned long long)arg, r);
-        PXTraceCaller("proc_pidinfo", extra);
+        PXTraceCallerFromAddr(ret, "proc_pidinfo", extra);
     }
     return r;
 }
 
 static px_proc_regionfilename_f orig_proc_regionfilename_trace;
 static int hook_proc_regionfilename_trace(int pid, uint64_t address, void *buffer, uint32_t buffersize) {
+    void *ret = __builtin_return_address(0);
     int r = orig_proc_regionfilename_trace ? orig_proc_regionfilename_trace(pid, address, buffer, buffersize) : 0;
     if (gTraceMask & 2) {
         char extra[128];
         (void)snprintf(extra, sizeof(extra), "pid=%d addr=0x%llx r=%d", pid, (unsigned long long)address, r);
-        PXTraceCaller("proc_regionfilename", extra);
+        PXTraceCallerFromAddr(ret, "proc_regionfilename", extra);
     }
     return r;
 }
 
 static px_proc_listmap_f orig_proc_listmap_trace;
 static int hook_proc_listmap_trace(pid_t pid, void *buffer, uint32_t buffersize) {
+    void *ret = __builtin_return_address(0);
     int r = orig_proc_listmap_trace ? orig_proc_listmap_trace(pid, buffer, buffersize) : 0;
     if (gTraceMask & 2) {
         char extra[96];
         (void)snprintf(extra, sizeof(extra), "pid=%d r=%d", (int)pid, r);
-        PXTraceCaller("proc_listmap", extra);
+        PXTraceCallerFromAddr(ret, "proc_listmap", extra);
     }
     return r;
 }
