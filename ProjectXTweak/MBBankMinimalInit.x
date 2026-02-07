@@ -344,6 +344,8 @@ static mach_port_t hook_pthread_mach_thread_np(pthread_t thread) {
 
 // --- SIGILL recovery (best-effort) ---
 static struct sigaction gPrevSigill;
+static struct sigaction gPrevSigbus;
+static struct sigaction gPrevSigsegv;
 
 static bool PXIsPthreadMachThreadStub(uintptr_t pc) {
     Dl_info di;
@@ -351,6 +353,18 @@ static bool PXIsPthreadMachThreadStub(uintptr_t pc) {
     if (di.dli_sname && strstr(di.dli_sname, "pthread_mach_thread_np")) return true;
     if (di.dli_fname && PXStrContainsNoCaseC(di.dli_fname, "libsystem_pthread")) return true;
     return false;
+}
+
+static void PXLogAddr(const char *label, uintptr_t addr) {
+    if (!label) label = "addr";
+    Dl_info di;
+    const char *img = NULL;
+    const char *sym = NULL;
+    if (dladdr((void *)addr, &di)) {
+        img = di.dli_fname;
+        sym = di.dli_sname;
+    }
+    PXTraceWritef("%s=0x%lx img=%s sym=%s", label, (unsigned long)addr, img ? img : "(null)", sym ? sym : "(null)");
 }
 
 static void PXSigillChainOrDie(int sig, siginfo_t *info, void *uap) {
@@ -394,6 +408,8 @@ static void PXSigillHandler(int sig, siginfo_t *info, void *uap) {
     char buf[256];
     (void)snprintf(buf, sizeof(buf), "SIGILL caught pc=0x%lx lr=0x%lx x0=0x%lx", (unsigned long)pc, (unsigned long)lr, (unsigned long)x0);
     PXWriteLine(buf);
+    PXLogAddr("SIGILL_pc", pc);
+    PXLogAddr("SIGILL_lr", lr);
 
     // Treat this like a forced crash. Skip to LR when possible; otherwise advance PC.
     uc->uc_mcontext->__ss.__x[0] = (uint64_t)mach_thread_self();
@@ -414,6 +430,87 @@ static void PXInstallSigillHandler(void) {
     sa.sa_flags = SA_SIGINFO;
     sigaction(SIGILL, &sa, &gPrevSigill);
     PXWriteLine("installed SIGILL handler");
+}
+
+static void PXSigbusChainOrDie(int sig, siginfo_t *info, void *uap) {
+    if (gPrevSigbus.sa_flags & SA_SIGINFO) {
+        if (gPrevSigbus.sa_sigaction) {
+            gPrevSigbus.sa_sigaction(sig, info, uap);
+            return;
+        }
+    } else {
+        if (gPrevSigbus.sa_handler && gPrevSigbus.sa_handler != SIG_DFL && gPrevSigbus.sa_handler != SIG_IGN) {
+            gPrevSigbus.sa_handler(sig);
+            return;
+        }
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void PXSigsegvChainOrDie(int sig, siginfo_t *info, void *uap) {
+    if (gPrevSigsegv.sa_flags & SA_SIGINFO) {
+        if (gPrevSigsegv.sa_sigaction) {
+            gPrevSigsegv.sa_sigaction(sig, info, uap);
+            return;
+        }
+    } else {
+        if (gPrevSigsegv.sa_handler && gPrevSigsegv.sa_handler != SIG_DFL && gPrevSigsegv.sa_handler != SIG_IGN) {
+            gPrevSigsegv.sa_handler(sig);
+            return;
+        }
+    }
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+static void PXSigbusHandler(int sig, siginfo_t *info, void *uap) {
+    if (sig != SIGBUS || !uap) {
+        PXSigbusChainOrDie(sig, info, uap);
+        return;
+    }
+#if defined(__aarch64__)
+    ucontext_t *uc = (ucontext_t *)uap;
+    uintptr_t pc = (uintptr_t)uc->uc_mcontext->__ss.__pc;
+    uintptr_t lr = (uintptr_t)uc->uc_mcontext->__ss.__lr;
+    PXWriteLine("SIGBUS caught");
+    PXLogAddr("SIGBUS_pc", pc);
+    PXLogAddr("SIGBUS_lr", lr);
+#endif
+    PXSigbusChainOrDie(sig, info, uap);
+}
+
+static void PXSigsegvHandler(int sig, siginfo_t *info, void *uap) {
+    if (sig != SIGSEGV || !uap) {
+        PXSigsegvChainOrDie(sig, info, uap);
+        return;
+    }
+#if defined(__aarch64__)
+    ucontext_t *uc = (ucontext_t *)uap;
+    uintptr_t pc = (uintptr_t)uc->uc_mcontext->__ss.__pc;
+    uintptr_t lr = (uintptr_t)uc->uc_mcontext->__ss.__lr;
+    PXWriteLine("SIGSEGV caught");
+    PXLogAddr("SIGSEGV_pc", pc);
+    PXLogAddr("SIGSEGV_lr", lr);
+#endif
+    PXSigsegvChainOrDie(sig, info, uap);
+}
+
+static void PXInstallSigbusSigsegvHandlers(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = PXSigbusHandler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGBUS, &sa, &gPrevSigbus);
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = PXSigsegvHandler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, &gPrevSigsegv);
+
+    PXWriteLine("installed SIGBUS/SIGSEGV handlers");
 }
 
 // --- dyld_all_image_infos sanitization via task_info(TASK_DYLD_INFO) ---
@@ -996,6 +1093,7 @@ static void PXInstallMBBankMinimal(void) {
     if (mode == -4) {
         PXWriteLine("mode -4: SIGILL handler only");
         PXInstallSigillHandler();
+        PXInstallSigbusSigsegvHandlers();
         PXWriteLine("[ProjectX] MBBankMinimalInit v3 installed");
         return;
     }
@@ -1003,6 +1101,7 @@ static void PXInstallMBBankMinimal(void) {
     if (mode == -5) {
         PXWriteLine("mode -5: SIGILL + TASK_DYLD_INFO sanitizer only");
         PXInstallSigillHandler();
+        PXInstallSigbusSigsegvHandlers();
 
         PXWriteLine("install task_info(TASK_DYLD_INFO) sanitizer");
         void *ts = dlsym(RTLD_DEFAULT, "task_info");
