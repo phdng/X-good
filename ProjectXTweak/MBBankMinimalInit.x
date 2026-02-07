@@ -41,9 +41,13 @@ typedef int (*px_proc_pidinfo_f)(int pid, int flavor, uint64_t arg, void *buffer
 typedef int (*px_proc_regionfilename_f)(int pid, uint64_t address, void *buffer, uint32_t buffersize);
 typedef int (*px_proc_listmap_f)(pid_t pid, void *buffer, uint32_t buffersize);
 
+typedef int (*px_sysctlbyname_f)(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+typedef int (*px_sysctl_f)(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen);
+
 // Trace bitmask
 // 1: dyld APIs, 2: libproc APIs, 4: objc image APIs, 8: filesystem probes (substrate/cy only)
 static int gTraceMask = 0;
+static char gTraceFilter[64];
 
 static int PXReadIntFile(const char *path, int defaultValue) {
     if (!path) return defaultValue;
@@ -183,6 +187,12 @@ static void PXTraceCallerFrom2Addrs(void *ret0, void *ret1, const char *apiName,
 
 static void PXTraceCallerFrom4Addrs(void *ret0, void *ret1, void *ret2, void *ret3, const char *apiName, const char *extra) {
     if (!apiName) apiName = "(api)";
+
+    // Filter by caller image if requested.
+    const char *picked = PXPickFilteredCallerImage(ret0, ret1, ret2, ret3);
+    if (gTraceFilter[0] != '\0' && !picked) {
+        return;
+    }
 
     Dl_info d0; const char *img0 = NULL; const char *sym0 = NULL;
     if (ret0 && dladdr(ret0, &d0)) { img0 = d0.dli_fname; sym0 = d0.dli_sname; }
@@ -332,6 +342,53 @@ static void PXLoadTraceMask(void) {
     if (gTraceMask) {
         PXTraceWritef("[ProjectX] trace_mask=%d", gTraceMask);
     }
+}
+
+static void PXLoadTraceFilter(void) {
+    memset(gTraceFilter, 0, sizeof(gTraceFilter));
+    const char *paths[] = {
+        "/var/mobile/Library/Logs/ProjectX/projectx_mbbank_trace_filter",
+        "/tmp/projectx_mbbank_trace_filter",
+        NULL
+    };
+    for (int i = 0; paths[i]; i++) {
+        int fd = open(paths[i], O_RDONLY);
+        if (fd < 0) continue;
+        ssize_t n = read(fd, gTraceFilter, (sizeof(gTraceFilter) - 1));
+        close(fd);
+        if (n <= 0) continue;
+        // Trim trailing whitespace
+        while (n > 0 && (gTraceFilter[n - 1] == '\n' || gTraceFilter[n - 1] == '\r' || gTraceFilter[n - 1] == ' ' || gTraceFilter[n - 1] == '\t')) {
+            gTraceFilter[n - 1] = '\0';
+            n--;
+        }
+        if (gTraceFilter[0] != '\0') {
+            PXTraceWritef("[ProjectX] trace_filter=%s", gTraceFilter);
+        }
+        return;
+    }
+}
+
+static bool PXTracePassesFilter(const char *callerImage) {
+    if (gTraceFilter[0] == '\0') return true;
+    if (!callerImage) return false;
+    return PXStrContainsNoCaseC(callerImage, gTraceFilter);
+}
+
+static const char *PXPickFilteredCallerImage(void *ret0, void *ret1, void *ret2, void *ret3) {
+    void *rets[] = { ret0, ret1, ret2, ret3, NULL };
+    for (int i = 0; rets[i]; i++) {
+        Dl_info di;
+        if (dladdr(rets[i], &di) && di.dli_fname) {
+            if (PXTracePassesFilter(di.dli_fname)) return di.dli_fname;
+        }
+    }
+    return NULL;
+}
+
+static bool PXIsSuspiciousPathForLog(const char *path) {
+    if (!path) return false;
+    return PXShouldHideSubstrateCyOnly(path) || PXShouldHidePathOrImage(path);
 }
 
 // Patch for protected apps that crash inside dyld stubs for pthread_mach_thread_np.
@@ -745,6 +802,82 @@ static int hook_proc_listmap_trace(pid_t pid, void *buffer, uint32_t buffersize)
     return r;
 }
 
+// sysctl tracing
+static px_sysctlbyname_f orig_sysctlbyname_trace;
+static int hook_sysctlbyname_trace(const char *name, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    int r = orig_sysctlbyname_trace ? orig_sysctlbyname_trace(name, oldp, oldlenp, newp, newlen) : -1;
+    if (gTraceMask & 1) {
+        if (name && (PXStrContainsNoCaseC(name, "kern") || PXStrContainsNoCaseC(name, "proc") || PXStrContainsNoCaseC(name, "dyld") || PXStrContainsNoCaseC(name, "boot"))) {
+            char extra[256];
+            (void)snprintf(extra, sizeof(extra), "name=%s r=%d", name, r);
+            PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "sysctlbyname", extra);
+        }
+    }
+    return r;
+}
+
+static px_sysctl_f orig_sysctl_trace;
+static int hook_sysctl_trace(int *name, u_int namelen, void *oldp, size_t *oldlenp, void *newp, size_t newlen) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    int r = orig_sysctl_trace ? orig_sysctl_trace(name, namelen, oldp, oldlenp, newp, newlen) : -1;
+    if (gTraceMask & 1) {
+        if (name && namelen >= 2) {
+            char extra[256];
+            (void)snprintf(extra, sizeof(extra), "name0=%d name1=%d namelen=%u r=%d", name[0], name[1], (unsigned)namelen, r);
+            PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "sysctl", extra);
+        }
+    }
+    return r;
+}
+
+// Filesystem probe tracing (only suspicious paths)
+static int (*orig_open_trace)(const char *, int, ...);
+static int hook_open_trace(const char *path, int flags, ...) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    mode_t mode = 0;
+    int fd;
+    if (flags & O_CREAT) {
+        va_list ap;
+        va_start(ap, flags);
+        mode = (mode_t)va_arg(ap, int);
+        va_end(ap);
+        fd = orig_open_trace ? orig_open_trace(path, flags, mode) : -1;
+    } else {
+        fd = orig_open_trace ? orig_open_trace(path, flags) : -1;
+    }
+    if ((gTraceMask & 8) && PXIsSuspiciousPathForLog(path)) {
+        char extra[512];
+        (void)snprintf(extra, sizeof(extra), "path=%s flags=0x%x fd=%d", path ? path : "(null)", flags, fd);
+        PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "open", extra);
+    }
+    return fd;
+}
+
+static int (*orig_stat_trace)(const char *, struct stat *);
+static int hook_stat_trace(const char *path, struct stat *st) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    int r = orig_stat_trace ? orig_stat_trace(path, st) : -1;
+    if ((gTraceMask & 8) && PXIsSuspiciousPathForLog(path)) {
+        char extra[512];
+        (void)snprintf(extra, sizeof(extra), "path=%s r=%d", path ? path : "(null)", r);
+        PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "stat", extra);
+    }
+    return r;
+}
+
 // --- libc file probes ---
 static int (*orig_stat)(const char *, struct stat *);
 static int hook_stat(const char *path, struct stat *st) {
@@ -1044,6 +1177,7 @@ static void PXInstallMBBankMinimal(void) {
 
     PXWriteLine("[ProjectX] MBBankMinimalInit v3 begin");
     PXLoadTraceMask();
+    PXLoadTraceFilter();
 
     int mode = PXReadMode();
     char modeBuf[32];
@@ -1076,6 +1210,12 @@ static void PXInstallMBBankMinimal(void) {
 
             sym = dlsym(RTLD_DEFAULT, "dl_iterate_phdr");
             if (sym) MSHookFunction(sym, (void *)hook_dl_iterate_phdr_trace, (void **)&orig_dl_iterate_phdr_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "sysctlbyname");
+            if (sym) MSHookFunction(sym, (void *)hook_sysctlbyname_trace, (void **)&orig_sysctlbyname_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "sysctl");
+            if (sym) MSHookFunction(sym, (void *)hook_sysctl_trace, (void **)&orig_sysctl_trace);
         }
 
         if (gTraceMask & 2) {
@@ -1087,6 +1227,13 @@ static void PXInstallMBBankMinimal(void) {
 
             sym = dlsym(RTLD_DEFAULT, "proc_listmap");
             if (sym) MSHookFunction(sym, (void *)hook_proc_listmap_trace, (void **)&orig_proc_listmap_trace);
+        }
+
+        if (gTraceMask & 8) {
+            sym = dlsym(RTLD_DEFAULT, "open");
+            if (sym) MSHookFunction(sym, (void *)hook_open_trace, (void **)&orig_open_trace);
+            sym = dlsym(RTLD_DEFAULT, "stat");
+            if (sym) MSHookFunction(sym, (void *)hook_stat_trace, (void **)&orig_stat_trace);
         }
     }
 
