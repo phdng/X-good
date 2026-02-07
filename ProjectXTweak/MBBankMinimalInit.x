@@ -48,6 +48,7 @@ typedef int (*px_sysctl_f)(int *name, u_int namelen, void *oldp, size_t *oldlenp
 // 1: dyld APIs, 2: libproc APIs, 4: objc image APIs, 8: filesystem probes (substrate/cy only)
 // 16: include backtrace dump when filter hits
 // 32: dlopen/dlsym/objc_getClass probes (trace only)
+// 64: include backtrace dump on SIGBUS/SIGSEGV
 static int gTraceMask = 0;
 static char gTraceFilter[64];
 
@@ -133,6 +134,28 @@ static void PXTraceBacktrace(const char *apiName, const char *extra) {
     }
 
     PXTraceWritef("API=%s bt_frames=%d %s", apiName, n, extra ? extra : "");
+    for (int i = 0; i < n; i++) {
+        Dl_info di;
+        const char *img = NULL;
+        const char *sym = NULL;
+        if (dladdr(stack[i], &di)) {
+            img = di.dli_fname;
+            sym = di.dli_sname;
+        }
+        PXTraceWritef("  bt#%d addr=%p img=%s sym=%s", i, stack[i], img ? img : "(null)", sym ? sym : "(null)");
+    }
+}
+
+static void PXSignalBacktraceDump(const char *sigName) {
+    if (!(gTraceMask & 64)) return;
+    if (!sigName) sigName = "(signal)";
+    void *stack[32];
+    int n = backtrace(stack, (int)(sizeof(stack) / sizeof(stack[0])));
+    if (n <= 0) {
+        PXTraceWritef("%s bt=(unavailable)", sigName);
+        return;
+    }
+    PXTraceWritef("%s bt_frames=%d", sigName, n);
     for (int i = 0; i < n; i++) {
         Dl_info di;
         const char *img = NULL;
@@ -593,6 +616,7 @@ static void PXSigbusHandler(int sig, siginfo_t *info, void *uap) {
     PXWriteLine("SIGBUS caught");
     PXLogAddr("SIGBUS_pc", pc);
     PXLogAddr("SIGBUS_lr", lr);
+    PXSignalBacktraceDump("SIGBUS");
 #endif
     PXSigbusChainOrDie(sig, info, uap);
 }
@@ -609,6 +633,7 @@ static void PXSigsegvHandler(int sig, siginfo_t *info, void *uap) {
     PXWriteLine("SIGSEGV caught");
     PXLogAddr("SIGSEGV_pc", pc);
     PXLogAddr("SIGSEGV_lr", lr);
+    PXSignalBacktraceDump("SIGSEGV");
 #endif
     PXSigsegvChainOrDie(sig, info, uap);
 }
