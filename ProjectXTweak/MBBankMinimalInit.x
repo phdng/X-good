@@ -49,6 +49,12 @@ typedef int (*px_sysctl_f)(int *name, u_int namelen, void *oldp, size_t *oldlenp
 static int gTraceMask = 0;
 static char gTraceFilter[64];
 
+// Forward declarations needed by trace helpers
+static bool PXStrContainsNoCaseC(const char *haystack, const char *needle);
+static bool PXShouldHidePathOrImage(const char *s);
+static bool PXShouldHideSubstrateCyOnly(const char *path);
+static const char *PXPickFilteredCallerImage(void *ret0, void *ret1, void *ret2, void *ret3);
+
 static int PXReadIntFile(const char *path, int defaultValue) {
     if (!path) return defaultValue;
     int fd = open(path, O_RDONLY);
