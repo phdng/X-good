@@ -35,6 +35,86 @@
 #include <mach-o/dyld_images.h>
 #endif
 
+// libproc prototypes may not exist in all SDKs; we resolve via dlsym.
+typedef int (*px_proc_pidinfo_f)(int pid, int flavor, uint64_t arg, void *buffer, int buffersize);
+typedef int (*px_proc_regionfilename_f)(int pid, uint64_t address, void *buffer, uint32_t buffersize);
+typedef int (*px_proc_listmap_f)(pid_t pid, void *buffer, uint32_t buffersize);
+
+// Trace bitmask
+// 1: dyld APIs, 2: libproc APIs, 4: objc image APIs, 8: filesystem probes (substrate/cy only)
+static int gTraceMask = 0;
+
+static int PXReadIntFile(const char *path, int defaultValue) {
+    if (!path) return defaultValue;
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return defaultValue;
+    char buf[64];
+    ssize_t n = read(fd, buf, (sizeof(buf) - 1));
+    close(fd);
+    if (n <= 0) return defaultValue;
+    buf[n] = '\0';
+    return atoi(buf);
+}
+
+static const char *PXTraceLogPath(void) {
+    // User-requested preferred location (may be blocked by sandbox).
+    static const char *preferred = "/var/mobile/Library/Logs/ProjectX/projectx_mbbank_trace.log";
+    static const char *fallback = "/tmp/projectx_mbbank_trace.log";
+    // Try to create the directory; ignore failures.
+    (void)mkdir("/var/mobile/Library/Logs", 0755);
+    (void)mkdir("/var/mobile/Library/Logs/ProjectX", 0755);
+    int fd = open(preferred, O_CREAT | O_WRONLY | O_APPEND, 0644);
+    if (fd >= 0) {
+        close(fd);
+        return preferred;
+    }
+    return fallback;
+}
+
+static void PXTraceWriteLine(const char *line) {
+    if (!line) return;
+    const char *path = PXTraceLogPath();
+    int fd = open(path, O_CREAT | O_WRONLY | O_APPEND, 0644);
+    if (fd < 0) return;
+    (void)write(fd, line, strlen(line));
+    (void)write(fd, "\n", 1);
+    (void)close(fd);
+}
+
+static void PXTraceWritef(const char *fmt, ...) {
+    if (!fmt) return;
+    char buf[1024];
+    va_list ap;
+    va_start(ap, fmt);
+    (void)vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+    PXTraceWriteLine(buf);
+}
+
+static uint64_t PXNowAbs(void) {
+    return mach_absolute_time();
+}
+
+static bool PXShouldRateLimit(uint64_t *lastAbs, uint64_t intervalAbs) {
+    uint64_t now = PXNowAbs();
+    if (*lastAbs && (now - *lastAbs) < intervalAbs) return true;
+    *lastAbs = now;
+    return false;
+}
+
+static void PXTraceCaller(const char *apiName, const char *extra) {
+    if (!apiName) apiName = "(api)";
+    void *ret = __builtin_return_address(0);
+    Dl_info di;
+    const char *img = NULL;
+    const char *sym = NULL;
+    if (dladdr(ret, &di)) {
+        img = di.dli_fname;
+        sym = di.dli_sname;
+    }
+    PXTraceWritef("API=%s caller_img=%s caller_sym=%s %s", apiName, img ? img : "(null)", sym ? sym : "(null)", extra ? extra : "");
+}
+
 #import <objc/runtime.h>
 
 // Some Theos SDKs don't ship <link.h>
@@ -151,6 +231,18 @@ static int PXReadMode(void) {
     if (v < -5) v = -5;
     if (v > 4) v = 4;
     return v;
+}
+
+static void PXLoadTraceMask(void) {
+    // Prefer /var/mobile path if readable, fallback to /tmp.
+    int m = PXReadIntFile("/var/mobile/Library/Logs/ProjectX/projectx_mbbank_trace_mask", 0);
+    if (m == 0) {
+        m = PXReadIntFile("/tmp/projectx_mbbank_trace_mask", 0);
+    }
+    gTraceMask = m;
+    if (gTraceMask) {
+        PXTraceWritef("[ProjectX] trace_mask=%d", gTraceMask);
+    }
 }
 
 // Patch for protected apps that crash inside dyld stubs for pthread_mach_thread_np.
@@ -348,6 +440,103 @@ static const struct dyld_all_image_infos *hook__dyld_get_all_image_infos(void) {
     const struct dyld_all_image_infos *src = orig__dyld_get_all_image_infos ? orig__dyld_get_all_image_infos() : NULL;
     const struct dyld_all_image_infos *san = PXBuildSanitizedInfos(src);
     return san ? san : src;
+}
+
+// --- Trace-only hooks (do not modify behavior) ---
+static kern_return_t (*orig_task_info_trace)(task_t, task_flavor_t, task_info_t, mach_msg_type_number_t *);
+static kern_return_t hook_task_info_trace(task_t target_task, task_flavor_t flavor, task_info_t out, mach_msg_type_number_t *outCnt) {
+    kern_return_t kr = orig_task_info_trace ? orig_task_info_trace(target_task, flavor, out, outCnt) : KERN_INVALID_ARGUMENT;
+    if (!(gTraceMask & 1)) return kr;
+#ifdef TASK_DYLD_INFO
+    if (target_task == mach_task_self() && flavor == TASK_DYLD_INFO) {
+        uint32_t count = 0;
+        if (kr == KERN_SUCCESS && out && outCnt && *outCnt >= TASK_DYLD_INFO_COUNT) {
+            task_dyld_info_data_t *dy = (task_dyld_info_data_t *)out;
+            const struct dyld_all_image_infos *infos = (const struct dyld_all_image_infos *)(uintptr_t)dy->all_image_info_addr;
+            if (infos) count = (uint32_t)infos->infoArrayCount;
+        }
+        char extra[128];
+        (void)snprintf(extra, sizeof(extra), "flavor=TASK_DYLD_INFO kr=%d count=%u", (int)kr, count);
+        PXTraceCaller("task_info", extra);
+    }
+#endif
+    return kr;
+}
+
+static const struct dyld_all_image_infos *(*orig__dyld_get_all_image_infos_trace)(void);
+static const struct dyld_all_image_infos *hook__dyld_get_all_image_infos_trace(void) {
+    const struct dyld_all_image_infos *infos = orig__dyld_get_all_image_infos_trace ? orig__dyld_get_all_image_infos_trace() : NULL;
+    if (gTraceMask & 1) {
+        uint32_t count = infos ? (uint32_t)infos->infoArrayCount : 0;
+        char extra[96];
+        (void)snprintf(extra, sizeof(extra), "count=%u", count);
+        PXTraceCaller("_dyld_get_all_image_infos", extra);
+    }
+    return infos;
+}
+
+static uint32_t (*orig__dyld_image_count_trace)(void);
+static uint32_t hook__dyld_image_count_trace(void) {
+    uint32_t c = orig__dyld_image_count_trace ? orig__dyld_image_count_trace() : 0;
+    if (gTraceMask & 1) {
+        static uint64_t last;
+        if (!PXShouldRateLimit(&last, 1000000000ULL)) {
+            char extra[64];
+            (void)snprintf(extra, sizeof(extra), "count=%u", c);
+            PXTraceCaller("_dyld_image_count", extra);
+        }
+    }
+    return c;
+}
+
+static const char *(*orig__dyld_get_image_name_trace)(uint32_t);
+static const char *hook__dyld_get_image_name_trace(uint32_t idx) {
+    const char *nm = orig__dyld_get_image_name_trace ? orig__dyld_get_image_name_trace(idx) : NULL;
+    if ((gTraceMask & 1) && nm && PXShouldHideSubstrateCyOnly(nm)) {
+        PXTraceCaller("_dyld_get_image_name", nm);
+    }
+    return nm;
+}
+
+static int (*orig_dl_iterate_phdr_trace)(int (*callback)(struct dl_phdr_info *info, size_t size, void *data), void *data);
+static int hook_dl_iterate_phdr_trace(int (*callback)(struct dl_phdr_info *info, size_t size, void *data), void *data) {
+    if (gTraceMask & 1) {
+        PXTraceCaller("dl_iterate_phdr", NULL);
+    }
+    return orig_dl_iterate_phdr_trace ? orig_dl_iterate_phdr_trace(callback, data) : 0;
+}
+
+static px_proc_pidinfo_f orig_proc_pidinfo_trace;
+static int hook_proc_pidinfo_trace(int pid, int flavor, uint64_t arg, void *buffer, int buffersize) {
+    int r = orig_proc_pidinfo_trace ? orig_proc_pidinfo_trace(pid, flavor, arg, buffer, buffersize) : -1;
+    if (gTraceMask & 2) {
+        char extra[128];
+        (void)snprintf(extra, sizeof(extra), "pid=%d flavor=%d arg=0x%llx r=%d", pid, flavor, (unsigned long long)arg, r);
+        PXTraceCaller("proc_pidinfo", extra);
+    }
+    return r;
+}
+
+static px_proc_regionfilename_f orig_proc_regionfilename_trace;
+static int hook_proc_regionfilename_trace(int pid, uint64_t address, void *buffer, uint32_t buffersize) {
+    int r = orig_proc_regionfilename_trace ? orig_proc_regionfilename_trace(pid, address, buffer, buffersize) : 0;
+    if (gTraceMask & 2) {
+        char extra[128];
+        (void)snprintf(extra, sizeof(extra), "pid=%d addr=0x%llx r=%d", pid, (unsigned long long)address, r);
+        PXTraceCaller("proc_regionfilename", extra);
+    }
+    return r;
+}
+
+static px_proc_listmap_f orig_proc_listmap_trace;
+static int hook_proc_listmap_trace(pid_t pid, void *buffer, uint32_t buffersize) {
+    int r = orig_proc_listmap_trace ? orig_proc_listmap_trace(pid, buffer, buffersize) : 0;
+    if (gTraceMask & 2) {
+        char extra[96];
+        (void)snprintf(extra, sizeof(extra), "pid=%d r=%d", (int)pid, r);
+        PXTraceCaller("proc_listmap", extra);
+    }
+    return r;
 }
 
 // --- libc file probes ---
@@ -648,6 +837,8 @@ static void PXInstallMBBankMinimal(void) {
     if (!PXIsMBBankProcess()) return;
 
     PXWriteLine("[ProjectX] MBBankMinimalInit v3 begin");
+    PXLoadTraceMask();
+
     int mode = PXReadMode();
     char modeBuf[32];
     (void)snprintf(modeBuf, sizeof(modeBuf), "%d", mode);
@@ -657,6 +848,40 @@ static void PXInstallMBBankMinimal(void) {
         PXWriteLine("mode -2: no hooks installed");
         PXWriteLine("[ProjectX] MBBankMinimalInit v3 installed");
         return;
+    }
+
+    // Install trace-only hooks early when enabled.
+    if (gTraceMask) {
+        PXWriteLine("install trace-only hooks");
+        void *sym = NULL;
+
+        if (gTraceMask & 1) {
+            sym = dlsym(RTLD_DEFAULT, "task_info");
+            if (sym) MSHookFunction(sym, (void *)hook_task_info_trace, (void **)&orig_task_info_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "_dyld_get_all_image_infos");
+            if (sym) MSHookFunction(sym, (void *)hook__dyld_get_all_image_infos_trace, (void **)&orig__dyld_get_all_image_infos_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "_dyld_image_count");
+            if (sym) MSHookFunction(sym, (void *)hook__dyld_image_count_trace, (void **)&orig__dyld_image_count_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "_dyld_get_image_name");
+            if (sym) MSHookFunction(sym, (void *)hook__dyld_get_image_name_trace, (void **)&orig__dyld_get_image_name_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "dl_iterate_phdr");
+            if (sym) MSHookFunction(sym, (void *)hook_dl_iterate_phdr_trace, (void **)&orig_dl_iterate_phdr_trace);
+        }
+
+        if (gTraceMask & 2) {
+            sym = dlsym(RTLD_DEFAULT, "proc_pidinfo");
+            if (sym) MSHookFunction(sym, (void *)hook_proc_pidinfo_trace, (void **)&orig_proc_pidinfo_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "proc_regionfilename");
+            if (sym) MSHookFunction(sym, (void *)hook_proc_regionfilename_trace, (void **)&orig_proc_regionfilename_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "proc_listmap");
+            if (sym) MSHookFunction(sym, (void *)hook_proc_listmap_trace, (void **)&orig_proc_listmap_trace);
+        }
     }
 
     if (mode == -4) {
