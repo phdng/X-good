@@ -48,7 +48,7 @@ typedef int (*px_sysctl_f)(int *name, u_int namelen, void *oldp, size_t *oldlenp
 // 1: dyld APIs, 2: libproc APIs, 4: objc image APIs, 8: filesystem probes (substrate/cy only)
 // 16: include backtrace dump when filter hits
 // 32: dlopen/dlsym/objc_getClass probes (trace only)
-// 64: include backtrace dump on SIGBUS/SIGSEGV
+// 64: include backtrace dump on SIGILL/SIGBUS/SIGSEGV
 // 128: termination tracing (exit/_exit/abort/raise/kill/pthread_kill)
 static int gTraceMask = 0;
 static char gTraceFilter[64];
@@ -651,6 +651,17 @@ static void PXSigillHandler(int sig, siginfo_t *info, void *uap) {
     x0 = (uintptr_t)uc->uc_mcontext->__ss.__x[0];
 
     if (!PXIsPthreadMachThreadStub(pc) || gSigillMode == 2) {
+        static volatile uint32_t sigillPassCount = 0;
+        uint32_t n = __sync_add_and_fetch(&sigillPassCount, 1);
+        if (n <= 20 || (n % 50) == 0) {
+            char buf[256];
+            (void)snprintf(buf, sizeof(buf), "SIGILL passthrough n=%u mode=%d pc=0x%lx lr=0x%lx x0=0x%lx", n, gSigillMode, (unsigned long)pc, (unsigned long)lr, (unsigned long)x0);
+            PXWriteLine(buf);
+            PXLogAddr("SIGILL_pc", pc);
+            PXLogAddr("SIGILL_lr", lr);
+            PXDumpRecentEvents("SIGILL");
+            PXSignalBacktraceDump("SIGILL");
+        }
         PXSigillChainOrDie(sig, info, uap);
         return;
     }
