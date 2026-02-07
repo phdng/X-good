@@ -47,6 +47,7 @@ typedef int (*px_sysctl_f)(int *name, u_int namelen, void *oldp, size_t *oldlenp
 // Trace bitmask
 // 1: dyld APIs, 2: libproc APIs, 4: objc image APIs, 8: filesystem probes (substrate/cy only)
 // 16: include backtrace dump when filter hits
+// 32: dlopen/dlsym/objc_getClass probes (trace only)
 static int gTraceMask = 0;
 static char gTraceFilter[64];
 
@@ -787,13 +788,68 @@ static uint32_t (*orig__dyld_image_count_trace)(void);
 static uint32_t hook__dyld_image_count_trace(void) {
     void *ret0 = __builtin_return_address(0);
     void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
     uint32_t c = orig__dyld_image_count_trace ? orig__dyld_image_count_trace() : 0;
     if (gTraceMask & 1) {
         static uint64_t last;
         if (!PXShouldRateLimit(&last, 1000000000ULL)) {
             char extra[64];
             (void)snprintf(extra, sizeof(extra), "count=%u", c);
-            PXTraceCallerFrom2Addrs(ret0, ret1, "_dyld_image_count", extra);
+            PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "_dyld_image_count", extra);
+        }
+    }
+    return c;
+}
+
+// dlopen/dlsym/objc_getClass probe tracing
+static void *(*orig_dlopen_trace)(const char *path, int mode);
+static void *hook_dlopen_trace(const char *path, int mode) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    void *h = orig_dlopen_trace ? orig_dlopen_trace(path, mode) : NULL;
+    if (gTraceMask & 32) {
+        // Log only interesting paths to reduce noise.
+        if (path && (PXStrContainsNoCaseC(path, "appsflyer") || PXShouldHideSubstrateCyOnly(path))) {
+            char extra[512];
+            (void)snprintf(extra, sizeof(extra), "path=%s mode=0x%x handle=%p", path, mode, h);
+            PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "dlopen", extra);
+        }
+    }
+    return h;
+}
+
+static void *(*orig_dlsym_trace)(void *handle, const char *symbol);
+static void *hook_dlsym_trace(void *handle, const char *symbol) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    void *p = orig_dlsym_trace ? orig_dlsym_trace(handle, symbol) : NULL;
+    if (gTraceMask & 32) {
+        if (symbol && (PXStrContainsNoCaseC(symbol, "appsflyer") || PXStrContainsNoCaseC(symbol, "AF") || PXStrContainsNoCaseC(symbol, "MSHook"))) {
+            char extra[512];
+            (void)snprintf(extra, sizeof(extra), "symbol=%s ptr=%p", symbol, p);
+            PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "dlsym", extra);
+        }
+    }
+    return p;
+}
+
+static Class (*orig_objc_getClass_trace)(const char *name);
+static Class hook_objc_getClass_trace(const char *name) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    Class c = orig_objc_getClass_trace ? orig_objc_getClass_trace(name) : NULL;
+    if (gTraceMask & 32) {
+        if (name && PXStrContainsNoCaseC(name, "appsflyer")) {
+            char extra[256];
+            (void)snprintf(extra, sizeof(extra), "name=%s class=%p", name, c);
+            PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "objc_getClass", extra);
         }
     }
     return c;
@@ -1293,6 +1349,17 @@ static void PXInstallMBBankMinimal(void) {
             if (sym) MSHookFunction(sym, (void *)hook_open_trace, (void **)&orig_open_trace);
             sym = dlsym(RTLD_DEFAULT, "stat");
             if (sym) MSHookFunction(sym, (void *)hook_stat_trace, (void **)&orig_stat_trace);
+        }
+
+        if (gTraceMask & 32) {
+            sym = dlsym(RTLD_DEFAULT, "dlopen");
+            if (sym) MSHookFunction(sym, (void *)hook_dlopen_trace, (void **)&orig_dlopen_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "dlsym");
+            if (sym) MSHookFunction(sym, (void *)hook_dlsym_trace, (void **)&orig_dlsym_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "objc_getClass");
+            if (sym) MSHookFunction(sym, (void *)hook_objc_getClass_trace, (void **)&orig_objc_getClass_trace);
         }
     }
 
