@@ -224,6 +224,12 @@ struct dl_phdr_info {
     unsigned short dlpi_phnum;
 };
 
+// Forward declarations (this file is intentionally C-heavy; keep prototypes explicit)
+static bool PXStrContainsNoCaseC(const char *haystack, const char *needle);
+static bool PXShouldHidePathOrImage(const char *s);
+static bool PXShouldHideSubstrateCyOnly(const char *path);
+static const char *PXPickFilteredCallerImage(void *ret0, void *ret1, void *ret2, void *ret3);
+
 static inline bool PXIsMBBankProcess(void) {
     extern const char *__progname;
     return (__progname && strcmp(__progname, "MB Bank") == 0);
