@@ -49,6 +49,7 @@ typedef int (*px_sysctl_f)(int *name, u_int namelen, void *oldp, size_t *oldlenp
 // 16: include backtrace dump when filter hits
 // 32: dlopen/dlsym/objc_getClass probes (trace only)
 // 64: include backtrace dump on SIGBUS/SIGSEGV
+// 128: termination tracing (exit/_exit/abort/raise/kill/pthread_kill)
 static int gTraceMask = 0;
 static char gTraceFilter[64];
 
@@ -166,6 +167,77 @@ static void PXSignalBacktraceDump(const char *sigName) {
         }
         PXTraceWritef("  bt#%d addr=%p img=%s sym=%s", i, stack[i], img ? img : "(null)", sym ? sym : "(null)");
     }
+}
+
+// --- Termination tracing (log only) ---
+static void (*orig_exit_trace)(int);
+static void hook_exit_trace(int status) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    char extra[64];
+    (void)snprintf(extra, sizeof(extra), "status=%d", status);
+    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "exit", extra);
+    if (orig_exit_trace) orig_exit_trace(status);
+}
+
+static void (*orig__exit_trace)(int);
+static void hook__exit_trace(int status) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    char extra[64];
+    (void)snprintf(extra, sizeof(extra), "status=%d", status);
+    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "_exit", extra);
+    if (orig__exit_trace) orig__exit_trace(status);
+}
+
+static void (*orig_abort_trace)(void);
+static void hook_abort_trace(void) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "abort", NULL);
+    if (orig_abort_trace) orig_abort_trace();
+}
+
+static int (*orig_raise_trace)(int);
+static int hook_raise_trace(int sig) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    char extra[64];
+    (void)snprintf(extra, sizeof(extra), "sig=%d", sig);
+    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "raise", extra);
+    return orig_raise_trace ? orig_raise_trace(sig) : -1;
+}
+
+static int (*orig_kill_trace)(pid_t, int);
+static int hook_kill_trace(pid_t pid, int sig) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    char extra[96];
+    (void)snprintf(extra, sizeof(extra), "pid=%d sig=%d", (int)pid, sig);
+    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "kill", extra);
+    return orig_kill_trace ? orig_kill_trace(pid, sig) : -1;
+}
+
+static int (*orig_pthread_kill_trace)(pthread_t, int);
+static int hook_pthread_kill_trace(pthread_t thread, int sig) {
+    void *ret0 = __builtin_return_address(0);
+    void *ret1 = __builtin_return_address(1);
+    void *ret2 = __builtin_return_address(2);
+    void *ret3 = __builtin_return_address(3);
+    char extra[96];
+    (void)snprintf(extra, sizeof(extra), "sig=%d", sig);
+    PXTraceCallerFrom4Addrs(ret0, ret1, ret2, ret3, "pthread_kill", extra);
+    return orig_pthread_kill_trace ? orig_pthread_kill_trace(thread, sig) : -1;
 }
 
 static uint64_t PXNowAbs(void) {
@@ -1385,6 +1457,26 @@ static void PXInstallMBBankMinimal(void) {
 
             sym = dlsym(RTLD_DEFAULT, "objc_getClass");
             if (sym) MSHookFunction(sym, (void *)hook_objc_getClass_trace, (void **)&orig_objc_getClass_trace);
+        }
+
+        if (gTraceMask & 128) {
+            sym = dlsym(RTLD_DEFAULT, "exit");
+            if (sym) MSHookFunction(sym, (void *)hook_exit_trace, (void **)&orig_exit_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "_exit");
+            if (sym) MSHookFunction(sym, (void *)hook__exit_trace, (void **)&orig__exit_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "abort");
+            if (sym) MSHookFunction(sym, (void *)hook_abort_trace, (void **)&orig_abort_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "raise");
+            if (sym) MSHookFunction(sym, (void *)hook_raise_trace, (void **)&orig_raise_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "kill");
+            if (sym) MSHookFunction(sym, (void *)hook_kill_trace, (void **)&orig_kill_trace);
+
+            sym = dlsym(RTLD_DEFAULT, "pthread_kill");
+            if (sym) MSHookFunction(sym, (void *)hook_pthread_kill_trace, (void **)&orig_pthread_kill_trace);
         }
     }
 
