@@ -47,6 +47,15 @@ struct dl_phdr_info {
 #ifndef PT_DENY_ATTACH
 #define PT_DENY_ATTACH 31
 #endif
+
+// Code signing constants (not always available in Theos SDKs).
+#ifndef CS_OPS_STATUS
+#define CS_OPS_STATUS       0
+#endif
+#ifndef CS_PLATFORM_BINARY
+#define CS_PLATFORM_BINARY  0x4000000
+#endif
+int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
 #import <unistd.h>
 #import <limits.h>
 
@@ -1718,6 +1727,112 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
     return r;
 }
 
+// --- Priority 1: UID/GID spoofing ---
+// Many apps check getuid()==0 to detect root access on jailbroken devices.
+// Return 501 (mobile user) to appear non-jailbroken.
+
+static uid_t (*orig_getuid)(void);
+static uid_t hook_getuid(void) {
+    if (PXJBShouldBypassCached()) return 501;
+    return orig_getuid ? orig_getuid() : 501;
+}
+
+static uid_t (*orig_geteuid)(void);
+static uid_t hook_geteuid(void) {
+    if (PXJBShouldBypassCached()) return 501;
+    return orig_geteuid ? orig_geteuid() : 501;
+}
+
+static gid_t (*orig_getgid)(void);
+static gid_t hook_getgid(void) {
+    if (PXJBShouldBypassCached()) return 501;
+    return orig_getgid ? orig_getgid() : 501;
+}
+
+static gid_t (*orig_getegid)(void);
+static gid_t hook_getegid(void) {
+    if (PXJBShouldBypassCached()) return 501;
+    return orig_getegid ? orig_getegid() : 501;
+}
+
+static int (*orig_setuid)(uid_t);
+static int hook_setuid(uid_t uid) {
+    if (PXJBShouldBypassCached() && uid == 0) {
+        errno = EPERM;
+        return -1;
+    }
+    return orig_setuid ? orig_setuid(uid) : -1;
+}
+
+static int (*orig_seteuid)(uid_t);
+static int hook_seteuid(uid_t uid) {
+    if (PXJBShouldBypassCached() && uid == 0) {
+        errno = EPERM;
+        return -1;
+    }
+    return orig_seteuid ? orig_seteuid(uid) : -1;
+}
+
+static int (*orig_setgid)(gid_t);
+static int hook_setgid(gid_t gid) {
+    if (PXJBShouldBypassCached() && gid == 0) {
+        errno = EPERM;
+        return -1;
+    }
+    return orig_setgid ? orig_setgid(gid) : -1;
+}
+
+static int (*orig_setegid)(gid_t);
+static int hook_setegid(gid_t gid) {
+    if (PXJBShouldBypassCached() && gid == 0) {
+        errno = EPERM;
+        return -1;
+    }
+    return orig_setegid ? orig_setegid(gid) : -1;
+}
+
+static int (*orig_setreuid)(uid_t, uid_t);
+static int hook_setreuid(uid_t ruid, uid_t euid) {
+    if (PXJBShouldBypassCached() && (ruid == 0 || euid == 0)) {
+        errno = EPERM;
+        return -1;
+    }
+    return orig_setreuid ? orig_setreuid(ruid, euid) : -1;
+}
+
+static int (*orig_setregid)(gid_t, gid_t);
+static int hook_setregid(gid_t rgid, gid_t egid) {
+    if (PXJBShouldBypassCached() && (rgid == 0 || egid == 0)) {
+        errno = EPERM;
+        return -1;
+    }
+    return orig_setregid ? orig_setregid(rgid, egid) : -1;
+}
+
+// --- Priority 1: getppid spoofing ---
+// On non-jailbroken devices, parent PID is always 1 (launchd).
+static pid_t (*orig_getppid)(void);
+static pid_t hook_getppid(void) {
+    if (PXJBShouldBypassCached()) return 1;
+    return orig_getppid ? orig_getppid() : 1;
+}
+
+// --- Priority 1: csops — hide CS_PLATFORM_BINARY ---
+// Some detectors check if the process has the platform binary flag set,
+// which can happen on jailbroken devices.
+static int (*orig_csops)(pid_t, unsigned int, void *, size_t);
+static int hook_csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize) {
+    int ret = orig_csops ? orig_csops(pid, ops, useraddr, usersize) : -1;
+    if (ret == 0 && PXJBShouldBypassCached() && ops == CS_OPS_STATUS && pid == getpid()) {
+        // Clear CS_PLATFORM_BINARY flag from the returned status.
+        if (useraddr && usersize >= sizeof(uint32_t)) {
+            uint32_t *flags = (uint32_t *)useraddr;
+            *flags &= ~CS_PLATFORM_BINARY;
+        }
+    }
+    return ret;
+}
+
 // --- ObjC hooks ---
 %hook NSFileManager
 
@@ -1910,6 +2025,36 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
 
 %end
 
+// --- Priority 1: NSBundle SignerIdentity ---
+%hook NSBundle
+
+- (id)objectForInfoDictionaryKey:(NSString *)key {
+    if (PXJBShouldBypassCached() && [key isKindOfClass:[NSString class]]) {
+        if ([key isEqualToString:@"SignerIdentity"]) {
+            return nil;
+        }
+    }
+    return %orig;
+}
+
++ (instancetype)bundleWithPath:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+- (instancetype)initWithPath:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+%end
+
 %ctor {
     @autoreleasepool {
         // Install C hooks unconditionally; gate inside hooks for scoped apps.
@@ -1982,6 +2127,45 @@ static int hook_fstatvfs(int fd, struct statvfs *buf) {
 
             sym = FindSymbol(NULL, "vfork");
             if (sym) MSHookFunction(sym, (void *)hook_vfork, (void **)&orig_vfork);
+
+            // Priority 1: UID/GID spoofing - hide root access.
+            sym = FindSymbol(NULL, "getuid");
+            if (sym) MSHookFunction(sym, (void *)hook_getuid, (void **)&orig_getuid);
+
+            sym = FindSymbol(NULL, "geteuid");
+            if (sym) MSHookFunction(sym, (void *)hook_geteuid, (void **)&orig_geteuid);
+
+            sym = FindSymbol(NULL, "getgid");
+            if (sym) MSHookFunction(sym, (void *)hook_getgid, (void **)&orig_getgid);
+
+            sym = FindSymbol(NULL, "getegid");
+            if (sym) MSHookFunction(sym, (void *)hook_getegid, (void **)&orig_getegid);
+
+            sym = FindSymbol(NULL, "setuid");
+            if (sym) MSHookFunction(sym, (void *)hook_setuid, (void **)&orig_setuid);
+
+            sym = FindSymbol(NULL, "seteuid");
+            if (sym) MSHookFunction(sym, (void *)hook_seteuid, (void **)&orig_seteuid);
+
+            sym = FindSymbol(NULL, "setgid");
+            if (sym) MSHookFunction(sym, (void *)hook_setgid, (void **)&orig_setgid);
+
+            sym = FindSymbol(NULL, "setegid");
+            if (sym) MSHookFunction(sym, (void *)hook_setegid, (void **)&orig_setegid);
+
+            sym = FindSymbol(NULL, "setreuid");
+            if (sym) MSHookFunction(sym, (void *)hook_setreuid, (void **)&orig_setreuid);
+
+            sym = FindSymbol(NULL, "setregid");
+            if (sym) MSHookFunction(sym, (void *)hook_setregid, (void **)&orig_setregid);
+
+            // Priority 1: getppid spoofing.
+            sym = FindSymbol(NULL, "getppid");
+            if (sym) MSHookFunction(sym, (void *)hook_getppid, (void **)&orig_getppid);
+
+            // Priority 1: csops — clear CS_PLATFORM_BINARY.
+            sym = FindSymbol(NULL, "csops");
+            if (sym) MSHookFunction(sym, (void *)hook_csops, (void **)&orig_csops);
 
             if (wantSyscallHook) {
                 sym = FindSymbol(NULL, "syscall");
