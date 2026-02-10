@@ -1837,8 +1837,7 @@ static int hook_csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersi
 static bool (*orig_dlopen_preflight)(const char *);
 static bool hook_dlopen_preflight(const char *path) {
     if (PXJBShouldBypassCached() && path) {
-        NSString *name = [NSString stringWithUTF8String:path];
-        if (PXJBShouldBlockDlopenPath(name)) return false;
+        if (PXJBShouldBlockDlopenPath(path)) return false;
     }
     return orig_dlopen_preflight ? orig_dlopen_preflight(path) : false;
 }
@@ -1859,8 +1858,7 @@ static const char **hook_objc_copyClassNamesForImage(const char *image, unsigned
 static int32_t (*orig_NSVersionOfRunTimeLibrary)(const char *);
 static int32_t hook_NSVersionOfRunTimeLibrary(const char *libraryName) {
     if (PXJBShouldBypassCached() && libraryName) {
-        NSString *name = [NSString stringWithUTF8String:libraryName];
-        if (PXJBShouldHideImageName([name UTF8String])) return -1;
+        if (PXJBShouldHideImageName(libraryName)) return -1;
     }
     return orig_NSVersionOfRunTimeLibrary ? orig_NSVersionOfRunTimeLibrary(libraryName) : -1;
 }
@@ -1868,8 +1866,7 @@ static int32_t hook_NSVersionOfRunTimeLibrary(const char *libraryName) {
 static int32_t (*orig_NSVersionOfLinkTimeLibrary)(const char *);
 static int32_t hook_NSVersionOfLinkTimeLibrary(const char *libraryName) {
     if (PXJBShouldBypassCached() && libraryName) {
-        NSString *name = [NSString stringWithUTF8String:libraryName];
-        if (PXJBShouldHideImageName([name UTF8String])) return -1;
+        if (PXJBShouldHideImageName(libraryName)) return -1;
     }
     return orig_NSVersionOfLinkTimeLibrary ? orig_NSVersionOfLinkTimeLibrary(libraryName) : -1;
 }
