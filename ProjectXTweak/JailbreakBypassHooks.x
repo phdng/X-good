@@ -1923,6 +1923,214 @@ static int hook_csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersi
     return dest;
 }
 
+// --- Priority 2: Extended NSFileManager methods ---
+
+- (NSDictionary *)attributesOfFileSystemForPath:(NSString *)path error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
+- (NSArray<NSURL *> *)contentsOfDirectoryAtURL:(NSURL *)url includingPropertiesForKeys:(NSArray<NSURLResourceKey> *)keys options:(NSDirectoryEnumerationOptions)mask error:(NSError **)error {
+    NSArray *ret = %orig;
+    if (!PXJBShouldBypassCached()) return ret;
+    if (![ret isKindOfClass:[NSArray class]] || ret.count == 0) return ret;
+
+    NSMutableArray *filtered = [NSMutableArray arrayWithCapacity:ret.count];
+    for (NSURL *retURL in ret) {
+        if ([retURL isKindOfClass:[NSURL class]] && [retURL isFileURL]) {
+            const char *p = [[retURL path] fileSystemRepresentation];
+            if (PXJBPathShouldHide(p)) continue;
+        }
+        [filtered addObject:retURL];
+    }
+    return [filtered copy];
+}
+
+- (NSArray<NSURL *> *)URLsForDirectory:(NSSearchPathDirectory)directory inDomains:(NSSearchPathDomainMask)domainMask {
+    NSArray *ret = %orig;
+    if (!PXJBShouldBypassCached()) return ret;
+    if (![ret isKindOfClass:[NSArray class]] || ret.count == 0) return ret;
+
+    NSMutableArray *filtered = [NSMutableArray arrayWithCapacity:ret.count];
+    for (NSURL *u in ret) {
+        if ([u isKindOfClass:[NSURL class]] && [u isFileURL]) {
+            const char *p = [[u path] fileSystemRepresentation];
+            if (PXJBPathShouldHide(p)) continue;
+        }
+        [filtered addObject:u];
+    }
+    return [filtered copy];
+}
+
+- (NSDirectoryEnumerator<NSString *> *)enumeratorAtPath:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return %orig(@"/.file");
+    }
+    return %orig;
+}
+
+- (NSArray<NSString *> *)subpathsOfDirectoryAtPath:(NSString *)path error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    NSArray *ret = %orig;
+    if (!PXJBShouldBypassCached()) return ret;
+    if (![ret isKindOfClass:[NSArray class]] || ret.count == 0) return ret;
+    NSMutableArray *filtered = [NSMutableArray arrayWithCapacity:ret.count];
+    for (NSString *sub in ret) {
+        if ([sub isKindOfClass:[NSString class]]) {
+            NSString *full = [path stringByAppendingPathComponent:sub];
+            const char *fp = [full fileSystemRepresentation];
+            if (PXJBPathShouldHide(fp)) continue;
+        }
+        [filtered addObject:sub];
+    }
+    return [filtered copy];
+}
+
+- (NSArray<NSString *> *)subpathsAtPath:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+- (BOOL)copyItemAtPath:(NSString *)srcPath toPath:(NSString *)dstPath error:(NSError **)error {
+    if (PXJBShouldBypassCached()) {
+        BOOL srcHide = [srcPath isKindOfClass:[NSString class]] && PXJBPathShouldHide([srcPath fileSystemRepresentation]);
+        BOOL dstHide = [dstPath isKindOfClass:[NSString class]] && PXJBPathShouldHide([dstPath fileSystemRepresentation]);
+        if (srcHide || dstHide) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)copyItemAtURL:(NSURL *)srcURL toURL:(NSURL *)dstURL error:(NSError **)error {
+    if (PXJBShouldBypassCached()) {
+        BOOL srcHide = [srcURL isKindOfClass:[NSURL class]] && [srcURL isFileURL] && PXJBPathShouldHide([[srcURL path] fileSystemRepresentation]);
+        BOOL dstHide = [dstURL isKindOfClass:[NSURL class]] && [dstURL isFileURL] && PXJBPathShouldHide([[dstURL path] fileSystemRepresentation]);
+        if (srcHide || dstHide) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)moveItemAtPath:(NSString *)srcPath toPath:(NSString *)dstPath error:(NSError **)error {
+    if (PXJBShouldBypassCached()) {
+        BOOL srcHide = [srcPath isKindOfClass:[NSString class]] && PXJBPathShouldHide([srcPath fileSystemRepresentation]);
+        BOOL dstHide = [dstPath isKindOfClass:[NSString class]] && PXJBPathShouldHide([dstPath fileSystemRepresentation]);
+        if (srcHide || dstHide) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)moveItemAtURL:(NSURL *)srcURL toURL:(NSURL *)dstURL error:(NSError **)error {
+    if (PXJBShouldBypassCached()) {
+        BOOL srcHide = [srcURL isKindOfClass:[NSURL class]] && [srcURL isFileURL] && PXJBPathShouldHide([[srcURL path] fileSystemRepresentation]);
+        BOOL dstHide = [dstURL isKindOfClass:[NSURL class]] && [dstURL isFileURL] && PXJBPathShouldHide([[dstURL path] fileSystemRepresentation]);
+        if (srcHide || dstHide) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)createDirectoryAtPath:(NSString *)path withIntermediateDirectories:(BOOL)createIntermediates attributes:(NSDictionary *)attributes error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)createDirectoryAtURL:(NSURL *)url withIntermediateDirectories:(BOOL)createIntermediates attributes:(NSDictionary *)attributes error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)createFileAtPath:(NSString *)path contents:(NSData *)data attributes:(NSDictionary *)attr {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return NO;
+    }
+    return %orig;
+}
+
+- (BOOL)removeItemAtPath:(NSString *)path error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)removeItemAtURL:(NSURL *)URL error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [URL isKindOfClass:[NSURL class]] && [URL isFileURL]) {
+        const char *p = [[URL path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)linkItemAtPath:(NSString *)srcPath toPath:(NSString *)dstPath error:(NSError **)error {
+    if (PXJBShouldBypassCached()) {
+        BOOL srcHide = [srcPath isKindOfClass:[NSString class]] && PXJBPathShouldHide([srcPath fileSystemRepresentation]);
+        BOOL dstHide = [dstPath isKindOfClass:[NSString class]] && PXJBPathShouldHide([dstPath fileSystemRepresentation]);
+        if (srcHide || dstHide) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)createSymbolicLinkAtPath:(NSString *)path withDestinationPath:(NSString *)destPath error:(NSError **)error {
+    if (PXJBShouldBypassCached()) {
+        BOOL srcHide = [path isKindOfClass:[NSString class]] && PXJBPathShouldHide([path fileSystemRepresentation]);
+        BOOL dstHide = [destPath isKindOfClass:[NSString class]] && PXJBPathShouldHide([destPath fileSystemRepresentation]);
+        if (srcHide || dstHide) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
 %end
 
 %hook NSProcessInfo
@@ -2053,6 +2261,520 @@ static int hook_csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersi
     return %orig;
 }
 
+%end
+
+// --- Priority 2: NSFileHandle hooks ---
+%hook NSFileHandle
+
++ (instancetype)fileHandleForReadingAtPath:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
++ (instancetype)fileHandleForReadingFromURL:(NSURL *)url error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
++ (instancetype)fileHandleForWritingAtPath:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
++ (instancetype)fileHandleForWritingToURL:(NSURL *)url error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
++ (instancetype)fileHandleForUpdatingAtPath:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+%end
+
+// --- Priority 2: UIImage hooks ---
+%hook UIImage
+
+- (instancetype)initWithContentsOfFile:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
++ (UIImage *)imageWithContentsOfFile:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+%end
+
+// --- Priority 2: NSString file read/write hooks ---
+%hook NSString
+
+- (instancetype)initWithContentsOfFile:(NSString *)path encoding:(NSStringEncoding)enc error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
+- (instancetype)initWithContentsOfFile:(NSString *)path usedEncoding:(NSStringEncoding *)enc error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
++ (instancetype)stringWithContentsOfFile:(NSString *)path encoding:(NSStringEncoding)enc error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
++ (instancetype)stringWithContentsOfFile:(NSString *)path usedEncoding:(NSStringEncoding *)enc error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)writeToFile:(NSString *)path atomically:(BOOL)useAuxiliaryFile encoding:(NSStringEncoding)enc error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)writeToURL:(NSURL *)url atomically:(BOOL)useAuxiliaryFile encoding:(NSStringEncoding)enc error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+%end
+
+// --- Priority 2: NSArray file read/write hooks ---
+%hook NSArray
+
+- (id)initWithContentsOfFile:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
++ (id)arrayWithContentsOfFile:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
++ (id)arrayWithContentsOfURL:(NSURL *)url {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+- (BOOL)writeToFile:(NSString *)path atomically:(BOOL)useAuxiliaryFile {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return NO;
+    }
+    return %orig;
+}
+
+- (BOOL)writeToURL:(NSURL *)url atomically:(BOOL)atomically {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return NO;
+    }
+    return %orig;
+}
+
+%end
+
+%hook NSMutableArray
+
+- (id)initWithContentsOfFile:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+- (id)initWithContentsOfURL:(NSURL *)url {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+%end
+
+// --- Priority 2: NSDictionary file read/write hooks ---
+%hook NSDictionary
+
+- (id)initWithContentsOfFile:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+- (id)initWithContentsOfURL:(NSURL *)url {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
++ (id)dictionaryWithContentsOfFile:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
++ (id)dictionaryWithContentsOfURL:(NSURL *)url {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+- (BOOL)writeToFile:(NSString *)path atomically:(BOOL)useAuxiliaryFile {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return NO;
+    }
+    return %orig;
+}
+
+- (BOOL)writeToURL:(NSURL *)url atomically:(BOOL)atomically {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return NO;
+    }
+    return %orig;
+}
+
+- (BOOL)writeToURL:(NSURL *)url error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+%end
+
+%hook NSMutableDictionary
+
+- (id)initWithContentsOfFile:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+- (id)initWithContentsOfURL:(NSURL *)url {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+%end
+
+// --- Priority 2: NSData file read/write hooks ---
+%hook NSData
+
+- (instancetype)initWithContentsOfFile:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+- (instancetype)initWithContentsOfFile:(NSString *)path options:(NSDataReadingOptions)readOptionsMask error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
+- (instancetype)initWithContentsOfURL:(NSURL *)url {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+- (instancetype)initWithContentsOfURL:(NSURL *)url options:(NSDataReadingOptions)readOptionsMask error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
++ (instancetype)dataWithContentsOfFile:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
++ (instancetype)dataWithContentsOfFile:(NSString *)path options:(NSDataReadingOptions)readOptionsMask error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
++ (instancetype)dataWithContentsOfURL:(NSURL *)url {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
++ (instancetype)dataWithContentsOfURL:(NSURL *)url options:(NSDataReadingOptions)readOptionsMask error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)writeToFile:(NSString *)path atomically:(BOOL)useAuxiliaryFile {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return NO;
+    }
+    return %orig;
+}
+
+- (BOOL)writeToFile:(NSString *)path options:(NSDataWritingOptions)writeOptionsMask error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)writeToURL:(NSURL *)url atomically:(BOOL)useAuxiliaryFile {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return NO;
+    }
+    return %orig;
+}
+
+- (BOOL)writeToURL:(NSURL *)url options:(NSDataWritingOptions)writeOptionsMask error:(NSError **)error {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (error) *error = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+%end
+
+// --- Priority 2: Known JB detection library class hooks ---
+// These classes are from popular SDKs that apps embed for jailbreak detection.
+
+%hook UIDevice
++ (BOOL)isJailbroken { return NO; }
+- (BOOL)isJailBreak { return NO; }
+- (BOOL)isJailBroken { return NO; }
+%end
+
+%hook JailbreakDetectionVC
+- (BOOL)isJailbroken { return NO; }
+%end
+
+%hook DTTJailbreakDetection
++ (BOOL)isJailbroken { return NO; }
+%end
+
+%hook ANSMetadata
+- (BOOL)computeIsJailbroken { return NO; }
+- (BOOL)isJailbroken { return NO; }
+%end
+
+%hook AppsFlyerUtils
++ (BOOL)isJailBreakon { return NO; }
+%end
+
+%hook GBDeviceInfo
+- (BOOL)isJailbroken { return NO; }
+%end
+
+%hook CMARAppRestrictionsDelegate
+- (bool)isDeviceNonCompliant { return false; }
+%end
+
+%hook ADYSecurityChecks
++ (bool)isDeviceJailbroken { return false; }
+%end
+
+%hook UBReportMetadataDevice
+- (void *)is_rooted { return NULL; }
+%end
+
+%hook UtilitySystem
++ (bool)isJailbreak { return false; }
+%end
+
+%hook GemaltoConfiguration
++ (bool)isJailbreak { return false; }
+%end
+
+%hook CPWRDeviceInfo
+- (bool)isJailbroken { return false; }
+%end
+
+%hook CPWRSessionInfo
+- (bool)isJailbroken { return false; }
+%end
+
+%hook KSSystemInfo
++ (bool)isJailbroken { return false; }
+%end
+
+%hook EMDSKPPConfiguration
+- (bool)jailBroken { return false; }
+%end
+
+%hook EnrollParameters
+- (void *)jailbroken { return NULL; }
+%end
+
+%hook EMDskppConfigurationBuilder
+- (bool)jailbreakStatus { return false; }
+%end
+
+%hook FCRSystemMetadata
+- (bool)isJailbroken { return false; }
+%end
+
+%hook v_VDMap
+- (bool)isJailBrokenDetectedByVOS { return false; }
+- (bool)isDFPHookedDetecedByVOS { return false; }
+- (bool)isCodeInjectionDetectedByVOS { return false; }
+- (bool)isDebuggerCheckDetectedByVOS { return false; }
+- (bool)isAppSignerCheckDetectedByVOS { return false; }
+- (bool)v_checkAModified { return false; }
+%end
+
+%hook SDMUtils
+- (BOOL)isJailBroken { return NO; }
+%end
+
+%hook OneSignalJailbreakDetection
++ (BOOL)isJailbroken { return NO; }
+%end
+
+%hook DigiPassHandler
+- (BOOL)rootedDeviceTestResult { return NO; }
+%end
+
+%hook AWMyDeviceGeneralInfo
+- (bool)isCompliant { return true; }
 %end
 
 %ctor {
