@@ -31,7 +31,40 @@
 #import <pthread.h>
 #import <dispatch/dispatch.h>
 #import <mach/mach.h>
+#import <mach/vm_map.h>
 #import <stdint.h>
+#include <xpc/xpc.h>
+
+// bootstrap_look_up from bootstrap.h
+extern kern_return_t bootstrap_look_up(mach_port_t bp, const char *service_name, mach_port_t *sp);
+#ifndef BOOTSTRAP_UNKNOWN_SERVICE
+#define BOOTSTRAP_UNKNOWN_SERVICE 1102
+#endif
+
+// fcntl code-signing constants (not in all SDKs)
+#ifndef F_ADDSIGS
+#define F_ADDSIGS 61
+#endif
+#ifndef F_GETSIGSINFO
+#define F_GETSIGSINFO 69
+#endif
+#ifndef GETSIGSINFO_PLATFORM_BINARY
+#define GETSIGSINFO_PLATFORM_BINARY 1
+#endif
+typedef struct {
+    off_t       fs_file_start;
+    void       *fs_blob_start;
+    size_t      fs_blob_size;
+} fsignatures_t;
+typedef struct {
+    off_t       fg_file_start;
+    int         fg_info_request;
+    int         fg_sig_is_platform;
+} fgetsigsinfo;
+
+// XPC private functions
+extern int xpc_pipe_routine(xpc_object_t pipe, xpc_object_t request, xpc_object_t *reply);
+extern int xpc_pipe_routine_with_flags(xpc_object_t pipe, xpc_object_t request, xpc_object_t *reply, uint64_t flags);
 
 // Some iOS SDKs used by Theos don't ship <link.h>, but we only need the
 // leading fields of dl_phdr_info to access dlpi_name for dl_iterate_phdr.
@@ -76,6 +109,16 @@ int csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersize);
 - (NSArray *)allInstalledApplications;
 - (NSArray *)installedApplications;
 - (NSArray *)allApplications;
+- (NSArray *)installedPlugins;
+@end
+
+@interface LSBundleProxy : NSObject
+- (NSString *)bundleIdentifier;
+@end
+
+@interface LSPlugInKitProxy : LSBundleProxy
+- (NSString *)pluginIdentifier;
+- (LSBundleProxy *)containingBundle;
 @end
 
 static void *FindSymbol(const char *image, const char *symbol) {
@@ -2033,6 +2076,185 @@ static int hook_rmdir(const char *path) {
     return orig_rmdir ? orig_rmdir(path) : -1;
 }
 
+// --- JailbreakDetector bypass: getmntinfo ---
+// Filters out bind mounts and suspicious APFS snapshot mounts from mount enumeration.
+static int (*orig_getmntinfo)(struct statfs **, int);
+static int hook_getmntinfo(struct statfs **mntbufp, int flags) {
+    int n = orig_getmntinfo ? orig_getmntinfo(mntbufp, flags) : 0;
+    if (!PXJBShouldBypassCached() || n <= 0 || !mntbufp || !*mntbufp) return n;
+
+    struct statfs *buf = *mntbufp;
+    int out = 0;
+    for (int i = 0; i < n; i++) {
+        // Hide bindfs mounts (used by some JBs for fakefs/fakelib)
+        if (strcmp(buf[i].f_fstypename, "bindfs") == 0) {
+            // Only allow known Apple bind mounts
+            static const char *knownBinds[] = {
+                "/usr/standalone/firmware",
+                "/System/Library/Pearl/ReferenceFrames",
+                "/System/Library/Caches/com.apple.factorydata",
+                NULL
+            };
+            BOOL known = NO;
+            for (int j = 0; knownBinds[j]; j++) {
+                if (strcmp(buf[i].f_mntonname, knownBinds[j]) == 0) { known = YES; break; }
+            }
+            if (!known) continue; // hide unknown bindfs
+        }
+        // Hide unexpected APFS snapshot mounts (JB rootfs remounts)
+        if (strcmp(buf[i].f_mntonname, "/") != 0 &&
+            strcmp(buf[i].f_fstypename, "apfs") == 0 &&
+            strstr(buf[i].f_mntfromname, "@") != NULL) {
+            // Optional: hide suspicious snapshot mounts not on /
+            // Only hide if mount point looks JB-related
+            if (PXJBPathShouldHide(buf[i].f_mntonname)) continue;
+        }
+        if (out != i) buf[out] = buf[i];
+        out++;
+    }
+    return out;
+}
+
+// --- JailbreakDetector bypass: bootstrap_look_up ---
+// Blocks Mach service lookups for known JB daemons.
+static kern_return_t (*orig_bootstrap_look_up)(mach_port_t, const char *, mach_port_t *);
+static kern_return_t hook_bootstrap_look_up(mach_port_t bp, const char *service_name, mach_port_t *sp) {
+    if (PXJBShouldBypassCached() && service_name) {
+        static const char *deny[] = {
+            "cy:com.saurik.substrated",
+            "org.coolstar.jailbreakd",
+            "jailbreakd",
+            "cy:com.opa334.jailbreakd",
+            "lh:com.opa334.jailbreakd",
+            "com.opa334.jailbreakd",
+            NULL
+        };
+        for (int i = 0; deny[i]; i++) {
+            if (strcmp(service_name, deny[i]) == 0) {
+                if (sp) *sp = MACH_PORT_NULL;
+                return BOOTSTRAP_UNKNOWN_SERVICE;
+            }
+        }
+        // Also block cy: and lh: prefixed probes generically
+        if (strncmp(service_name, "cy:", 3) == 0 || strncmp(service_name, "lh:", 3) == 0) {
+            if (sp) *sp = MACH_PORT_NULL;
+            return BOOTSTRAP_UNKNOWN_SERVICE;
+        }
+    }
+    return orig_bootstrap_look_up ? orig_bootstrap_look_up(bp, service_name, sp) : BOOTSTRAP_UNKNOWN_SERVICE;
+}
+
+// --- JailbreakDetector bypass: vm_region_64 ---
+// Sanitize protection flags so injected code regions look normal.
+static kern_return_t (*orig_vm_region_64)(vm_map_t, vm_address_t *, vm_size_t *, vm_region_flavor_t, vm_region_info_t, mach_msg_type_number_t *, mach_port_t *);
+static kern_return_t hook_vm_region_64(vm_map_t target_task, vm_address_t *address, vm_size_t *size, vm_region_flavor_t flavor, vm_region_info_t info, mach_msg_type_number_t *infoCnt, mach_port_t *object_name) {
+    kern_return_t kr = orig_vm_region_64 ? orig_vm_region_64(target_task, address, size, flavor, info, infoCnt, object_name) : KERN_FAILURE;
+    if (kr != KERN_SUCCESS) return kr;
+    if (!PXJBShouldBypassCached()) return kr;
+
+    // For basic info, ensure protection looks like read-only for system library regions
+    if (flavor == VM_REGION_BASIC_INFO_64 && info) {
+        vm_region_basic_info_data_64_t *binfo = (vm_region_basic_info_data_64_t *)info;
+        // If protection has execute+write on what should be read-only, fix it
+        if ((binfo->protection & (VM_PROT_WRITE | VM_PROT_EXECUTE)) == (VM_PROT_WRITE | VM_PROT_EXECUTE)) {
+            // Injected regions typically have RWX; sanitize to RX
+            binfo->protection &= ~VM_PROT_WRITE;
+        }
+        // If it's RW on a region that should be RO (system lib text), sanitize to R
+        if (binfo->protection == (VM_PROT_READ | VM_PROT_WRITE)) {
+            // Check if it looks like it should be read-only
+            if (binfo->max_protection == VM_PROT_READ) {
+                binfo->protection = VM_PROT_READ;
+            }
+        }
+    }
+    return kr;
+}
+
+// --- JailbreakDetector bypass: task_get_exception_ports ---
+// Return clean exception port state (no JB-inherited ports).
+static kern_return_t (*orig_task_get_exception_ports)(task_t, exception_mask_t, exception_mask_array_t, mach_msg_type_number_t *, exception_handler_array_t, exception_behavior_array_t, exception_flavor_array_t);
+static kern_return_t hook_task_get_exception_ports(task_t task, exception_mask_t exception_mask, exception_mask_array_t masks, mach_msg_type_number_t *masksCnt, exception_handler_array_t old_handlers, exception_behavior_array_t old_behaviors, exception_flavor_array_t old_flavors) {
+    kern_return_t kr = orig_task_get_exception_ports ? orig_task_get_exception_ports(task, exception_mask, masks, masksCnt, old_handlers, old_behaviors, old_flavors) : KERN_FAILURE;
+    if (kr != KERN_SUCCESS) return kr;
+    if (!PXJBShouldBypassCached()) return kr;
+
+    // Sanitize: set all ports/behaviors/flavors to 0 (clean state)
+    // The detector checks if count != 1 or if any ports/behaviors/flavors are non-zero
+    if (masksCnt && masks && old_handlers && old_behaviors && old_flavors) {
+        for (mach_msg_type_number_t i = 0; i < *masksCnt; i++) {
+            old_handlers[i] = MACH_PORT_NULL;
+            old_behaviors[i] = 0;
+            old_flavors[i] = 0;
+        }
+    }
+    return kr;
+}
+
+// --- JailbreakDetector bypass: fcntl (F_ADDSIGS / F_GETSIGSINFO) ---
+// Block code signature injection probing and lie about platform binary status.
+static int (*orig_fcntl)(int, int, ...);
+static int hook_fcntl(int fd, int cmd, ...) {
+    va_list ap;
+    va_start(ap, cmd);
+
+    if (PXJBShouldBypassCached()) {
+        // Block F_ADDSIGS: prevents testing JB code signatures on kernel
+        if (cmd == F_ADDSIGS) {
+            va_end(ap);
+            errno = EPERM;
+            return -1;
+        }
+        // Sanitize F_GETSIGSINFO: always return "not platform binary"
+        if (cmd == F_GETSIGSINFO) {
+            fgetsigsinfo *siginfo = va_arg(ap, fgetsigsinfo *);
+            va_end(ap);
+            if (siginfo) {
+                siginfo->fg_sig_is_platform = 0;
+            }
+            return 0;
+        }
+    }
+
+    // Forward all other fcntl commands
+    void *arg = va_arg(ap, void *);
+    va_end(ap);
+    return orig_fcntl ? orig_fcntl(fd, cmd, arg) : -1;
+}
+
+// --- JailbreakDetector bypass: xpc_pipe_routine ---
+// Block JB-server XPC queries (Dopamine jb-domain, launchd deplatformization probes).
+static int (*orig_xpc_pipe_routine)(xpc_object_t, xpc_object_t, xpc_object_t *);
+static int hook_xpc_pipe_routine(xpc_object_t pipe, xpc_object_t request, xpc_object_t *reply) {
+    if (PXJBShouldBypassCached() && request) {
+        // Block launchd deplatformization probe (subsystem=3, routine=815)
+        if (xpc_get_type(request) == XPC_TYPE_DICTIONARY) {
+            uint64_t subsystem = xpc_dictionary_get_uint64(request, "subsystem");
+            uint64_t routine = xpc_dictionary_get_uint64(request, "routine");
+            if (subsystem == 3 && routine == 815) {
+                if (reply) *reply = NULL;
+                return 154; // Expected error code for non-jailbroken device
+            }
+        }
+    }
+    return orig_xpc_pipe_routine ? orig_xpc_pipe_routine(pipe, request, reply) : -1;
+}
+
+static int (*orig_xpc_pipe_routine_with_flags)(xpc_object_t, xpc_object_t, xpc_object_t *, uint64_t);
+static int hook_xpc_pipe_routine_with_flags(xpc_object_t pipe, xpc_object_t request, xpc_object_t *reply, uint64_t flags) {
+    if (PXJBShouldBypassCached() && request) {
+        // Block jb-domain XPC queries (Dopamine jb server)
+        if (xpc_get_type(request) == XPC_TYPE_DICTIONARY) {
+            uint64_t jb_domain = xpc_dictionary_get_uint64(request, "jb-domain");
+            if (jb_domain != 0) {
+                if (reply) *reply = NULL;
+                return -1; // Simulate no JB server
+            }
+        }
+    }
+    return orig_xpc_pipe_routine_with_flags ? orig_xpc_pipe_routine_with_flags(pipe, request, reply, flags) : -1;
+}
+
 // --- ObjC hooks ---
 %hook NSFileManager
 
@@ -3073,6 +3295,92 @@ static int hook_rmdir(const char *path) {
 
 %end
 
+// --- JailbreakDetector bypass: NSUserDefaults cfprefsd hook detection ---
+// Block attempts to read JB plists via NSUserDefaults initWithSuiteName:.
+static BOOL PXJBIsJBPlistSuiteName(NSString *suiteName) {
+    if (!suiteName || ![suiteName isKindOfClass:[NSString class]]) return NO;
+    static NSArray *jbPlistPrefixes = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        jbPlistPrefixes = @[
+            @"/basebin/",
+            @"com.opa334.",
+            @"com.xina.",
+            @"org.coolstar.",
+            @"com.tigisoftware.",
+            @"ws.hbang.",
+            @"xyz.willy.",
+            @"ru.domo.cocoatop",
+            @"com.spark.snowboard",
+            @"us.diatr.shshd",
+            @"com.openssh.",
+        ];
+    });
+    for (NSString *prefix in jbPlistPrefixes) {
+        if ([suiteName hasPrefix:prefix]) return YES;
+    }
+    // Also block suite names that look like absolute JB paths
+    if ([suiteName hasPrefix:@"/"] && PXJBPathShouldHide([suiteName fileSystemRepresentation])) return YES;
+    return NO;
+}
+
+%hook NSUserDefaults
+
+- (instancetype)initWithSuiteName:(NSString *)suitename {
+    if (PXJBShouldBypassCached() && PXJBIsJBPlistSuiteName(suitename)) {
+        // Return a blank defaults that has no stored keys
+        return %orig(@"com.apple.does.not.exist.sentinel");
+    }
+    return %orig;
+}
+
+%end
+
+// --- JailbreakDetector bypass: LSApplicationWorkspace installedPlugins ---
+// Filter plugins belonging to known JB apps from the enumeration.
+%hook LSApplicationWorkspace
+
+- (NSArray *)installedPlugins {
+    NSArray *plugins = %orig;
+    if (!PXJBShouldBypassCached() || !plugins) return plugins;
+
+    static NSSet *jbAppIDs = nil;
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        jbAppIDs = [NSSet setWithArray:@[
+            @"com.xina.jailbreak",
+            @"com.opa334.Dopamine",
+            @"com.tigisoftware.Filza",
+            @"org.coolstar.SileoStore",
+            @"org.coolstar.Sileo",
+            @"ws.hbang.Terminal",
+            @"xyz.willy.Zebra",
+            @"shshd",
+            @"com.saurik.Cydia",
+        ]];
+    });
+
+    NSMutableArray *filtered = [NSMutableArray arrayWithCapacity:plugins.count];
+    for (id plugin in plugins) {
+        if ([plugin respondsToSelector:@selector(containingBundle)]) {
+            id appBundle = [plugin performSelector:@selector(containingBundle)];
+            if (appBundle && [appBundle respondsToSelector:@selector(bundleIdentifier)]) {
+                NSString *appID = [appBundle performSelector:@selector(bundleIdentifier)];
+                if (appID && [jbAppIDs containsObject:appID]) continue; // skip JB plugin
+            }
+        }
+        // Also check plugin identifier hash for obfuscated detection
+        if ([plugin respondsToSelector:@selector(pluginIdentifier)]) {
+            NSString *pluginID = [plugin performSelector:@selector(pluginIdentifier)];
+            if (pluginID && [jbAppIDs containsObject:pluginID]) continue;
+        }
+        [filtered addObject:plugin];
+    }
+    return [filtered copy];
+}
+
+%end
+
 %ctor {
     @autoreleasepool {
         // Install C hooks unconditionally; gate inside hooks for scoped apps.
@@ -3268,6 +3576,28 @@ static int hook_rmdir(const char *path) {
 
             sym = FindSymbol(NULL, "NSVersionOfLinkTimeLibrary");
             if (sym) MSHookFunction(sym, (void *)hook_NSVersionOfLinkTimeLibrary, (void **)&orig_NSVersionOfLinkTimeLibrary);
+
+            // JailbreakDetector bypass hooks.
+            sym = FindSymbol(NULL, "getmntinfo");
+            if (sym) MSHookFunction(sym, (void *)hook_getmntinfo, (void **)&orig_getmntinfo);
+
+            sym = FindSymbol(NULL, "bootstrap_look_up");
+            if (sym) MSHookFunction(sym, (void *)hook_bootstrap_look_up, (void **)&orig_bootstrap_look_up);
+
+            sym = FindSymbol(NULL, "vm_region_64");
+            if (sym) MSHookFunction(sym, (void *)hook_vm_region_64, (void **)&orig_vm_region_64);
+
+            sym = FindSymbol(NULL, "task_get_exception_ports");
+            if (sym) MSHookFunction(sym, (void *)hook_task_get_exception_ports, (void **)&orig_task_get_exception_ports);
+
+            sym = FindSymbol(NULL, "fcntl");
+            if (sym) MSHookFunction(sym, (void *)hook_fcntl, (void **)&orig_fcntl);
+
+            sym = FindSymbol(NULL, "xpc_pipe_routine");
+            if (sym) MSHookFunction(sym, (void *)hook_xpc_pipe_routine, (void **)&orig_xpc_pipe_routine);
+
+            sym = FindSymbol(NULL, "xpc_pipe_routine_with_flags");
+            if (sym) MSHookFunction(sym, (void *)hook_xpc_pipe_routine_with_flags, (void **)&orig_xpc_pipe_routine_with_flags);
 
             // Phase 3 (toggle: jbBypassHideDylibsEnabled). Install only when explicitly enabled.
             if (wantDyldHide) {
