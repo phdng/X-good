@@ -1833,6 +1833,209 @@ static int hook_csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersi
     return ret;
 }
 
+// --- Priority 3: dlopen_preflight ---
+static bool (*orig_dlopen_preflight)(const char *);
+static bool hook_dlopen_preflight(const char *path) {
+    if (PXJBShouldBypassCached() && path) {
+        NSString *name = [NSString stringWithUTF8String:path];
+        if (PXJBShouldBlockDlopenPath(name)) return false;
+    }
+    return orig_dlopen_preflight ? orig_dlopen_preflight(path) : false;
+}
+
+// --- Priority 3: objc_copyClassNamesForImage ---
+static const char **(*orig_objc_copyClassNamesForImage)(const char *, unsigned int *);
+static const char **hook_objc_copyClassNamesForImage(const char *image, unsigned int *outCount) {
+    if (PXJBShouldBypassCached() && image) {
+        if (PXJBShouldHideImageName(image)) {
+            if (outCount) *outCount = 0;
+            return NULL;
+        }
+    }
+    return orig_objc_copyClassNamesForImage ? orig_objc_copyClassNamesForImage(image, outCount) : NULL;
+}
+
+// --- Priority 3: NSVersionOfRunTimeLibrary / NSVersionOfLinkTimeLibrary ---
+static int32_t (*orig_NSVersionOfRunTimeLibrary)(const char *);
+static int32_t hook_NSVersionOfRunTimeLibrary(const char *libraryName) {
+    if (PXJBShouldBypassCached() && libraryName) {
+        NSString *name = [NSString stringWithUTF8String:libraryName];
+        if (PXJBShouldHideImageName([name UTF8String])) return -1;
+    }
+    return orig_NSVersionOfRunTimeLibrary ? orig_NSVersionOfRunTimeLibrary(libraryName) : -1;
+}
+
+static int32_t (*orig_NSVersionOfLinkTimeLibrary)(const char *);
+static int32_t hook_NSVersionOfLinkTimeLibrary(const char *libraryName) {
+    if (PXJBShouldBypassCached() && libraryName) {
+        NSString *name = [NSString stringWithUTF8String:libraryName];
+        if (PXJBShouldHideImageName([name UTF8String])) return -1;
+    }
+    return orig_NSVersionOfLinkTimeLibrary ? orig_NSVersionOfLinkTimeLibrary(libraryName) : -1;
+}
+
+// --- Priority 3: creat ---
+static int (*orig_creat)(const char *, mode_t);
+static int hook_creat(const char *path, mode_t mode) {
+    if (PXJBShouldBypassCached() && PXJBPathShouldHide(path)) {
+        errno = EACCES;
+        return -1;
+    }
+    return orig_creat ? orig_creat(path, mode) : -1;
+}
+
+// --- Priority 3: fstat (fd-based, resolve via fcntl F_GETPATH) ---
+static int (*orig_fstat)(int, struct stat *);
+static int hook_fstat(int fd, struct stat *buf) {
+    if (PXJBShouldBypassCached() && fd >= 0) {
+        char fdpath[PATH_MAX];
+        if (fcntl(fd, F_GETPATH, fdpath) != -1) {
+            if (PXJBPathShouldHide(fdpath)) {
+                errno = EBADF;
+                return -1;
+            }
+        }
+    }
+    return orig_fstat ? orig_fstat(fd, buf) : -1;
+}
+
+// --- Priority 3: fstatat ---
+static int (*orig_fstatat)(int, const char *, struct stat *, int);
+static int hook_fstatat(int dirfd, const char *pathname, struct stat *buf, int flags) {
+    if (PXJBShouldBypassCached() && pathname) {
+        // If pathname is relative, resolve against dirfd
+        if (pathname[0] != '/' && dirfd != AT_FDCWD) {
+            char dirpath[PATH_MAX];
+            if (fcntl(dirfd, F_GETPATH, dirpath) != -1) {
+                NSString *base = [NSString stringWithUTF8String:dirpath];
+                NSString *rel = [NSString stringWithUTF8String:pathname];
+                NSString *full = [base stringByAppendingPathComponent:rel];
+                if (PXJBPathShouldHide([full fileSystemRepresentation])) {
+                    errno = ENOENT;
+                    return -1;
+                }
+            }
+        } else {
+            if (PXJBPathShouldHide(pathname)) {
+                errno = ENOENT;
+                return -1;
+            }
+        }
+    }
+    return orig_fstatat ? orig_fstatat(dirfd, pathname, buf, flags) : -1;
+}
+
+// --- Priority 3: faccessat ---
+static int (*orig_faccessat)(int, const char *, int, int);
+static int hook_faccessat(int dirfd, const char *pathname, int mode, int flags) {
+    if (PXJBShouldBypassCached() && pathname) {
+        if (pathname[0] != '/' && dirfd != AT_FDCWD) {
+            char dirpath[PATH_MAX];
+            if (fcntl(dirfd, F_GETPATH, dirpath) != -1) {
+                NSString *base = [NSString stringWithUTF8String:dirpath];
+                NSString *rel = [NSString stringWithUTF8String:pathname];
+                NSString *full = [base stringByAppendingPathComponent:rel];
+                if (PXJBPathShouldHide([full fileSystemRepresentation])) {
+                    errno = ENOENT;
+                    return -1;
+                }
+            }
+        } else {
+            if (PXJBPathShouldHide(pathname)) {
+                errno = ENOENT;
+                return -1;
+            }
+        }
+    }
+    return orig_faccessat ? orig_faccessat(dirfd, pathname, mode, flags) : -1;
+}
+
+// --- Priority 3: readlinkat ---
+static ssize_t (*orig_readlinkat)(int, const char *, char *, size_t);
+static ssize_t hook_readlinkat(int dirfd, const char *pathname, char *buf, size_t bufsiz) {
+    if (PXJBShouldBypassCached() && pathname) {
+        if (pathname[0] != '/' && dirfd != AT_FDCWD) {
+            char dirpath[PATH_MAX];
+            if (fcntl(dirfd, F_GETPATH, dirpath) != -1) {
+                NSString *base = [NSString stringWithUTF8String:dirpath];
+                NSString *rel = [NSString stringWithUTF8String:pathname];
+                NSString *full = [base stringByAppendingPathComponent:rel];
+                if (PXJBPathShouldHide([full fileSystemRepresentation])) {
+                    errno = ENOENT;
+                    return -1;
+                }
+            }
+        } else {
+            if (PXJBPathShouldHide(pathname)) {
+                errno = ENOENT;
+                return -1;
+            }
+        }
+    }
+    return orig_readlinkat ? orig_readlinkat(dirfd, pathname, buf, bufsiz) : -1;
+}
+
+// --- Priority 3: Filesystem mutation hooks ---
+static int (*orig_symlink)(const char *, const char *);
+static int hook_symlink(const char *path1, const char *path2) {
+    if (PXJBShouldBypassCached()) {
+        if ((path1 && PXJBPathShouldHide(path1)) || (path2 && PXJBPathShouldHide(path2))) {
+            errno = EACCES;
+            return -1;
+        }
+    }
+    return orig_symlink ? orig_symlink(path1, path2) : -1;
+}
+
+static int (*orig_rename)(const char *, const char *);
+static int hook_rename(const char *old, const char *new_path) {
+    if (PXJBShouldBypassCached()) {
+        if ((old && PXJBPathShouldHide(old)) || (new_path && PXJBPathShouldHide(new_path))) {
+            errno = ENOENT;
+            return -1;
+        }
+    }
+    return orig_rename ? orig_rename(old, new_path) : -1;
+}
+
+static int (*orig_link)(const char *, const char *);
+static int hook_link(const char *path1, const char *path2) {
+    if (PXJBShouldBypassCached()) {
+        if ((path1 && PXJBPathShouldHide(path1)) || (path2 && PXJBPathShouldHide(path2))) {
+            errno = ENOENT;
+            return -1;
+        }
+    }
+    return orig_link ? orig_link(path1, path2) : -1;
+}
+
+static int (*orig_unlink)(const char *);
+static int hook_unlink(const char *path) {
+    if (PXJBShouldBypassCached() && path && PXJBPathShouldHide(path)) {
+        errno = ENOENT;
+        return -1;
+    }
+    return orig_unlink ? orig_unlink(path) : -1;
+}
+
+static int (*orig_remove_func)(const char *);
+static int hook_remove_func(const char *path) {
+    if (PXJBShouldBypassCached() && path && PXJBPathShouldHide(path)) {
+        errno = ENOENT;
+        return -1;
+    }
+    return orig_remove_func ? orig_remove_func(path) : -1;
+}
+
+static int (*orig_rmdir)(const char *);
+static int hook_rmdir(const char *path) {
+    if (PXJBShouldBypassCached() && path && PXJBPathShouldHide(path)) {
+        errno = ENOENT;
+        return -1;
+    }
+    return orig_rmdir ? orig_rmdir(path) : -1;
+}
+
 // --- ObjC hooks ---
 %hook NSFileManager
 
@@ -2777,6 +2980,102 @@ static int hook_csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersi
 - (bool)isCompliant { return true; }
 %end
 
+// --- Priority 3: NSDirectoryEnumerator filtering ---
+%hook NSDirectoryEnumerator
+
+- (id)nextObject {
+    if (!PXJBShouldBypassCached()) return %orig;
+
+    id obj = %orig;
+    while (obj != nil) {
+        NSString *path = nil;
+        if ([obj isKindOfClass:[NSURL class]]) {
+            NSURL *url = (NSURL *)obj;
+            if ([url isFileURL]) path = [url path];
+        } else if ([obj isKindOfClass:[NSString class]]) {
+            path = (NSString *)obj;
+        }
+        if (path) {
+            const char *p = [path fileSystemRepresentation];
+            if (PXJBPathShouldHide(p)) {
+                obj = %orig;
+                continue;
+            }
+        }
+        break;
+    }
+    return obj;
+}
+
+%end
+
+// --- Priority 3: NSFileWrapper hooks ---
+%hook NSFileWrapper
+
+- (instancetype)initWithURL:(NSURL *)url options:(NSFileWrapperReadingOptions)options error:(NSError **)outError {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (outError) *outError = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return nil;
+        }
+    }
+    return %orig;
+}
+
+- (instancetype)initWithPath:(NSString *)path {
+    if (PXJBShouldBypassCached() && [path isKindOfClass:[NSString class]]) {
+        const char *p = [path fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+- (BOOL)writeToURL:(NSURL *)url options:(NSFileWrapperWritingOptions)options originalContentsURL:(NSURL *)originalContentsURL error:(NSError **)outError {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (outError) *outError = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+- (BOOL)readFromURL:(NSURL *)url options:(NSFileWrapperReadingOptions)options error:(NSError **)outError {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) {
+            if (outError) *outError = [NSError errorWithDomain:NSCocoaErrorDomain code:NSFileNoSuchFileError userInfo:nil];
+            return NO;
+        }
+    }
+    return %orig;
+}
+
+%end
+
+// --- Priority 3: NSFileVersion hooks ---
+%hook NSFileVersion
+
++ (NSFileVersion *)currentVersionOfItemAtURL:(NSURL *)url {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
++ (NSArray<NSFileVersion *> *)otherVersionsOfItemAtURL:(NSURL *)url {
+    if (PXJBShouldBypassCached() && [url isKindOfClass:[NSURL class]] && [url isFileURL]) {
+        const char *p = [[url path] fileSystemRepresentation];
+        if (PXJBPathShouldHide(p)) return nil;
+    }
+    return %orig;
+}
+
+%end
+
 %ctor {
     @autoreleasepool {
         // Install C hooks unconditionally; gate inside hooks for scoped apps.
@@ -2925,6 +3224,53 @@ static int hook_csops(pid_t pid, unsigned int ops, void *useraddr, size_t usersi
 
             sym = FindSymbol(NULL, "fstatvfs");
             if (sym) MSHookFunction(sym, (void *)hook_fstatvfs, (void **)&orig_fstatvfs);
+
+            // Priority 3: dlopen_preflight, creat, fstat variants, fs mutation hooks.
+            sym = FindSymbol(NULL, "dlopen_preflight");
+            if (sym) MSHookFunction(sym, (void *)hook_dlopen_preflight, (void **)&orig_dlopen_preflight);
+
+            sym = FindSymbol(NULL, "creat");
+            if (sym) MSHookFunction(sym, (void *)hook_creat, (void **)&orig_creat);
+
+            sym = FindSymbol(NULL, "fstat");
+            if (sym) MSHookFunction(sym, (void *)hook_fstat, (void **)&orig_fstat);
+
+            sym = FindSymbol(NULL, "fstatat");
+            if (sym) MSHookFunction(sym, (void *)hook_fstatat, (void **)&orig_fstatat);
+
+            sym = FindSymbol(NULL, "faccessat");
+            if (sym) MSHookFunction(sym, (void *)hook_faccessat, (void **)&orig_faccessat);
+
+            sym = FindSymbol(NULL, "readlinkat");
+            if (sym) MSHookFunction(sym, (void *)hook_readlinkat, (void **)&orig_readlinkat);
+
+            sym = FindSymbol(NULL, "symlink");
+            if (sym) MSHookFunction(sym, (void *)hook_symlink, (void **)&orig_symlink);
+
+            sym = FindSymbol(NULL, "rename");
+            if (sym) MSHookFunction(sym, (void *)hook_rename, (void **)&orig_rename);
+
+            sym = FindSymbol(NULL, "link");
+            if (sym) MSHookFunction(sym, (void *)hook_link, (void **)&orig_link);
+
+            sym = FindSymbol(NULL, "unlink");
+            if (sym) MSHookFunction(sym, (void *)hook_unlink, (void **)&orig_unlink);
+
+            sym = FindSymbol(NULL, "remove");
+            if (sym) MSHookFunction(sym, (void *)hook_remove_func, (void **)&orig_remove_func);
+
+            sym = FindSymbol(NULL, "rmdir");
+            if (sym) MSHookFunction(sym, (void *)hook_rmdir, (void **)&orig_rmdir);
+
+            // Priority 3: objc_copyClassNamesForImage, NSVersionOf*.
+            sym = FindSymbol(NULL, "objc_copyClassNamesForImage");
+            if (sym) MSHookFunction(sym, (void *)hook_objc_copyClassNamesForImage, (void **)&orig_objc_copyClassNamesForImage);
+
+            sym = FindSymbol(NULL, "NSVersionOfRunTimeLibrary");
+            if (sym) MSHookFunction(sym, (void *)hook_NSVersionOfRunTimeLibrary, (void **)&orig_NSVersionOfRunTimeLibrary);
+
+            sym = FindSymbol(NULL, "NSVersionOfLinkTimeLibrary");
+            if (sym) MSHookFunction(sym, (void *)hook_NSVersionOfLinkTimeLibrary, (void **)&orig_NSVersionOfLinkTimeLibrary);
 
             // Phase 3 (toggle: jbBypassHideDylibsEnabled). Install only when explicitly enabled.
             if (wantDyldHide) {
