@@ -62,16 +62,22 @@ extern kern_return_t bootstrap_look_up(mach_port_t bp, const char *service_name,
 #ifndef GETSIGSINFO_PLATFORM_BINARY
 #define GETSIGSINFO_PLATFORM_BINARY 1
 #endif
+#ifndef _FSIGNATURES_T_DEFINED
+#define _FSIGNATURES_T_DEFINED
 typedef struct {
     off_t       fs_file_start;
     void       *fs_blob_start;
     size_t      fs_blob_size;
 } fsignatures_t;
+#endif
+#ifndef _FGETSIGSINFO_DEFINED
+#define _FGETSIGSINFO_DEFINED
 typedef struct {
     off_t       fg_file_start;
     int         fg_info_request;
     int         fg_sig_is_platform;
 } fgetsigsinfo;
+#endif
 
 // XPC private pipe functions (resolved via libxpc at link time)
 extern int xpc_pipe_routine(xpc_object_t pipe, xpc_object_t request, xpc_object_t *reply);
