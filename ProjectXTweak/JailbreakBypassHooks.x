@@ -33,7 +33,18 @@
 #import <mach/mach.h>
 #import <mach/vm_map.h>
 #import <stdint.h>
-#include <xpc/xpc.h>
+
+// XPC types — Theos SDK doesn't ship <xpc/xpc.h>.
+// We only need opaque pointers and a few functions.
+typedef void *xpc_object_t;
+typedef const struct _xpc_type_s *xpc_type_t;
+extern xpc_type_t _xpc_type_dictionary;
+#define XPC_TYPE_DICTIONARY (&_xpc_type_dictionary)
+extern xpc_type_t xpc_get_type(xpc_object_t object);
+extern xpc_object_t xpc_dictionary_create(const char * const *keys, const xpc_object_t *values, size_t count);
+extern xpc_object_t xpc_dictionary_create_empty(void);
+extern uint64_t xpc_dictionary_get_uint64(xpc_object_t xdict, const char *key);
+extern void xpc_dictionary_set_uint64(xpc_object_t xdict, const char *key, uint64_t value);
 
 // bootstrap_look_up from bootstrap.h
 extern kern_return_t bootstrap_look_up(mach_port_t bp, const char *service_name, mach_port_t *sp);
@@ -62,7 +73,7 @@ typedef struct {
     int         fg_sig_is_platform;
 } fgetsigsinfo;
 
-// XPC private functions
+// XPC private pipe functions (resolved via libxpc at link time)
 extern int xpc_pipe_routine(xpc_object_t pipe, xpc_object_t request, xpc_object_t *reply);
 extern int xpc_pipe_routine_with_flags(xpc_object_t pipe, xpc_object_t request, xpc_object_t *reply, uint64_t flags);
 
