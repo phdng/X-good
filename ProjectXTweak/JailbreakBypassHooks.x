@@ -387,7 +387,10 @@ static BOOL PXJBIsHiddenExactPath(const char *path) {
         "/Library/MobileSubstrate/DynamicLibraries/Veency.plist",
         "/Library/MobileSubstrate/MobileSubstrate.dylib",
         "/Library/MobileSubstrate/DynamicLibraries",
-        
+        "/Library/dpkg/info/mobilesubstrate.md5sums",
+        "/Library/dpkg/status", 
+        "/private/var/binpack/Applications/loader.app",      
+
         // Substrate/hooking libs
         "/usr/lib/substrate/SubstrateBootstrap.dylib",
         "/usr/lib/substrate/SubstrateLoader.dylib",
@@ -499,6 +502,7 @@ static BOOL PXJBIsHiddenPrefixPath(const char *path) {
         "/Library/Frameworks/CydiaSubstrate.framework/",
         "/Library/PreferenceBundles/",
         "/Library/PreferenceLoader/",
+        "/Library/dpkg/info/",
         "/Library/Themes/",
         "/Library/Ringtones/",
         "/Library/Wallpaper/",
