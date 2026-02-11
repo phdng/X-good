@@ -432,11 +432,16 @@ static BOOL PXJBIsHiddenExactPath(const char *path) {
         
         // Common directories
         "/etc/apt",
+        "/private/etc/apt",
+        "/etc/ssh",
+        "/private/etc/ssh",
         "/var/lib/apt",
         "/var/lib/cydia",
         "/var/cache/apt",
         "/var/log/syslog",
         "/var/tmp/cydia.log",
+        "/Library/dpkg",
+        "/private/var/binpack",
         
         // Jailbreak markers / files
         "/var/checkra1n.dmg",
@@ -545,6 +550,15 @@ static BOOL PXJBIsHiddenPrefixPath(const char *path) {
         
         // ElleKit injection
         "/var/jb/usr/lib/ellekit/",
+
+        // Additional prefixes found from sandbox logs (MB Bank / VNID)
+        "/etc/apt/",
+        "/private/etc/apt/",
+        "/etc/ssh/",
+        "/private/etc/ssh/",
+        "/Library/dpkg/",
+        "/private/var/binpack/",
+        "/usr/libexec/cydia/",
         
         NULL
     };
