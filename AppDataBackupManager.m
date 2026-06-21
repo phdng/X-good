@@ -206,6 +206,59 @@ static NSDictionary *PXArtifactInfo(NSString *path, NSString *name) {
     };
 }
 
+static unsigned long long PXArtifactsTotalSize(NSArray<NSDictionary *> *artifacts) {
+    unsigned long long total = 0;
+    for (NSDictionary *artifact in artifacts) {
+        if (![artifact isKindOfClass:[NSDictionary class]]) continue;
+        NSNumber *size = artifact[@"size"];
+        if ([size respondsToSelector:@selector(unsignedLongLongValue)]) {
+            total += [size unsignedLongLongValue];
+        }
+    }
+    return total;
+}
+
+static NSArray<NSString *> *PXIncludedOptionNames(PXBackupOptions options) {
+    NSMutableArray<NSString *> *out = [NSMutableArray arrayWithObject:@"DataContainer"];
+    if (options & PXBackupOptionIncludeAppGroups) [out addObject:@"AppGroups"];
+    if (options & PXBackupOptionIncludePreferences) [out addObject:@"GlobalPreferences"];
+    if (options & PXBackupOptionIncludeKeychain) [out addObject:@"Keychain"];
+    return out;
+}
+
+static NSArray<NSString *> *PXExcludedOptionNames(PXBackupOptions options) {
+    NSMutableArray<NSString *> *out = [NSMutableArray array];
+    if (!(options & PXBackupOptionIncludeAppGroups)) [out addObject:@"AppGroups"];
+    if (!(options & PXBackupOptionIncludePreferences)) [out addObject:@"GlobalPreferences"];
+    if (!(options & PXBackupOptionIncludeKeychain)) [out addObject:@"Keychain"];
+    return out;
+}
+
+static NSString *PXVerifyArtifact(NSString *backupDir, NSDictionary *artifact) {
+    if (!backupDir.length || ![artifact isKindOfClass:[NSDictionary class]]) return @"invalid artifact metadata";
+    NSString *name = [artifact[@"name"] isKindOfClass:[NSString class]] ? artifact[@"name"] : nil;
+    if (!name.length) return @"artifact missing name";
+    NSString *path = [backupDir stringByAppendingPathComponent:name];
+    if (![[NSFileManager defaultManager] fileExistsAtPath:path]) {
+        return [NSString stringWithFormat:@"artifact missing: %@", name];
+    }
+    NSNumber *expectedSize = artifact[@"size"];
+    NSDictionary *attrs = [[NSFileManager defaultManager] attributesOfItemAtPath:path error:nil];
+    NSNumber *actualSize = attrs[NSFileSize];
+    if ([expectedSize respondsToSelector:@selector(unsignedLongLongValue)] && [actualSize respondsToSelector:@selector(unsignedLongLongValue)] &&
+        [expectedSize unsignedLongLongValue] != [actualSize unsignedLongLongValue]) {
+        return [NSString stringWithFormat:@"artifact size mismatch: %@", name];
+    }
+    NSString *expectedHash = [artifact[@"sha256"] isKindOfClass:[NSString class]] ? artifact[@"sha256"] : nil;
+    if (expectedHash.length) {
+        NSString *actualHash = PXHexString(PXFileSHA256(path));
+        if (actualHash.length && ![actualHash isEqualToString:expectedHash]) {
+            return [NSString stringWithFormat:@"artifact sha256 mismatch: %@", name];
+        }
+    }
+    return nil;
+}
+
 static BOOL PXContainerUUIDMatchesBundleID(NSFileManager *fm, NSString *baseDir, NSString *uuid, NSString *bundleID) {
     if (!baseDir.length || !uuid.length || !bundleID.length) return NO;
     NSString *containerPath = [baseDir stringByAppendingPathComponent:uuid];
@@ -1505,13 +1558,50 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
             if (a) [artifacts addObject:a];
         }
 
+        for (NSDictionary *artifact in artifacts) {
+            NSString *verifyWarning = PXVerifyArtifact(backupDir, artifact);
+            if (verifyWarning.length) {
+                [warnings addObject:[@"Backup artifact verification: " stringByAppendingString:verifyWarning]];
+            }
+        }
+
+        NSString *toolVersion = [[NSBundle mainBundle] objectForInfoDictionaryKey:@"CFBundleShortVersionString"] ?: @"";
+        NSString *toolBuild = [[NSBundle mainBundle] objectForInfoDictionaryKey:(NSString *)kCFBundleVersionKey] ?: @"";
+        NSMutableArray<NSString *> *restoreNotes = [NSMutableArray array];
+        if (keychainBackupPath) {
+            [restoreNotes addObject:@"Keychain restore intentionally omits system-managed attributes such as access-control, dates and persistent refs when required by Security.framework."];
+        }
+        if (systemGlobalManifests.count || sharedSystemDBFiles.count) {
+            [restoreNotes addObject:@"This backup includes system/global data that may affect more than one app."];
+        }
+
+        unsigned long long totalArtifactSize = PXArtifactsTotalSize(artifacts);
+
         NSDictionary *manifest = @{
-            @"manifestVersion": @2,
+            @"manifestVersion": @3,
             @"bundleID": bundleID,
             @"appName": appName ?: @"",
+            @"createdAt": [NSDate date],
             @"timestamp": timestamp,
             @"iosVersion": iosVersion,
+            @"toolVersion": toolVersion,
+            @"toolBuild": toolBuild,
             @"profileId": profileId,
+            @"backupMode": @"strict",
+            @"sourceDataContainerPath": dataContainerPath ?: @"",
+            @"sourceDataContainerUUID": dataUUID ?: @"",
+            @"includedOptions": PXIncludedOptionNames(options),
+            @"excludedOptions": PXExcludedOptionNames(options),
+            @"artifactCount": @(artifacts.count),
+            @"totalSize": @(totalArtifactSize),
+            @"archiveChecksum": dataArtifact[@"sha256"] ?: @"",
+            @"warnings": [warnings copy],
+            @"restoreCompatibility": @{
+                @"targetBundleID": bundleID ?: @"",
+                @"requiresSameBundleID": @YES,
+                @"requiresInstalledAppContainer": @YES,
+                @"notes": restoreNotes
+            },
             @"data": @{
                 @"uuid": dataUUID,
                 @"archive": @"data.tar.gz",
@@ -1666,6 +1756,9 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
             dispatch_async(dispatch_get_main_queue(), ^{ if (completion) completion(nil, err); });
             return;
         }
+        if ([manifest[@"warnings"] isKindOfClass:[NSArray class]] && [(NSArray *)manifest[@"warnings"] count] > 0) {
+            [warnings addObject:[NSString stringWithFormat:@"Backup manifest contains %lu warning(s); review manifest before relying on full fidelity restore", (unsigned long)[(NSArray *)manifest[@"warnings"] count]]];
+        }
 
         // Kill app before restore
         [self _killRelatedProcessesForBundleID:bundleID];
@@ -1674,9 +1767,13 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         if ([manifest[@"profileId"] isKindOfClass:[NSString class]]) {
             manifestProfileId = manifest[@"profileId"];
         }
+        NSString *manifestBundleID = [manifest[@"bundleID"] isKindOfClass:[NSString class]] ? manifest[@"bundleID"] : nil;
+        if (manifestBundleID.length && ![manifestBundleID isEqualToString:bundleID]) {
+            [warnings addObject:[NSString stringWithFormat:@"Restore target bundle mismatch: backup bundle %@, requested bundle %@", manifestBundleID, bundleID]];
+        }
         NSString *activeProfileId = [self _activeProfileId];
         if (manifestProfileId.length && activeProfileId.length && ![manifestProfileId isEqualToString:activeProfileId]) {
-            [warnings addObject:[NSString stringWithFormat:@"Backup was created under profile %@ but current profile is %@", manifestProfileId, activeProfileId]];
+            [warnings addObject:[NSString stringWithFormat:@"Backup profileId %@ != active profileId %@", manifestProfileId, activeProfileId]];
         }
 
         // Data container lookup:
@@ -1790,6 +1887,10 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
                 NSString *name = a[@"name"];
                 if ([name isKindOfClass:[NSString class]] && name.length) {
                     m[name] = a;
+                }
+                NSString *verifyWarning = PXVerifyArtifact(backupDir, a);
+                if (verifyWarning.length) {
+                    [warnings addObject:[@"Restore artifact verification: " stringByAppendingString:verifyWarning]];
                 }
             }
             artByName = m;
@@ -2228,6 +2329,18 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
                 PXDebugRun(runner, debugPost, @"ls lsDataContainerPath/Library/Preferences", [NSString stringWithFormat:@"ls -la %@ 2>/dev/null || true", PXShellQuote([lsDataPath stringByAppendingPathComponent:@"Library/Preferences"]) ]);
             }
         }
+
+        NSString *metadataPath = [dataContainerPath stringByAppendingPathComponent:@".com.apple.mobile_container_manager.metadata.plist"];
+        if (![fm fileExistsAtPath:metadataPath]) {
+            [warnings addObject:@"Post-restore verification: data container metadata plist is missing"];
+        }
+        NSString *libraryPath = [dataContainerPath stringByAppendingPathComponent:@"Library"];
+        BOOL libraryIsDir = NO;
+        if (![fm fileExistsAtPath:libraryPath isDirectory:&libraryIsDir] || !libraryIsDir) {
+            [warnings addObject:@"Post-restore verification: Library directory missing after restore"];
+        }
+
+        [self _killRelatedProcessesForBundleID:bundleID];
 
         PXRestoreResult *out = [[PXRestoreResult alloc] init];
         out.warnings = warnings;

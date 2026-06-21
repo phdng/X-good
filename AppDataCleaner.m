@@ -1010,6 +1010,14 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
                 // Step 7: Sync filesystem
                 [strongSelf logMessage:@"[AppDataCleaner] Step 7: Syncing filesystem..."];
                 sync();
+
+                // Step 8: Verification is log-only for now; the existing verifier is intentionally broad
+                // and can report system-created directories that do not indicate account leakage.
+                [strongSelf logMessage:@"[AppDataCleaner] Step 8: Verifying clear result (log-only)..."];
+                BOOL clearVerified = [strongSelf verifyDataCleared:bundleID];
+                if (!clearVerified) {
+                    [strongSelf logMessage:@"[AppDataCleaner] WARNING: Clear verification found residual data; review log before switching accounts"];
+                }
                 
                 [strongSelf logMessage:@"[AppDataCleaner] === COMPLETED data clearing for %@ ===", bundleID];
                 if (!keychainOK1 || !keychainOK2) {
