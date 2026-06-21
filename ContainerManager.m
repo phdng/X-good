@@ -1,4 +1,5 @@
 #import "ContainerManager.h"
+#import "common/PXPaths.h"
 #import <Foundation/Foundation.h>
 
 @interface ContainerManager ()
@@ -34,6 +35,10 @@
     if (!bundleID || !originalPath || originalPath.length == 0) {
         return originalPath;
     }
+
+    if (![self isPathRedirectable:originalPath forApp:bundleID]) {
+        return originalPath;
+    }
     
     if (!profileID) {
         profileID = [self currentProfileID];
@@ -43,18 +48,34 @@
     }
     
     NSString *appDataPath = [self appDataPath:bundleID inProfile:profileID];
-    return [originalPath stringByReplacingOccurrencesOfString:@"/var/mobile/Library"
-                                                  withString:[appDataPath stringByAppendingPathComponent:@"Library"]];
+    NSArray<NSString *> *prefixes = @[@"/var/mobile/Library", @"/private/var/mobile/Library"];
+    for (NSString *prefix in prefixes) {
+        if ([originalPath isEqualToString:prefix] || [originalPath hasPrefix:[prefix stringByAppendingString:@"/"]]) {
+            NSString *suffix = [originalPath substringFromIndex:prefix.length];
+            NSString *redirectBase = [appDataPath stringByAppendingPathComponent:@"Library"];
+            return [redirectBase stringByAppendingString:suffix ?: @""];
+        }
+    }
+    return originalPath;
 }
 
 - (BOOL)isPathRedirectable:(NSString *)path forApp:(NSString *)bundleID {
-    return [path hasPrefix:@"/var/mobile/Library"];
+    if (!path.length || !bundleID.length) {
+        return NO;
+    }
+    if ([bundleID isEqualToString:@"com.hydra.projectx"]) {
+        return NO;
+    }
+    return [path isEqualToString:@"/var/mobile/Library"] ||
+           [path hasPrefix:@"/var/mobile/Library/"] ||
+           [path isEqualToString:@"/private/var/mobile/Library"] ||
+           [path hasPrefix:@"/private/var/mobile/Library/"];
 }
 
 #pragma mark - Directory Structure
 
 - (NSString *)profileBasePath:(NSString *)profileID {
-    NSString *basePath = @"/var/mobile/Library/WeaponX/Profiles";
+    NSString *basePath = PXProfilesPath();
     return [basePath stringByAppendingPathComponent:profileID];
 }
 
@@ -105,17 +126,13 @@
         return nil;
     }
     
-    // Check if we're in a rootless environment
-    BOOL isRootless = [[NSFileManager defaultManager] fileExistsAtPath:@"/var/jb"];
-    
-    if (isRootless) {
-        // If the path starts with /var/mobile, prepend /var/jb
-        if ([path hasPrefix:@"/var/mobile"]) {
-            return [@"/var/jb" stringByAppendingString:path];
-        }
+    if ([path hasPrefix:@"/var/mobile/Library"]) {
+        NSString *mobileLibrary = PXMobileLibraryPath();
+        NSString *suffix = [path substringFromIndex:@"/var/mobile/Library".length];
+        return [mobileLibrary stringByAppendingString:suffix ?: @""];
     }
     
     return path;
 }
 
-@end 
+@end

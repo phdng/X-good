@@ -2,6 +2,7 @@
 #import <ifaddrs.h>
 #import <arpa/inet.h>
 #import "ProjectXLogging.h"
+#import "PXPaths.h"
 
 @implementation NetworkManager
 
@@ -205,13 +206,13 @@
 + (NSString *)profileIdentityPath {
     // Get current profile ID
     NSString *profileId = nil;
-    NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *centralInfoPath = PXCurrentProfileInfoPath();
     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
     
     profileId = centralInfo[@"ProfileId"];
     if (!profileId) {
         // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *activeInfoPath = PXLegacyActiveProfileInfoPath();
         NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
         profileId = activeInfo[@"ProfileId"];
         
@@ -222,7 +223,7 @@
         PXLog(@"[WeaponX] Warning: No active profile ID found for NetworkManager");
         // Fallback approach: try to find any profile directory
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = @"/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDir = PXProfilesPath();
         NSError *error = nil;
         NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
         
@@ -233,7 +234,7 @@
                 NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
                 [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
                 
-                if (isDir) {
+                if (isDir && ![item isEqualToString:@"0"] && ![item isEqualToString:@"profile_0"]) {
                     profileId = item;
                     PXLog(@"[WeaponX] NetworkManager using fallback profile ID: %@", profileId);
                     break;
@@ -249,7 +250,7 @@
     }
     
     // Build the path to this profile's identity directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [PXProfilesPath() stringByAppendingPathComponent:profileId];
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     
     // Create the directory if it doesn't exist

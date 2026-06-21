@@ -23,6 +23,7 @@
 #import "CoreDataUUIDManager.h"
 #import "AppInstallUUIDManager.h"
 #import "AppContainerUUIDManager.h"
+#import "PXPaths.h"
 #import <Security/Security.h>
 
 @interface LSApplicationWorkspace
@@ -484,15 +485,18 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
 
 - (NSString *)getActiveProfileId {
     // First check the primary profile info file
-    NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *centralInfoPath = PXCurrentProfileInfoPath();
     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
     
-    NSString *profileId = centralInfo[@"ProfileId"];
+    NSString *profileId = [centralInfo[@"ProfileId"] isKindOfClass:[NSString class]] ? centralInfo[@"ProfileId"] : nil;
     if (!profileId) {
         // If not found, check the legacy active_profile_info.plist
-        NSString *activeInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *activeInfoPath = PXLegacyActiveProfileInfoPath();
         NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
-        profileId = activeInfo[@"ProfileId"];
+        profileId = [activeInfo[@"ProfileId"] isKindOfClass:[NSString class]] ? activeInfo[@"ProfileId"] : nil;
+        if (!profileId.length) {
+            profileId = [activeInfo[@"currentProfileId"] isKindOfClass:[NSString class]] ? activeInfo[@"currentProfileId"] : nil;
+        }
         
         NSLog(@"[WeaponX] 🔍 CRITICAL CHECK - Primary profile info not found, checked backup: %@", profileId ? @"✅ found" : @"❌ not found");
     }
@@ -501,7 +505,7 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
         NSLog(@"[WeaponX] Warning: No active profile ID found, using default");
         // Try to find any profile directory as a fallback
         NSFileManager *fileManager = [NSFileManager defaultManager];
-        NSString *profilesDir = @"/var/mobile/Library/WeaponX/Profiles";
+        NSString *profilesDir = PXProfilesPath();
         NSError *error = nil;
         NSArray *contents = [fileManager contentsOfDirectoryAtPath:profilesDir error:&error];
         
@@ -512,7 +516,7 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
                 NSString *fullPath = [profilesDir stringByAppendingPathComponent:item];
                 [fileManager fileExistsAtPath:fullPath isDirectory:&isDir];
                 
-                if (isDir) {
+                if (isDir && ![item isEqualToString:@"0"] && ![item isEqualToString:@"profile_0"]) {
                     profileId = item;
                     NSLog(@"[WeaponX] Using fallback profile ID: %@", profileId);
                     break;
@@ -539,7 +543,7 @@ static NSString *PXPickModelNumberFromModelSpec(NSDictionary *modelSpec) {
     }
     
     // Build the path to this profile's identity directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [PXProfilesPath() stringByAppendingPathComponent:profileId];
     NSString *identityDir = [profileDir stringByAppendingPathComponent:@"identity"];
     
     // Create the directory if it doesn't exist
@@ -1387,7 +1391,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     
     // For WiFi specifically, also update the SystemConfiguration plist
     if ([type isEqualToString:@"WiFi"]) {
-        NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = PXSecuritySettingsPath();
         NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
         settingsDict[@"wifiSpoofEnabled"] = @(enabled);
         [settingsDict writeToFile:securitySettingsPath atomically:YES];
@@ -1404,7 +1408,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     }
     // For Battery specifically, update the SystemConfiguration plist
     else if ([type isEqualToString:@"Battery"]) {
-        NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = PXSecuritySettingsPath();
         NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
         settingsDict[@"batterySpoofEnabled"] = @(enabled);
         [settingsDict writeToFile:securitySettingsPath atomically:YES];
@@ -1421,7 +1425,7 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
     }
     // For DeviceTheme, update the SystemConfiguration plist
     else if ([type isEqualToString:@"DeviceTheme"]) {
-        NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+        NSString *securitySettingsPath = PXSecuritySettingsPath();
         NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
         settingsDict[@"deviceThemeSpoofEnabled"] = @(enabled);
         [settingsDict writeToFile:securitySettingsPath atomically:YES];
@@ -1447,20 +1451,6 @@ NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:prof
 #pragma mark - Current Values
 
 - (NSString *)currentValueForIdentifier:(NSString *)type {
-    // Special hardcoded serial number for Filza and ADManager
-    if ([type isEqualToString:@"SerialNumber"]) {
-        NSString *bundleID = [[NSBundle mainBundle] bundleIdentifier];
-        if (bundleID) {
-            if ([bundleID isEqualToString:@"com.tigisoftware.Filza"] || 
-                [bundleID isEqualToString:@"com.tigisoftware.ADManager"]) {
-                // Return hardcoded serial number for these specific apps
-                NSString *hardcodedSerial = @"FCCC15Q4HG04";
-                PXLog(@"[WeaponX] 📱 Returning hardcoded serial number for %@: %@", bundleID, hardcodedSerial);
-                return hardcodedSerial;
-            }
-        }
-    }
-    
     // First try to get from profile-specific storage
     NSString *identityDir = [self profileIdentityPath];
     if (identityDir) {
@@ -1866,6 +1856,10 @@ NSTimeInterval uptime = [[UptimeManager sharedManager] currentUptimeForProfile:p
     else if ([type isEqualToString:@"BootTime"]) {
         NSString *profilePath = [self profileIdentityPath];
 NSDate *bootTime = [[UptimeManager sharedManager] currentBootTimeForProfile:profilePath];
+        if (!bootTime) {
+            PXLog(@"Default BootTime value: Not Set");
+            return @"Not Set";
+        }
         NSDateFormatter *formatter = [[NSDateFormatter alloc] init];
         formatter.dateStyle = NSDateFormatterMediumStyle;
         formatter.timeStyle = NSDateFormatterMediumStyle;
@@ -2168,26 +2162,10 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 // New method to load scoped apps configuration explicitly
 - (void)loadScopedApps {
-    // Try rootless path first
-    NSString *prefsPath = @"/var/mobile/Library/Preferences";
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
+    NSString *scopedAppsFile = PXGlobalScopePath();
     PXLog(@"[WeaponX] IdentifierManager DEBUG: Trying to load scoped apps from: %@", scopedAppsFile);
     
-    // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-        PXLog(@"[WeaponX] IdentifierManager DEBUG: First path not found, trying Dopamine 2 path");
-        // Try Dopamine 2 path
-        prefsPath = @"/private/var/mobile/Library/Preferences";
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to older paths if needed
-        if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-            PXLog(@"[WeaponX] IdentifierManager DEBUG: Dopamine 2 path not found, trying legacy path");
-            prefsPath = @"/var/mobile/Library/Preferences";
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        }
-    }
     
     PXLog(@"[WeaponX] IdentifierManager DEBUG: Loading scoped apps from: %@", scopedAppsFile);
     PXLog(@"[WeaponX] IdentifierManager DEBUG: File exists: %@", [fileManager fileExistsAtPath:scopedAppsFile] ? @"YES" : @"NO");
@@ -2226,32 +2204,13 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (void)saveSettings {
     // Get the proper preferences path
-    NSString *prefsPath = @"/var/mobile/Library/Preferences";
-    NSString *prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
+    NSString *prefsPath = PXPreferencesPath();
+    NSString *prefsFile = PXProjectXSettingsPath();
     
     // Global settings file for scoped apps (universal across all profiles)
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
+    NSString *scopedAppsFile = PXGlobalScopePath();
     
-    // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
-    if (![fileManager fileExistsAtPath:prefsPath]) {
-        // Try Dopamine 2 path first
-        prefsPath = @"/private/var/mobile/Library/Preferences";
-        prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to standard path if needed
-        if (![fileManager fileExistsAtPath:prefsFile]) {
-            prefsPath = @"/var/mobile/Library/Preferences";
-            prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-            
-            // If still not found, try the original filename as a fallback
-            if (![fileManager fileExistsAtPath:prefsFile]) {
-                prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.plist"];
-            }
-        }
-    }
     
     // Ensure preferences directory exists with proper permissions
     NSError *dirError = nil;
@@ -2304,6 +2263,10 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     } else {
         PXLog(@"[WeaponX] ✅ Saved scoped apps to: %@", scopedAppsFile);
     }
+
+    [self.spoofCache removeAllObjects];
+    [_appEnabledCache removeAllObjects];
+    PXPostSettingsChangedNotification();
 }
     
 
@@ -2311,34 +2274,16 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 - (void)loadSettings {
     PXLog(@"[WeaponX] Loading settings...");
     
-    // Try rootless path first
-    NSString *prefsPath = @"/var/mobile/Library/Preferences";
-    NSString *prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
+    NSString *prefsFile = PXProjectXSettingsPath();
+    NSString *scopedAppsFile = PXGlobalScopePath();
     
-    // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if (![fileManager fileExistsAtPath:prefsFile]) {
         PXLog(@"[WeaponX] Settings not found at default path: %@", prefsFile);
-        
-        // Try Dopamine 2 path
-        prefsPath = @"/private/var/mobile/Library/Preferences";
-        prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to standard path if needed
-        if (![fileManager fileExistsAtPath:prefsFile]) {
-            PXLog(@"[WeaponX] Settings not found at private path: %@", prefsFile);
-            
-            prefsPath = @"/var/mobile/Library/Preferences";
-            prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.settings.plist"];
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-            
-            // If still not found, try the original filename as a fallback
-            if (![fileManager fileExistsAtPath:prefsFile]) {
-                prefsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.plist"];
-                PXLog(@"[WeaponX] Checking fallback legacy path: %@", prefsFile);
-            }
+        NSString *legacyPrefsFile = [PXPreferencesPath() stringByAppendingPathComponent:@"com.hydra.projectx.plist"];
+        if ([fileManager fileExistsAtPath:legacyPrefsFile]) {
+            prefsFile = legacyPrefsFile;
+            PXLog(@"[WeaponX] Checking fallback legacy path: %@", prefsFile);
         }
     }
     
@@ -2364,8 +2309,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
             @"SerialNumber": @NO,
             @"UDID": @NO,
             @"IMEI": @NO,
-            @"SystemVersion": @NO,
-            @"BuildVersion": @NO,
+            @"IOSVersion": @NO,
             @"StorageSystem": @NO,
             @"SystemBootUUID": @NO,
             @"DyldCacheUUID": @NO,
@@ -2383,6 +2327,14 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         NSDictionary *enabledIdentifiers = loadedDict[@"EnabledIdentifiers"];
         if (enabledIdentifiers) {
             self.settings = [enabledIdentifiers mutableCopy];
+            if (self.settings[@"IOSVersion"] == nil) {
+                id migrated = self.settings[@"SystemVersion"] ?: self.settings[@"BuildVersion"];
+                if (migrated) {
+                    self.settings[@"IOSVersion"] = migrated;
+                }
+            }
+            [self.settings removeObjectForKey:@"SystemVersion"];
+            [self.settings removeObjectForKey:@"BuildVersion"];
             PXLog(@"[WeaponX] ✅ Loaded %lu identifier settings from EnabledIdentifiers", (unsigned long)self.settings.count);
         } else {
             PXLog(@"[WeaponX] ⚠️ EnabledIdentifiers key not found, using defaults");
@@ -2390,7 +2342,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
                 @"IDFA": @NO,
                 @"IDFV": @NO,
                 @"DeviceName": @NO,
-                @"SerialNumber": @NO
+                @"SerialNumber": @NO,
+                @"IOSVersion": @NO
             }];
         }
     }
@@ -2517,7 +2470,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     
     // Check cache first
     NSNumber *cachedDecision = self.spoofCache[bundleID];
-    if (cachedDecision) {
+    NSDate *cachedAt = self.spoofCache[[bundleID stringByAppendingString:@"_timestamp"]];
+    if (cachedDecision && [cachedAt isKindOfClass:[NSDate class]] && [[NSDate date] timeIntervalSinceDate:cachedAt] < 30.0) {
         return [cachedDecision boolValue];
     }
     
@@ -2550,21 +2504,12 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (void)saveScopedApps {
     // Get the proper preferences path
-    NSString *prefsPath = @"/var/mobile/Library/Preferences";
-    NSString *scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
+    NSString *prefsPath = PXPreferencesPath();
+    NSString *scopedAppsFile = PXGlobalScopePath();
     
-    // Fallback to standard path if rootless path doesn't exist
     NSFileManager *fileManager = [NSFileManager defaultManager];
     if (![fileManager fileExistsAtPath:prefsPath]) {
-        // Try Dopamine 2 path first
-        prefsPath = @"/private/var/mobile/Library/Preferences";
-        scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        
-        // Fallback to standard path if needed
-        if (![fileManager fileExistsAtPath:scopedAppsFile]) {
-            prefsPath = @"/var/mobile/Library/Preferences";
-            scopedAppsFile = [prefsPath stringByAppendingPathComponent:@"com.hydra.projectx.global_scope.plist"];
-        }
+        [fileManager createDirectoryAtPath:prefsPath withIntermediateDirectories:YES attributes:@{NSFilePosixPermissions: @0755} error:nil];
     }
     
     // Save scoped apps separately in the global scope file
@@ -2587,6 +2532,9 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
                              error:&permError]) {
         NSLog(@"[ProjectX] Warning: Failed to set global scope file permissions: %@", permError);
     }
+    [self.spoofCache removeAllObjects];
+    [_appEnabledCache removeAllObjects];
+    PXPostSettingsChangedNotification();
 }
 
 - (BOOL)isExtensionEnabled:(NSString *)bundleID {
@@ -2670,6 +2618,8 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         NSMutableDictionary *deviceIds = [NSMutableDictionary dictionaryWithContentsOfFile:deviceIdsPath] ?: 
                                          [NSMutableDictionary dictionary];
         deviceIds[type] = value;
+        NSInteger gen = [deviceIds[@"GenerationCounter"] respondsToSelector:@selector(integerValue)] ? [deviceIds[@"GenerationCounter"] integerValue] : 0;
+        deviceIds[@"GenerationCounter"] = @(gen + 1);
         success = [deviceIds writeToFile:deviceIdsPath atomically:YES];
         
         PXLog(@"[WeaponX] ✅ Custom %@ saved: %@", type, value);
@@ -2718,9 +2668,37 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 }
 
 - (BOOL)setCustomMEID:(NSString *)value {
-    // Validate MEID: must be 14 hex digits, and start with a US prefix (e.g., A00000, A10000, 990000, etc.)
+    // Validate MEID: 14 hex body + Luhn base-16 check digit.
     if (![self isValidMEID:value]) return NO;
     return [self saveCustomValue:value forType:@"MEID"];
+}
+
+static NSInteger PXHexValue(unichar c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    return -1;
+}
+
+static unichar PXHexChar(NSInteger value) {
+    static const char *digits = "0123456789ABCDEF";
+    return digits[value & 0xF];
+}
+
+static NSInteger PXMEIDLuhnCheckDigit(NSString *body) {
+    NSInteger sum = 0;
+    BOOL doubleDigit = YES;
+    for (NSInteger i = (NSInteger)body.length - 1; i >= 0; i--) {
+        NSInteger value = PXHexValue([body characterAtIndex:(NSUInteger)i]);
+        if (value < 0) return -1;
+        if (doubleDigit) {
+            value *= 2;
+            value = (value / 16) + (value % 16);
+        }
+        sum += value;
+        doubleDigit = !doubleDigit;
+    }
+    return (16 - (sum % 16)) % 16;
 }
 
 - (NSString *)generateIMEI {
@@ -2750,9 +2728,13 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     NSArray *usMEIDPrefixes = @[ @"A00000", @"A10000", @"990000" ];
     NSString *prefix = usMEIDPrefixes[arc4random_uniform((uint32_t)usMEIDPrefixes.count)];
     NSMutableString *meid = [NSMutableString stringWithString:prefix];
-    // 8 hex digits for the rest
+    // 8 hex digits plus Luhn base-16 check digit.
     for (int i = 0; i < 8; i++) {
         [meid appendFormat:@"%X", arc4random_uniform(16)];
+    }
+    NSInteger checkDigit = PXMEIDLuhnCheckDigit(meid);
+    if (checkDigit >= 0) {
+        [meid appendFormat:@"%C", PXHexChar(checkDigit)];
     }
     return meid;
 }
@@ -2777,9 +2759,9 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
     return (checkDigit == ([imei characterAtIndex:14] - '0'));
 }
 
-// MEID validation: 14 hex digits, US prefix
+// MEID validation: 14 hex body + Luhn base-16 check digit, US prefix.
 - (BOOL)isValidMEID:(NSString *)meid {
-    if (meid.length != 14) return NO;
+    if (meid.length != 15) return NO;
     NSArray *usMEIDPrefixes = @[ @"A00000", @"A10000", @"990000" ];
     NSString *prefix = [meid substringToIndex:6];
     if (![usMEIDPrefixes containsObject:prefix]) return NO;
@@ -2788,7 +2770,9 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
         unichar c = [meid characterAtIndex:i];
         if (![hexSet characterIsMember:c]) return NO;
     }
-    return YES;
+    NSString *body = [meid substringToIndex:14];
+    NSInteger checkDigit = PXMEIDLuhnCheckDigit(body);
+    return checkDigit >= 0 && PXHexValue([meid characterAtIndex:14]) == checkDigit;
 }
 
 - (BOOL)isAllDigits:(NSString *)string {
@@ -3091,7 +3075,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (BOOL)isCanvasFingerprintProtectionEnabled {
     // Read directly from the plist file - SINGLE SOURCE OF TRUTH
-    NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSString *securitySettingsPath = PXSecuritySettingsPath();
     NSDictionary *settingsDict = [NSDictionary dictionaryWithContentsOfFile:securitySettingsPath];
     
     if (settingsDict) {
@@ -3108,7 +3092,7 @@ static NSTimeInterval _cacheExpirationTime = 30.0; // Cache results for 30 secon
 
 - (BOOL)setCanvasFingerprintProtection:(BOOL)enabled {
     // Read and update the plist file directly - SINGLE SOURCE OF TRUTH
-    NSString *securitySettingsPath = @"/var/mobile/Library/Preferences/com.weaponx.securitySettings.plist";
+    NSString *securitySettingsPath = PXSecuritySettingsPath();
     NSMutableDictionary *settingsDict = [NSMutableDictionary dictionaryWithContentsOfFile:securitySettingsPath] ?: [NSMutableDictionary dictionary];
     
     // Update with both key names for compatibility

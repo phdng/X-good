@@ -11,6 +11,7 @@
 #import "AppGroupContainerResolver.h"
 #import "CommandRunner.h"
 #import "common/PXProcessKiller.h"
+#import "common/PXPaths.h"
 
 #import <CommonCrypto/CommonDigest.h>
 #import <notify.h>
@@ -469,7 +470,7 @@ static NSString *PXCleanSubdirName(NSString *s) {
 
     CommandRunner *runner = [CommandRunner shared];
     NSString *path = [runner firstExistingPath:@[
-        [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@/appdata/%@", profileId, bundleID],
+        [[[PXProfilesPath() stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"appdata"] stringByAppendingPathComponent:bundleID],
         [NSString stringWithFormat:@"/private/var/mobile/Library/WeaponX/Profiles/%@/appdata/%@", profileId, bundleID]
     ]];
     return path;
@@ -929,25 +930,28 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
 - (NSString *)_backupRoot {
     NSString *profileId = [self _activeProfileId];
     if (profileId.length) {
-        return [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@/backups", profileId];
+        return [[PXProfilesPath() stringByAppendingPathComponent:profileId] stringByAppendingPathComponent:@"backups"];
     }
     // Fallback to legacy global backups directory
-    return @"/var/mobile/Library/WeaponX/Backups";
+    return [PXWeaponXBasePath() stringByAppendingPathComponent:@"Backups"];
 }
 
 // Central profile ID helper (profile switch integration)
 - (NSString *)_activeProfileId {
     // Read from the same central store used across the project.
-    NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+    NSString *centralInfoPath = PXCurrentProfileInfoPath();
     NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
     NSString *profileId = [centralInfo isKindOfClass:[NSDictionary class]] ? centralInfo[@"ProfileId"] : nil;
     if ([profileId isKindOfClass:[NSString class]] && profileId.length) {
         return profileId;
     }
 
-    NSString *fallbackPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
+    NSString *fallbackPath = PXLegacyActiveProfileInfoPath();
     NSDictionary *fallbackInfo = [NSDictionary dictionaryWithContentsOfFile:fallbackPath];
     profileId = [fallbackInfo isKindOfClass:[NSDictionary class]] ? fallbackInfo[@"ProfileId"] : nil;
+    if (![profileId isKindOfClass:[NSString class]] || !profileId.length) {
+        profileId = [fallbackInfo isKindOfClass:[NSDictionary class]] ? fallbackInfo[@"currentProfileId"] : nil;
+    }
     if ([profileId isKindOfClass:[NSString class]] && profileId.length) {
         return profileId;
     }
@@ -988,7 +992,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     }
 
     // Also include legacy global backups if present (so users can migrate smoothly)
-    NSString *legacyDir = [@"/var/mobile/Library/WeaponX/Backups" stringByAppendingPathComponent:bundleID];
+    NSString *legacyDir = [[PXWeaponXBasePath() stringByAppendingPathComponent:@"Backups"] stringByAppendingPathComponent:bundleID];
     BOOL legacyIsDir = NO;
     if (![legacyDir isEqualToString:dir] && [fm fileExistsAtPath:legacyDir isDirectory:&legacyIsDir] && legacyIsDir) {
         NSArray<NSString *> *legacyItems = [fm contentsOfDirectoryAtPath:legacyDir error:nil];

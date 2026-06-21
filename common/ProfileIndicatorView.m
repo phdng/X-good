@@ -4,6 +4,7 @@
 #import "ProfileManager.h"
 #import "IPStatusViewController.h"
 #import "SecurityTabViewController.h"
+#import "PXPaths.h"
 
 // Forward declaration for static callbacks
 static void toggleIndicatorCallback(CFNotificationCenterRef center, void *observer, CFStringRef name, const void *object, CFDictionaryRef userInfo);
@@ -449,7 +450,7 @@ static void springboardBeenUnlockedCallback(CFNotificationCenterRef center, void
         PXLog(@"ProfileIndicator: ❌ Failed to read profile info dictionary from current_profile_info.plist");
         
         // Fallback to active profile info
-        NSString *activeProfileInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *activeProfileInfoPath = PXLegacyActiveProfileInfoPath();
         PXLog(@"ProfileIndicator: 🔄 Trying fallback profile info from: %@", activeProfileInfoPath);
         
         profileInfo = [NSDictionary dictionaryWithContentsOfFile:activeProfileInfoPath];
@@ -894,7 +895,7 @@ static void springboardBeenUnlockedCallback(CFNotificationCenterRef center, void
         // Direct file approach: Read current_profile_info.plist or active_profile_info.plist
         ProfileManager *profileManager = [ProfileManager sharedManager];
         NSString *centralProfileInfoPath = [profileManager centralProfileInfoPath];
-        NSString *activeProfileInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
+        NSString *activeProfileInfoPath = PXLegacyActiveProfileInfoPath();
         
         // Try reading from central profile info first
         NSDictionary *profileInfo = [NSDictionary dictionaryWithContentsOfFile:centralProfileInfoPath];
@@ -1177,4 +1178,4 @@ static void springboardBeenUnlockedCallback(CFNotificationCenterRef center, void
     });
 }
 
-@end 
+@end

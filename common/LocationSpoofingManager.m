@@ -1,8 +1,8 @@
 #import "LocationSpoofingManager.h"
 #import "ProjectXLogging.h"
+#import "PXPaths.h"
 
 // Constants
-static NSString *ROOT_PREFIX = @"/var/jb"; // For rootless jailbreak
 static NSString *PLIST_NAME = @"com.weaponx.gpsspoofing.plist";
 static NSString *GLOBAL_SCOPE_PLIST = @"com.hydra.projectx.global_scope.plist";
 
@@ -251,52 +251,24 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
 
 - (NSString *)spoofingPlistPath {
     @try {
-        // Try rootless path first
-        NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:[@"/var/mobile/Library/Preferences/" stringByAppendingString:PLIST_NAME]];
-        
-        // Check if file exists at rootless path
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        if (![fileManager fileExistsAtPath:plistPath]) {
-            // Try Dopamine 2 path
-            plistPath = [ROOT_PREFIX stringByAppendingPathComponent:[@"/private/var/mobile/Library/Preferences/" stringByAppendingString:PLIST_NAME]];
-            
-            // Fallback to non-rootless path if needed
-            if (![fileManager fileExistsAtPath:plistPath]) {
-                plistPath = [@"/var/mobile/Library/Preferences/" stringByAppendingString:PLIST_NAME];
-            }
-        }
+        NSString *plistPath = [PXPreferencesPath() stringByAppendingPathComponent:PLIST_NAME];
         
         PXLog(@"[WeaponX] Using GPS spoofing plist path: %@", plistPath);
         return plistPath;
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] Exception getting spoofing plist path: %@", exception);
         // Fallback to default path
-        return [@"/var/mobile/Library/Preferences/" stringByAppendingString:PLIST_NAME];
+        return [@"/var/mobile/Library/Preferences" stringByAppendingPathComponent:PLIST_NAME];
     }
 }
 
 - (NSString *)globalScopePlistPath {
     @try {
-        // Try rootless path first
-        NSString *plistPath = [ROOT_PREFIX stringByAppendingPathComponent:[@"/var/mobile/Library/Preferences/" stringByAppendingString:GLOBAL_SCOPE_PLIST]];
-        
-        // Check if file exists at rootless path
-        NSFileManager *fileManager = [NSFileManager defaultManager];
-        if (![fileManager fileExistsAtPath:plistPath]) {
-            // Try Dopamine 2 path
-            plistPath = [ROOT_PREFIX stringByAppendingPathComponent:[@"/private/var/mobile/Library/Preferences/" stringByAppendingString:GLOBAL_SCOPE_PLIST]];
-            
-            // Fallback to non-rootless path if needed
-            if (![fileManager fileExistsAtPath:plistPath]) {
-                plistPath = [@"/var/mobile/Library/Preferences/" stringByAppendingString:GLOBAL_SCOPE_PLIST];
-            }
-        }
-        
-        return plistPath;
+        return PXGlobalScopePath();
     } @catch (NSException *exception) {
         PXLog(@"[WeaponX] Exception getting global scope plist path: %@", exception);
         // Fallback to default path
-        return [@"/var/mobile/Library/Preferences/" stringByAppendingString:GLOBAL_SCOPE_PLIST];
+        return [@"/var/mobile/Library/Preferences" stringByAppendingPathComponent:GLOBAL_SCOPE_PLIST];
     }
 }
 
@@ -1479,4 +1451,4 @@ NSDate *lastCacheRefreshTime = nil;  // Shared between shouldSpoofApp and refres
     }
 }
 
-@end 
+@end

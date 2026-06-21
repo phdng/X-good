@@ -1,5 +1,6 @@
 #import "VersionManagementViewController.h"
 #import "ProjectXLogging.h"
+#import "common/PXPaths.h"
 
 @interface VersionManagementViewController ()
 @property (nonatomic, strong) UIBarButtonItem *addButton;
@@ -652,13 +653,13 @@
     // Fallback if no profile ID found
     if (!profileId) {
         // First check the primary profile info file
-        NSString *centralInfoPath = @"/var/mobile/Library/WeaponX/Profiles/current_profile_info.plist";
+        NSString *centralInfoPath = PXCurrentProfileInfoPath();
         NSDictionary *centralInfo = [NSDictionary dictionaryWithContentsOfFile:centralInfoPath];
         
         profileId = centralInfo[@"ProfileId"];
         if (!profileId) {
             // If not found, check the legacy active_profile_info.plist
-            NSString *activeInfoPath = @"/var/mobile/Library/WeaponX/active_profile_info.plist";
+            NSString *activeInfoPath = PXLegacyActiveProfileInfoPath();
             NSDictionary *activeInfo = [NSDictionary dictionaryWithContentsOfFile:activeInfoPath];
             profileId = activeInfo[@"ProfileId"];
         }
@@ -670,7 +671,7 @@
     }
     
     // Build the path to this profile's app versions directory
-    NSString *profileDir = [NSString stringWithFormat:@"/var/mobile/Library/WeaponX/Profiles/%@", profileId];
+    NSString *profileDir = [PXProfilesPath() stringByAppendingPathComponent:profileId];
     NSString *appVersionsDir = [profileDir stringByAppendingPathComponent:@"app_versions"];
     
     // Create the directory if it doesn't exist
@@ -1428,4 +1429,4 @@
     return 0.0;
 }
 
-@end 
+@end
