@@ -2,6 +2,9 @@
 #import "ProfileManager.h"
 #import "common/UIButton+SafeConfiguration.h"
 #import "common/PXPaths.h"
+#import "common/IdentifierManager.h"
+#import "AppDataBackupManager.h"
+#import <objc/message.h>
 
 // Custom ProfileTableViewCell class
 @interface ProfileTableViewCell : UITableViewCell
@@ -38,6 +41,7 @@
 @property (nonatomic, strong) UIImageView *searchIcon;
 @property (nonatomic, strong) UIButton *cancelButton;
 @property (nonatomic, strong) UIDocumentInteractionController *documentInteractionController;
+@property (nonatomic, strong) UIActivityIndicatorView *switchBackupIndicator;
 
 @end
 
@@ -2241,6 +2245,178 @@
     }
 }
 
+- (NSString *)dataContainerPathForBundleID:(NSString *)bundleID {
+    if (!bundleID.length) return nil;
+    Class proxyCls = NSClassFromString(@"LSApplicationProxy");
+    SEL sel = NSSelectorFromString(@"applicationProxyForIdentifier:");
+    if (!proxyCls || ![proxyCls respondsToSelector:sel]) return nil;
+    id proxy = ((id (*)(id, SEL, id))objc_msgSend)(proxyCls, sel, bundleID);
+    if (!proxy) return nil;
+
+    id url = nil;
+    @try {
+        url = [proxy valueForKey:@"dataContainerURL"];
+        if (!url) url = [proxy valueForKey:@"containerURL"];
+    } @catch (__unused NSException *e) {
+        url = nil;
+    }
+    if ([url isKindOfClass:[NSURL class]]) return [(NSURL *)url path];
+    if ([url isKindOfClass:[NSString class]]) return (NSString *)url;
+    return nil;
+}
+
+- (NSDate *)latestModificationDateUnderPath:(NSString *)path limit:(NSUInteger)limit reachedLimit:(BOOL *)reachedLimit {
+    if (reachedLimit) *reachedLimit = NO;
+    if (!path.length) return nil;
+    NSFileManager *fm = [NSFileManager defaultManager];
+    NSDate *latest = [fm attributesOfItemAtPath:path error:nil][NSFileModificationDate];
+    NSDirectoryEnumerator *enumerator = [fm enumeratorAtPath:path];
+    NSUInteger count = 0;
+    for (NSString *rel in enumerator) {
+        if (![rel isKindOfClass:[NSString class]]) continue;
+        if ([rel.lastPathComponent hasPrefix:@".com.apple"]) continue;
+        NSDate *mtime = [fm attributesOfItemAtPath:[path stringByAppendingPathComponent:rel] error:nil][NSFileModificationDate];
+        if (mtime && (!latest || [mtime compare:latest] == NSOrderedDescending)) latest = mtime;
+        count++;
+        if (limit > 0 && count >= limit) {
+            if (reachedLimit) *reachedLimit = YES;
+            break;
+        }
+    }
+    return latest;
+}
+
+- (NSDate *)latestBackupDateForBundleID:(NSString *)bundleID {
+    NSArray<NSString *> *backups = [[AppDataBackupManager shared] listBackupDirectoriesForBundleID:bundleID];
+    if (!backups.count) return nil;
+    NSString *latestDir = backups.firstObject;
+    NSDictionary *manifest = [[AppDataBackupManager shared] readManifestAtBackupDirectory:latestDir error:nil];
+    NSDate *createdAt = [manifest[@"createdAt"] isKindOfClass:[NSDate class]] ? manifest[@"createdAt"] : nil;
+    if (createdAt) return createdAt;
+    return [[NSFileManager defaultManager] attributesOfItemAtPath:latestDir error:nil][NSFileModificationDate];
+}
+
+- (NSArray<NSDictionary *> *)appsNeedingBackupBeforeSwitch {
+    IdentifierManager *idManager = [IdentifierManager sharedManager];
+    if (!idManager) return @[];
+
+    NSDictionary *apps = [idManager getApplicationInfo:nil];
+    if (![apps isKindOfClass:[NSDictionary class]] || !apps.count) return @[];
+
+    NSMutableArray<NSDictionary *> *dirty = [NSMutableArray array];
+    for (NSString *scopedKey in apps) {
+        NSDictionary *info = [apps[scopedKey] isKindOfClass:[NSDictionary class]] ? apps[scopedKey] : nil;
+        if (!info || ![info[@"enabled"] boolValue]) continue;
+        NSString *bundleID = [info[@"originalBundleID"] isKindOfClass:[NSString class]] ? info[@"originalBundleID"] : info[@"bundleID"];
+        if (!bundleID.length) bundleID = scopedKey;
+        if ([bundleID isEqualToString:@"com.hydra.projectx"] || [bundleID hasPrefix:@"com.apple."]) continue;
+
+        NSString *containerPath = [self dataContainerPathForBundleID:bundleID];
+        if (!containerPath.length) continue;
+
+        BOOL reachedLimit = NO;
+        NSDate *latestDataDate = [self latestModificationDateUnderPath:containerPath limit:5000 reachedLimit:&reachedLimit];
+        NSDate *latestBackupDate = [self latestBackupDateForBundleID:bundleID];
+        if (reachedLimit || !latestBackupDate || (latestDataDate && [latestDataDate compare:latestBackupDate] == NSOrderedDescending)) {
+            NSString *name = [info[@"name"] isKindOfClass:[NSString class]] ? info[@"name"] : bundleID;
+            NSMutableDictionary *item = [@{
+                @"bundleID": bundleID,
+                @"name": name,
+                @"containerPath": containerPath,
+                @"latestDataDate": latestDataDate ?: [NSDate distantPast]
+            } mutableCopy];
+            if (latestBackupDate) item[@"latestBackupDate"] = latestBackupDate;
+            if (reachedLimit) item[@"scanLimited"] = @YES;
+            [dirty addObject:item];
+        }
+    }
+    return dirty;
+}
+
+- (void)setSwitchBackupBusy:(BOOL)busy {
+    if (busy) {
+        if (!self.switchBackupIndicator) {
+            self.switchBackupIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleMedium];
+            self.switchBackupIndicator.center = self.view.center;
+            self.switchBackupIndicator.hidesWhenStopped = YES;
+            [self.view addSubview:self.switchBackupIndicator];
+        }
+        [self.switchBackupIndicator startAnimating];
+        self.view.userInteractionEnabled = NO;
+    } else {
+        [self.switchBackupIndicator stopAnimating];
+        self.view.userInteractionEnabled = YES;
+    }
+}
+
+- (void)backupDirtyApps:(NSArray<NSDictionary *> *)apps index:(NSUInteger)index completion:(void (^)(NSArray<NSString *> *warnings))completion {
+    if (index >= apps.count) {
+        if (completion) completion(@[]);
+        return;
+    }
+    NSDictionary *item = apps[index];
+    NSString *bundleID = item[@"bundleID"];
+    NSString *name = item[@"name"];
+    PXBackupOptions options = PXBackupOptionIncludeAppGroups | PXBackupOptionIncludePreferences | PXBackupOptionIncludeKeychain;
+    [[AppDataBackupManager shared] createBackupForBundleID:bundleID appName:name options:options completion:^(PXBackupResult *result, NSError *error) {
+        NSMutableArray<NSString *> *warnings = [NSMutableArray array];
+        if (error) {
+            [warnings addObject:[NSString stringWithFormat:@"%@: %@", name ?: bundleID, error.localizedDescription ?: @"backup failed"]];
+        } else if (result.warnings.count) {
+            for (NSString *w in result.warnings) {
+                [warnings addObject:[NSString stringWithFormat:@"%@: %@", name ?: bundleID, w]];
+            }
+        }
+        [self backupDirtyApps:apps index:index + 1 completion:^(NSArray<NSString *> *tailWarnings) {
+            [warnings addObjectsFromArray:tailWarnings ?: @[]];
+            if (completion) completion(warnings);
+        }];
+    }];
+}
+
+- (void)confirmSwitchToProfile:(Profile *)profile dirtyApps:(NSArray<NSDictionary *> *)dirtyApps {
+    if (!dirtyApps.count) {
+        [self switchToProfile:profile];
+        return;
+    }
+
+    NSMutableArray<NSString *> *names = [NSMutableArray array];
+    for (NSDictionary *item in dirtyApps) {
+        NSString *name = [item[@"name"] isKindOfClass:[NSString class]] ? item[@"name"] : item[@"bundleID"];
+        if (name.length) [names addObject:name];
+    }
+    NSString *preview = [names componentsJoinedByString:@", "];
+    if (preview.length > 220) preview = [[preview substringToIndex:220] stringByAppendingString:@"..."];
+
+    NSString *message = [NSString stringWithFormat:@"Detected %lu scoped app(s) with data newer than their latest backup:\n\n%@\n\nBackup current state before switching?", (unsigned long)dirtyApps.count, preview.length ? preview : @"(unknown)"];
+    UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Backup Before Switch" message:message preferredStyle:UIAlertControllerStyleAlert];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Switch Without Backup" style:UIAlertActionStyleDestructive handler:^(__unused UIAlertAction *action) {
+        [self switchToProfile:profile];
+    }]];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Backup Then Switch" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *action) {
+        [self setSwitchBackupBusy:YES];
+        [self backupDirtyApps:dirtyApps index:0 completion:^(NSArray<NSString *> *warnings) {
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self setSwitchBackupBusy:NO];
+                if (warnings.count) {
+                    NSArray *shown = [warnings subarrayWithRange:NSMakeRange(0, MIN((NSUInteger)5, warnings.count))];
+                    NSString *msg = [shown componentsJoinedByString:@"\n"];
+                    UIAlertController *warn = [UIAlertController alertControllerWithTitle:@"Backup Warnings" message:msg preferredStyle:UIAlertControllerStyleAlert];
+                    [warn addAction:[UIAlertAction actionWithTitle:@"Switch Anyway" style:UIAlertActionStyleDefault handler:^(__unused UIAlertAction *a) {
+                        [self switchToProfile:profile];
+                    }]];
+                    [warn addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:nil]];
+                    [self presentViewController:warn animated:YES completion:nil];
+                } else {
+                    [self switchToProfile:profile];
+                }
+            });
+        }];
+    }]];
+    [self presentViewController:alert animated:YES completion:nil];
+}
+
 - (void)switchTapped:(UIButton *)sender {
     NSInteger index = sender.tag;
     Profile *profile = self.isSearchActive ? self.filteredProfiles[index] : self.profiles[index];
@@ -2255,10 +2431,17 @@
                                              style:UIAlertActionStyleCancel 
                                            handler:nil]];
     
-    [alert addAction:[UIAlertAction actionWithTitle:@"Switch" 
-                                             style:UIAlertActionStyleDefault 
-                                           handler:^(UIAlertAction * _Nonnull action) {
-        [self switchToProfile:profile];
+    [alert addAction:[UIAlertAction actionWithTitle:@"Switch"
+                                              style:UIAlertActionStyleDefault
+                                            handler:^(UIAlertAction * _Nonnull action) {
+        [self setSwitchBackupBusy:YES];
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+            NSArray<NSDictionary *> *dirtyApps = [self appsNeedingBackupBeforeSwitch];
+            dispatch_async(dispatch_get_main_queue(), ^{
+                [self setSwitchBackupBusy:NO];
+                [self confirmSwitchToProfile:profile dirtyApps:dirtyApps];
+            });
+        });
     }]];
     
     [self presentViewController:alert animated:YES completion:nil];

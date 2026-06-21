@@ -1293,8 +1293,12 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         for (NSDictionary *extInfo in extensionContainers) {
             NSString *extDataUUID = extInfo[@"dataUUID"];
             if (extDataUUID) {
-                NSString *containerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", extDataUUID];
-                [self runCommandWithPrivileges:[NSString stringWithFormat:@"rm -rf '%@'/* 2>/dev/null || true", containerPath]];
+                BOOL rootless = [extInfo[@"rootless"] boolValue];
+                NSString *basePath = rootless ? @"/containers/Data/Application" : @"/var/mobile/Containers/Data/Application";
+                NSString *containerPath = [basePath stringByAppendingPathComponent:extDataUUID];
+                [self runCommandWithPrivileges:[NSString stringWithFormat:@"find '%@' -mindepth 1 -maxdepth 1 -not -name '.com.apple.mobile_container_manager.metadata.plist' -not -name '.com.apple.containermanagerd.metadata.plist' -exec rm -rf {} + 2>/dev/null || true", containerPath] timeoutSec:findTimeout];
+                [self runCommandWithPrivileges:[NSString stringWithFormat:@"mkdir -p '%@/Documents' '%@/Library/Caches' '%@/Library/Preferences' '%@/tmp' 2>/dev/null || true",
+                                              containerPath, containerPath, containerPath, containerPath] timeoutSec:60];
             }
         }
         [self logMessage:@"[AppDataCleaner] Extension containers wiped"];
