@@ -503,6 +503,34 @@ static NSString *PXCleanSubdirName(NSString *s) {
     return [runner runAndCapture:fallback];
 }
 
+- (BOOL)_directoryHasRestoredContent:(NSString *)dirPath {
+    if (!dirPath.length) return NO;
+    NSArray<NSString *> *items = [[NSFileManager defaultManager] contentsOfDirectoryAtPath:dirPath error:nil];
+    for (NSString *item in items) {
+        if (![item isKindOfClass:[NSString class]] || !item.length) continue;
+        if ([item hasPrefix:@".com.apple"]) continue;
+        return YES;
+    }
+    return NO;
+}
+
+- (CommandResult *)_tarExtractDataArchive:(NSString *)tarPath
+                                  archive:(NSString *)archivePath
+                                    toDir:(NSString *)destDir
+                                 warnings:(NSMutableArray<NSString *> *)warnings {
+    CommandResult *res = [self _tarExtract:tarPath archive:archivePath toDir:destDir];
+    if (res.exitCode == 0) {
+        return res;
+    }
+
+    NSString *stderrText = res.stderrString ?: @"";
+    if ([stderrText containsString:@"Cannot open: File exists"] && [self _directoryHasRestoredContent:destDir]) {
+        [warnings addObject:@"data.tar.gz extract reported 'File exists'; continuing because staging contains restored content"];
+        res.exitCode = 0;
+    }
+    return res;
+}
+
 - (NSString *)_preferencesDirectory {
     // Support rootful + common jailbreak layouts.
     CommandRunner *runner = [CommandRunner shared];
@@ -1936,7 +1964,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         [fm removeItemAtPath:stagingRoot error:nil];
         [fm createDirectoryAtPath:stagingData withIntermediateDirectories:YES attributes:nil error:nil];
 
-        CommandResult *stx = [self _tarExtract:tarPath archive:dataArchive toDir:stagingData];
+        CommandResult *stx = [self _tarExtractDataArchive:tarPath archive:dataArchive toDir:stagingData warnings:warnings];
         if (stx.exitCode != 0) {
             NSString *msg = stx.stderrString.length ? stx.stderrString : @"Failed to extract data archive to staging";
             NSError *err = [NSError errorWithDomain:PXBackupErrorDomain
