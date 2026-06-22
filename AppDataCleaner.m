@@ -1396,7 +1396,9 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     }
     for (NSDictionary *extInfo in extensionContainers) {
         NSString *extDataUUID = extInfo[@"dataUUID"];
-        NSString *path = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", extDataUUID];
+        BOOL rootless = [extInfo[@"rootless"] boolValue];
+        NSString *basePath = rootless ? @"/containers/Data/Application" : @"/var/mobile/Containers/Data/Application";
+        NSString *path = [basePath stringByAppendingPathComponent:extDataUUID];
         NSLog(@"[AppDataCleaner][Detect] Extension Data Container: %@", path);
         [finalSweepPaths addObject:path];
     }
@@ -3024,6 +3026,12 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         NSString *dataContainerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", dataContainerUUID];
         [self verifyClearedPath:dataContainerPath reportingTo:unclearedPaths];
     }
+
+    NSString *rootlessDataContainerUUID = [self findRootlessDataContainerUUID:bundleID];
+    if (rootlessDataContainerUUID) {
+        NSString *rootlessDataContainerPath = [NSString stringWithFormat:@"/containers/Data/Application/%@", rootlessDataContainerUUID];
+        [self verifyClearedPath:rootlessDataContainerPath reportingTo:unclearedPaths];
+    }
     
     // 2. Verify bundle container
     NSString *bundleContainerUUID = [self findBundleContainerUUID:bundleID];
@@ -3038,12 +3046,37 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         NSString *groupContainerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Shared/AppGroup/%@", groupUUID];
         [self verifyClearedPath:groupContainerPath reportingTo:unclearedPaths];
     }
+
+    NSArray *resolvedGroupUUIDs = [self _resolvedAppGroupUUIDsFromEntitlements:bundleID rootless:NO];
+    for (NSString *groupUUID in resolvedGroupUUIDs) {
+        NSString *groupContainerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Shared/AppGroup/%@", groupUUID];
+        [self verifyClearedPath:groupContainerPath reportingTo:unclearedPaths];
+    }
+
+    NSArray *rootlessGroupContainerUUIDs = [self _resolvedAppGroupUUIDsFromEntitlements:bundleID rootless:YES];
+    for (NSString *groupUUID in rootlessGroupContainerUUIDs) {
+        NSString *groupContainerPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", groupUUID];
+        [self verifyClearedPath:groupContainerPath reportingTo:unclearedPaths];
+    }
     
     // 4. Verify extension containers
     NSArray *extensionDataUUIDs = [self findExtensionDataContainersForBundleID:bundleID];
     for (NSString *extensionUUID in extensionDataUUIDs) {
         NSString *extensionPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", extensionUUID];
         [self verifyClearedPath:extensionPath reportingTo:unclearedPaths];
+    }
+
+    NSArray *dataDirs = [self listDirectoriesInPath:@"/var/mobile/Containers/Data/Application"];
+    NSArray *rootlessDataDirs = [self listDirectoriesInPath:@"/containers/Data/Application"];
+    NSArray *bundleDirs = [self listDirectoriesInPath:@"/var/containers/Bundle/Application"];
+    NSArray *rootlessBundleDirs = [self listDirectoriesInPath:@"/containers/Bundle/Application"];
+    NSArray *extensionContainers = [self optimized_findExtensionContainers:bundleID dataDirs:dataDirs rootlessDataDirs:rootlessDataDirs bundleDirs:bundleDirs rootlessDirs:rootlessBundleDirs];
+    for (NSDictionary *extInfo in extensionContainers) {
+        NSString *extDataUUID = extInfo[@"dataUUID"];
+        if (!extDataUUID.length) continue;
+        BOOL rootless = [extInfo[@"rootless"] boolValue];
+        NSString *basePath = rootless ? @"/containers/Data/Application" : @"/var/mobile/Containers/Data/Application";
+        [self verifyClearedPath:[basePath stringByAppendingPathComponent:extDataUUID] reportingTo:unclearedPaths];
     }
     
     // 5. Verify system paths
@@ -3089,7 +3122,8 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         }
         
         // Skip app container paths that only contain system directories
-        if ([path containsString:@"/var/mobile/Containers/Data/Application"] && 
+        if (([path containsString:@"/var/mobile/Containers/Data/Application"] ||
+             [path containsString:@"/containers/Data/Application"]) &&
             ([info containsString:@"StoreKit"] || 
              [info containsString:@"Directory has 0 non-system files"] ||
              [info containsString:@"Directory has 1 non-system files: Documents"] ||
