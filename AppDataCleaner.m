@@ -3019,51 +3019,45 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     
     // Create an array to store paths that weren't cleared properly
     NSMutableArray *unclearedPaths = [NSMutableArray array];
+    NSMutableSet<NSString *> *verifiedPaths = [NSMutableSet set];
     
     // 1. Verify app data container is cleared
     NSString *dataContainerUUID = [self findDataContainerUUID:bundleID];
     if (dataContainerUUID) {
         NSString *dataContainerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", dataContainerUUID];
-        [self verifyClearedPath:dataContainerPath reportingTo:unclearedPaths];
+        [self verifyClearedPath:dataContainerPath reportingTo:unclearedPaths seen:verifiedPaths];
     }
 
     NSString *rootlessDataContainerUUID = [self findRootlessDataContainerUUID:bundleID];
     if (rootlessDataContainerUUID) {
         NSString *rootlessDataContainerPath = [NSString stringWithFormat:@"/containers/Data/Application/%@", rootlessDataContainerUUID];
-        [self verifyClearedPath:rootlessDataContainerPath reportingTo:unclearedPaths];
+        [self verifyClearedPath:rootlessDataContainerPath reportingTo:unclearedPaths seen:verifiedPaths];
     }
     
-    // 2. Verify bundle container
-    NSString *bundleContainerUUID = [self findBundleContainerUUID:bundleID];
-    if (bundleContainerUUID) {
-        NSString *bundleContainerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Bundle/Application/%@", bundleContainerUUID];
-        [self verifyClearedPath:bundleContainerPath reportingTo:unclearedPaths];
-    }
-    
-    // 3. Verify group containers
+    // 2. Verify group containers
     NSArray *groupContainerUUIDs = [self findGroupContainerUUIDsForBundleID:bundleID];
     for (NSString *groupUUID in groupContainerUUIDs) {
         NSString *groupContainerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Shared/AppGroup/%@", groupUUID];
-        [self verifyClearedPath:groupContainerPath reportingTo:unclearedPaths];
+        [self verifyClearedPath:groupContainerPath reportingTo:unclearedPaths seen:verifiedPaths];
     }
 
     NSArray *resolvedGroupUUIDs = [self _resolvedAppGroupUUIDsFromEntitlements:bundleID rootless:NO];
     for (NSString *groupUUID in resolvedGroupUUIDs) {
         NSString *groupContainerPath = [NSString stringWithFormat:@"/var/mobile/Containers/Shared/AppGroup/%@", groupUUID];
-        [self verifyClearedPath:groupContainerPath reportingTo:unclearedPaths];
+        [self verifyClearedPath:groupContainerPath reportingTo:unclearedPaths seen:verifiedPaths];
     }
 
     NSArray *rootlessGroupContainerUUIDs = [self _resolvedAppGroupUUIDsFromEntitlements:bundleID rootless:YES];
     for (NSString *groupUUID in rootlessGroupContainerUUIDs) {
         NSString *groupContainerPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", groupUUID];
-        [self verifyClearedPath:groupContainerPath reportingTo:unclearedPaths];
+        [self verifyClearedPath:groupContainerPath reportingTo:unclearedPaths seen:verifiedPaths];
     }
     
-    // 4. Verify extension containers
+    // 3. Verify extension containers
     NSArray *extensionDataUUIDs = [self findExtensionDataContainersForBundleID:bundleID];
     for (NSString *extensionUUID in extensionDataUUIDs) {
         NSString *extensionPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", extensionUUID];
-        [self verifyClearedPath:extensionPath reportingTo:unclearedPaths];
+        [self verifyClearedPath:extensionPath reportingTo:unclearedPaths seen:verifiedPaths];
     }
 
     NSArray *dataDirs = [self listDirectoriesInPath:@"/var/mobile/Containers/Data/Application"];
@@ -3076,16 +3070,15 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         if (!extDataUUID.length) continue;
         BOOL rootless = [extInfo[@"rootless"] boolValue];
         NSString *basePath = rootless ? @"/containers/Data/Application" : @"/var/mobile/Containers/Data/Application";
-        [self verifyClearedPath:[basePath stringByAppendingPathComponent:extDataUUID] reportingTo:unclearedPaths];
+        [self verifyClearedPath:[basePath stringByAppendingPathComponent:extDataUUID] reportingTo:unclearedPaths seen:verifiedPaths];
     }
     
-    // 5. Verify system paths
+    // 4. Verify system paths. SpringBoard ApplicationState is intentionally not deleted (respring risk).
     NSArray *systemPaths = @[
         [NSString stringWithFormat:@"/var/mobile/Library/Preferences/%@.plist", bundleID],
         [NSString stringWithFormat:@"/var/mobile/Library/Caches/%@", bundleID],
         [NSString stringWithFormat:@"/var/mobile/Library/Cookies/%@.binarycookies", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/Application Support/%@", bundleID],
-        [NSString stringWithFormat:@"/var/mobile/Library/SpringBoard/ApplicationState/%@.plist", bundleID]
+        [NSString stringWithFormat:@"/var/mobile/Library/Application Support/%@", bundleID]
     ];
     
     for (NSString *path in systemPaths) {
@@ -3097,7 +3090,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         }
     }
     
-    // 6. Verify keychain items
+    // 5. Verify keychain items
     if ([self hasKeychainItemsForBundleID:bundleID]) {
         [unclearedPaths addObject:@{
             @"path": @"Keychain",
@@ -3105,7 +3098,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         }];
     }
     
-    // 7. Filter out special paths and expected system-created directories before reporting
+    // 6. Filter out special paths and expected system-created directories before reporting
     NSMutableArray *filteredPaths = [NSMutableArray array];
     for (NSDictionary *item in unclearedPaths) {
         NSString *path = item[@"path"];
@@ -3136,7 +3129,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         [filteredPaths addObject:item];
     }
     
-    // 8. Final verification summary
+    // 7. Final verification summary
     if (filteredPaths.count > 0) {
         NSLog(@"[AppDataCleaner] ⚠️ WARNING: Verification found %lu uncleared data paths:", (unsigned long)filteredPaths.count);
         for (NSDictionary *item in filteredPaths) {
@@ -3147,6 +3140,13 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
         NSLog(@"[AppDataCleaner] ✅ All data successfully cleared for %@", bundleID);
         return YES;
     }
+}
+
+- (void)verifyClearedPath:(NSString *)path reportingTo:(NSMutableArray *)unclearedPaths seen:(NSMutableSet<NSString *> *)seenPaths {
+    if (!path.length) return;
+    if ([seenPaths containsObject:path]) return;
+    [seenPaths addObject:path];
+    [self verifyClearedPath:path reportingTo:unclearedPaths];
 }
 
 // Helper method to verify a path is properly cleaned
@@ -3375,8 +3375,14 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     // Check if there's any data to clear for this bundle ID
     NSString *appDataUUID = [self findDataContainerUUID:bundleID];
     NSString *rootlessDataUUID = [self findRootlessDataContainerUUID:bundleID];
-    NSArray *appGroupUUIDs = [self findAppGroupUUIDs:bundleID];
-    NSArray *rootlessGroupUUIDs = [self findRootlessAppGroupUUIDs:bundleID];
+    NSMutableArray *appGroupUUIDs = [NSMutableArray array];
+    [appGroupUUIDs addObjectsFromArray:[self findAppGroupUUIDs:bundleID] ?: @[]];
+    [appGroupUUIDs addObjectsFromArray:[self _resolvedAppGroupUUIDsFromEntitlements:bundleID rootless:NO] ?: @[]];
+    appGroupUUIDs = [[[NSOrderedSet orderedSetWithArray:appGroupUUIDs] array] mutableCopy];
+    NSMutableArray *rootlessGroupUUIDs = [NSMutableArray array];
+    [rootlessGroupUUIDs addObjectsFromArray:[self findRootlessAppGroupUUIDs:bundleID] ?: @[]];
+    [rootlessGroupUUIDs addObjectsFromArray:[self _resolvedAppGroupUUIDsFromEntitlements:bundleID rootless:YES] ?: @[]];
+    rootlessGroupUUIDs = [[[NSOrderedSet orderedSetWithArray:rootlessGroupUUIDs] array] mutableCopy];
     
     NSLog(@"[AppDataCleaner] Found UUIDs - Data: %@, Rootless: %@, Groups: %@, Rootless Groups: %@", 
           appDataUUID ?: @"Not found", 
@@ -3866,11 +3872,19 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     NSMutableDictionary *usage = [NSMutableDictionary dictionary];
     
     // Calculate app data usage
+    long long dataSize = 0;
     NSString *appDataUUID = [self findDataContainerUUID:bundleID];
     if (appDataUUID) {
         NSString *dataPath = [NSString stringWithFormat:@"/var/mobile/Containers/Data/Application/%@", appDataUUID];
-        usage[@"dataSize"] = @([self calculateDirectorySize:dataPath]);
+        dataSize += [self calculateDirectorySize:dataPath];
     }
+
+    NSString *rootlessDataUUID = [self findRootlessDataContainerUUID:bundleID];
+    if (rootlessDataUUID) {
+        NSString *dataPath = [NSString stringWithFormat:@"/containers/Data/Application/%@", rootlessDataUUID];
+        dataSize += [self calculateDirectorySize:dataPath];
+    }
+    usage[@"dataSize"] = @(dataSize);
     
     // Calculate app bundle size
     NSString *bundleUUID = [self findBundleUUID:bundleID];
@@ -3880,10 +3894,27 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     }
     
     // Calculate shared data size
-    NSArray *appGroupUUIDs = [self findAppGroupUUIDs:bundleID];
+    NSMutableSet<NSString *> *seenGroups = [NSMutableSet set];
     long long sharedSize = 0;
+
+    NSMutableArray<NSString *> *appGroupUUIDs = [NSMutableArray array];
+    [appGroupUUIDs addObjectsFromArray:[self findAppGroupUUIDs:bundleID] ?: @[]];
+    [appGroupUUIDs addObjectsFromArray:[self _resolvedAppGroupUUIDsFromEntitlements:bundleID rootless:NO] ?: @[]];
     for (NSString *groupUUID in appGroupUUIDs) {
+        if (!groupUUID.length || [seenGroups containsObject:groupUUID]) continue;
+        [seenGroups addObject:groupUUID];
         NSString *groupPath = [NSString stringWithFormat:@"/var/mobile/Containers/Shared/AppGroup/%@", groupUUID];
+        sharedSize += [self calculateDirectorySize:groupPath];
+    }
+
+    NSMutableArray<NSString *> *rootlessGroupUUIDs = [NSMutableArray array];
+    [rootlessGroupUUIDs addObjectsFromArray:[self findRootlessAppGroupUUIDs:bundleID] ?: @[]];
+    [rootlessGroupUUIDs addObjectsFromArray:[self _resolvedAppGroupUUIDsFromEntitlements:bundleID rootless:YES] ?: @[]];
+    for (NSString *groupUUID in rootlessGroupUUIDs) {
+        NSString *key = [@"rootless:" stringByAppendingString:groupUUID ?: @""];
+        if (!groupUUID.length || [seenGroups containsObject:key]) continue;
+        [seenGroups addObject:key];
+        NSString *groupPath = [NSString stringWithFormat:@"/containers/Shared/AppGroup/%@", groupUUID];
         sharedSize += [self calculateDirectorySize:groupPath];
     }
     usage[@"sharedSize"] = @(sharedSize);
