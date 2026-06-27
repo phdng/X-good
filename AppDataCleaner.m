@@ -3064,7 +3064,7 @@ static NSDictionary *PXWaitForKeychainBridgeResponse(NSString *safeBundle, NSStr
     NSArray *rootlessDataDirs = [self listDirectoriesInPath:@"/containers/Data/Application"];
     NSArray *bundleDirs = [self listDirectoriesInPath:@"/var/containers/Bundle/Application"];
     NSArray *rootlessBundleDirs = [self listDirectoriesInPath:@"/containers/Bundle/Application"];
-    NSArray *extensionContainers = [self optimized_findExtensionContainers:bundleID dataDirs:dataDirs rootlessDataDirs:rootlessDataDirs bundleDirs:bundleDirs rootlessDirs:rootlessBundleDirs];
+    NSArray *extensionContainers = [self optimized_findExtensionContainers:bundleID dataDirs:dataDirs rootlessBundleDirs:rootlessDataDirs bundleDirs:bundleDirs rootlessDirs:rootlessBundleDirs];
     for (NSDictionary *extInfo in extensionContainers) {
         NSString *extDataUUID = extInfo[@"dataUUID"];
         if (!extDataUUID.length) continue;
