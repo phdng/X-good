@@ -620,40 +620,9 @@
     [enabledSwitch setNeedsDisplay];
     [enabledSwitch setNeedsLayout];
 
-    // Generate button
-    UIButton *generateButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    if ([UIButton buttonConfigurationClassExists]) {
-        UIButtonConfiguration *generateConfig = [UIButtonConfiguration plainButtonConfiguration];
-        generateConfig.image = [UIImage systemImageNamed:@"arrow.clockwise"];
-        generateConfig.title = @"Generate";
-        generateConfig.imagePlacement = NSDirectionalRectEdgeLeading;
-        generateConfig.imagePadding = 4;
-        generateConfig.cornerStyle = UIButtonConfigurationCornerStyleMedium;
-        generateConfig.background.backgroundColor = [UIColor.systemBlueColor colorWithAlphaComponent:0.15];
-        generateConfig.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
-        generateConfig.contentInsets = NSDirectionalEdgeInsetsMake(4, 6, 4, 6);
-        [generateButton safeSetConfiguration:generateConfig];
-        generateButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-        generateButton.layer.cornerRadius = 10;
-        generateButton.clipsToBounds = YES;
-    } else {
-        [generateButton setTitle:@"Generate" forState:UIControlStateNormal];
-        [generateButton setImage:[UIImage systemImageNamed:@"arrow.clockwise"] forState:UIControlStateNormal];
-        generateButton.tintColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
-        generateButton.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightMedium];
-    }
-    // Assign unique tags: 1=IMEI, 2=MEID, 3=DeviceModel, 4=DeviceTheme
-    if ([key isEqualToString:@"IMEI"]) generateButton.tag = 1;
-    else if ([key isEqualToString:@"MEID"]) generateButton.tag = 2;
-    else if ([key isEqualToString:@"DeviceModel"]) generateButton.tag = 3;
-    else if ([key isEqualToString:@"DeviceTheme"]) generateButton.tag = 4;
-    [generateButton addTarget:self action:@selector(generateIdentifier:) forControlEvents:UIControlEventTouchUpInside];
-    generateButton.accessibilityLabel = [NSString stringWithFormat:@"Generate %@", title];
-
     // Add controls to controlsStack
     [controlsStack addArrangedSubview:copyButton];
     [controlsStack addArrangedSubview:switchStatusStack];
-    [controlsStack addArrangedSubview:generateButton];
     [contentStack addArrangedSubview:controlsStack];
 
     // Tag for IMEI/MEID
@@ -946,7 +915,6 @@
     
     UILabel *stateLabel = nil;
     UIButton *copyButton = nil;
-    UIButton *generateButton = nil;
     
     // Find controls
     for (UIView *sub in card.subviews) {
@@ -961,9 +929,7 @@
                         }
                     }
                     if ([ctrl isKindOfClass:[UIButton class]]) {
-                        UIButton *btn = (UIButton *)ctrl;
-                        if (btn.tag == sender.tag) generateButton = btn;
-                        else copyButton = btn;
+                        copyButton = (UIButton *)ctrl;
                     }
                 }
             }
@@ -980,77 +946,8 @@
             cfg.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
             [copyButton safeSetConfiguration:cfg];
         }
-        if (generateButton) {
-            UIButtonConfiguration *cfg = [generateButton.configuration copy];
-            cfg.baseForegroundColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
-            [generateButton safeSetConfiguration:cfg];
-        }
     } else {
         if (copyButton) copyButton.tintColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
-        if (generateButton) generateButton.tintColor = isEnabled ? [UIColor systemBlueColor] : [UIColor systemGrayColor];
-    }
-}
-
-
-- (void)generateIdentifier:(UIButton *)sender {
-    NSString *key = nil;
-    if (sender.tag == 1) key = @"IMEI";
-    else if (sender.tag == 2) key = @"MEID";
-    else if (sender.tag == 3) key = @"DeviceModel";
-    else if (sender.tag == 4) key = @"DeviceTheme";
-    
-    NSString *newValue = nil;
-    if ([key isEqualToString:@"IMEI"]) {
-        newValue = [[IdentifierManager sharedManager] generateIMEI];
-        if (newValue) {
-            [[IdentifierManager sharedManager] setCustomIMEI:newValue];
-        }
-    } else if ([key isEqualToString:@"MEID"]) {
-        newValue = [[IdentifierManager sharedManager] generateMEID];
-        if (newValue) {
-            [[IdentifierManager sharedManager] setCustomMEID:newValue];
-        }
-    } else if ([key isEqualToString:@"DeviceModel"]) {
-        // Device model regeneration should also refresh the dependent device profile group.
-        newValue = [[IdentifierManager sharedManager] regenerateDeviceProfileGroup];
-        if (!newValue) {
-            newValue = [[IdentifierManager sharedManager] generateDeviceModel];
-            if (newValue) {
-                [[IdentifierManager sharedManager] setCustomDeviceModel:newValue];
-            }
-        }
-        if (newValue) {
-            // Get detailed device specifications
-            [self showDeviceSpecificationsForModel:newValue];
-        }
-    } else if ([key isEqualToString:@"DeviceTheme"]) {
-        // For DeviceTheme, we'll toggle between Light and Dark
-        // instead of generating a random value every time
-        newValue = [[IdentifierManager sharedManager] toggleDeviceTheme];
-    }
-    
-    // Update the value label in the card
-    if (newValue) {
-        UIView *card = nil;
-        if (sender.tag == 1) card = self.imeiCard;
-        else if (sender.tag == 2) card = self.meidCard;
-        else if (sender.tag == 3) card = self.deviceModelCard;
-        else if (sender.tag == 4) card = self.deviceThemeCard;
-        
-        UILabel *valueLabel = [card viewWithTag:100];
-        if ([valueLabel isKindOfClass:[UILabel class]]) {
-            if ([key isEqualToString:@"DeviceModel"] && newValue) {
-                // Use DeviceModelManager directly to ensure consistency
-                NSString *modelName = [[DeviceModelManager sharedManager] deviceModelNameForString:newValue];
-                if (modelName) {
-                    valueLabel.text = newValue; // Only show the model string (iPhone15,2)
-                } else {
-                    valueLabel.text = newValue;
-                }
-            } else {
-                valueLabel.text = newValue ?: @"Not Set";
-            }
-        }
     }
 }
 
